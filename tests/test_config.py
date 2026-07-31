@@ -1,0 +1,19 @@
+import os
+from ragspine.config import Config
+
+def test_defaults(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    cfg = Config.from_env()
+    assert cfg.port == 8400
+    assert cfg.db_path == str(tmp_path / "ragspine.db")
+
+def test_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAGSPINE_PORT", "9000")
+    assert Config.from_env().port == 9000
+
+def test_jwt_secret_persisted(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    s1 = Config.from_env().jwt_secret
+    s2 = Config.from_env().jwt_secret
+    assert s1 == s2 and len(s1) >= 32
