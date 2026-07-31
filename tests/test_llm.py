@@ -1,5 +1,5 @@
 import pytest
-from ragspine.core.llm import LLMClient, detect_provider, LLMUnavailable
+from ragspine.core.llm import LLMClient, detect_provider, LLMUnavailable, LLMError
 
 def test_detect():
     assert detect_provider("https://api.anthropic.com") == "anthropic"
@@ -24,6 +24,18 @@ def test_anthropic_path(cfg):
     r = LLMClient(cfg, transport=_fake_anthropic).complete(
         [{"role": "user", "content": "hej"}], system="ti si knjigovođa")
     assert r.text == "odgovor"
+
+def test_anthropic_malformed_response(cfg):
+    cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "claude-sonnet-5"
+    r = LLMClient(cfg, transport=lambda url, headers, body: {"content": [], "model": body["model"], "usage": {}})
+    with pytest.raises(LLMError):
+        r.complete([{"role": "user", "content": "hej"}])
+
+def test_openai_malformed_response(cfg):
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "deepseek-chat"
+    r = LLMClient(cfg, transport=lambda url, headers, body: {"choices": [], "model": body["model"], "usage": {}})
+    with pytest.raises(LLMError):
+        r.complete([{"role": "user", "content": "hej"}])
 
 def test_unavailable(cfg, monkeypatch):
     monkeypatch.setattr("ragspine.core.llm.load_oauth_token", lambda: None)

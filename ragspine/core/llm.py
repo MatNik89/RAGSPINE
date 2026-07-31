@@ -102,7 +102,13 @@ class LLMClient:
             if system is not None:
                 body["system"] = system
             resp = self.transport(url, headers, body)
-            return LLMResult(text=resp["content"][0]["text"], model=resp.get("model"), usage=resp.get("usage", {}))
+            try:
+                blocks = resp["content"]
+                block = next((b for b in blocks if b.get("type") == "text"), blocks[0])
+                text = block["text"]
+            except (KeyError, IndexError, TypeError):
+                raise LLMError(f"malformed provider response: {resp}") from None
+            return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
 
         url = f"{base}/v1/chat/completions"
         headers = {"content-type": "application/json"}
@@ -111,4 +117,8 @@ class LLMClient:
         msgs = ([{"role": "system", "content": system}] if system else []) + messages
         body = {"model": model, "max_tokens": max_tokens, "temperature": temperature, "messages": msgs}
         resp = self.transport(url, headers, body)
-        return LLMResult(text=resp["choices"][0]["message"]["content"], model=resp.get("model", model), usage=resp.get("usage", {}))
+        try:
+            text = resp["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise LLMError(f"malformed provider response: {resp}") from None
+        return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
