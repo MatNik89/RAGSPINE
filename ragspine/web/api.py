@@ -1,3 +1,5 @@
+import dataclasses
+
 from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -5,6 +7,7 @@ from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
 from ragspine.rag import pipeline
+from ragspine.web import watchlist
 from ragspine.web.deps import require_user
 
 
@@ -20,6 +23,13 @@ class ChatBody(BaseModel):
 class ChatCompletionsBody(BaseModel):
     messages: list[dict]
     model: str | None = None
+
+
+class WatchSourceBody(BaseModel):
+    url: str
+    category: str = ""
+    client_id: int | None = None
+    kind: str = "page"
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -68,5 +78,19 @@ def create_app(spine, cfg) -> FastAPI:
             "model": cfg.llm_model or "ragspine",
             "usage": {},
         }
+
+    @app.post("/watchlist/run")
+    def watchlist_run(user: str = Depends(require_user)):
+        return [dataclasses.asdict(c) for c in watchlist.check_all(spine, cfg)]
+
+    @app.get("/watchlist/sources")
+    def watchlist_list_sources(user: str = Depends(require_user)):
+        rows = spine.read().execute("SELECT * FROM watch_sources").fetchall()
+        return [dict(r) for r in rows]
+
+    @app.post("/watchlist/sources")
+    def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user)):
+        sid = watchlist.add_source(spine, body.url, body.category, body.client_id, user, body.kind)
+        return {"id": sid}
 
     return app

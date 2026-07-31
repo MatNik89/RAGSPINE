@@ -1,0 +1,164 @@
+"""Source watching: fetch, hash-diff, law diff, rate/date extraction,
+config overrides, upcoming changes, notifications."""
+import hashlib, html, re, sqlite3
+from dataclasses import dataclass
+
+from ragspine.core.net import safe_fetch
+from ragspine.docs.ingest import ingest_text
+
+CITIES = [
+    "Split", "Zagreb", "Rijeka", "Osijek", "Zadar", "Sisak", "Karlovac",
+    "Varaždin", "Šibenik", "Dubrovnik", "Pula", "Slavonski Brod", "Vinkovci",
+    "Vukovar", "Bjelovar", "Koprivnica", "Čakovec", "Virovitica", "Požega",
+    "Gospić", "Krapina", "Pazin", "Rovinj", "Velika Gorica", "Zaprešić",
+    "Samobor", "Kutina", "Đakovo", "Metković",
+]
+
+_RATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
+_EFFECTIVE_RE = re.compile(r"stupa na snagu\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\.?", re.I)
+
+
+@dataclass
+class Change:
+    source_id: int
+    url: str
+    summary: str
+    diff: list[str]
+
+
+def _strip_html(data: bytes) -> str:
+    text = data.decode("utf-8", errors="replace")
+    text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def _sentences(text: str) -> list[str]:
+    return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s.strip()]
+
+
+def law_diff(old: str, new: str) -> list[str]:
+    """Sentence-level diff; changed pairs formatted as 'old → new' so both
+    old and new numbers are visible in a single entry."""
+    import difflib, itertools
+
+    old_lines, new_lines = _sentences(old), _sentences(new)
+    diff: list[str] = []
+    sm = difflib.SequenceMatcher(None, old_lines, new_lines)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        for o, n in itertools.zip_longest(old_lines[i1:i2], new_lines[j1:j2], fillvalue=""):
+            if o == n:
+                continue
+            diff.append(f"{o} → {n}" if o and n else (o or n))
+    return diff
+
+
+def extract_rates(text: str) -> dict[str, str]:
+    """City → percentage, matching a city name within ~40 chars of a '%' number."""
+    rates: dict[str, str] = {}
+    for city in CITIES:
+        for m in re.finditer(re.escape(city), text):
+            window = text[max(0, m.start() - 40):m.end() + 40]
+            pm = _RATE_RE.search(window)
+            if pm:
+                rates[city] = pm.group(1).replace(",", ".")
+    return rates
+
+
+def extract_effective_dates(text: str) -> list[tuple[str, str]]:
+    """(sentence, ISO date) pairs from 'stupa na snagu d.m.yyyy.' phrases."""
+    out = []
+    for m in _EFFECTIVE_RE.finditer(text):
+        d, mo, y = m.groups()
+        iso = f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+        start = text.rfind(".", 0, m.start()) + 1
+        end = text.find(".", m.end())
+        end = end + 1 if end != -1 else len(text)
+        out.append((text[start:end].strip(), iso))
+    return out
+
+
+def add_source(spine, url, category="", client_id=None, added_by="", kind="page") -> int:
+    with spine.write() as c:
+        try:
+            return c.execute(
+                "INSERT INTO watch_sources(url,category,client_id,added_by,kind) VALUES(?,?,?,?,?)",
+                (url, category, client_id, added_by, kind),
+            ).lastrowid
+        except sqlite3.IntegrityError:
+            return c.execute("SELECT id FROM watch_sources WHERE url=?", (url,)).fetchone()["id"]
+
+
+def get_source(spine, sid):
+    return spine.read().execute("SELECT * FROM watch_sources WHERE id=?", (sid,)).fetchone()
+
+
+def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
+    fetch = fetch or safe_fetch
+    text = _strip_html(fetch(source_row["url"]))
+    new_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    state = spine.read().execute(
+        "SELECT * FROM watch_state WHERE source_id=?", (source_row["id"],)
+    ).fetchone()
+
+    if state is None:  # baseline — first ever fetch, nothing to diff against
+        with spine.write() as c:
+            c.execute(
+                "INSERT INTO watch_state(source_id,last_hash,last_checked,last_content) "
+                "VALUES(?,?,datetime('now'),?)",
+                (source_row["id"], new_hash, text),
+            )
+            c.execute("INSERT INTO law_versions(source_id,content) VALUES(?,?)", (source_row["id"], text))
+        return None
+
+    if state["last_hash"] == new_hash:
+        with spine.write() as c:
+            c.execute("UPDATE watch_state SET last_checked=datetime('now') WHERE source_id=?", (source_row["id"],))
+        return None
+
+    diff = law_diff(state["last_content"] or "", text)
+    for city, rate in extract_rates(text).items():
+        spine.set_override("kalkulator", f"prirez.{city}", rate, source_row["url"])
+    dates = extract_effective_dates(text)
+    summary = f"Promjena na {source_row['url']}"
+
+    ingest_text(spine, text, title=source_row["url"], source_url=source_row["url"],
+                client_id=source_row["client_id"])
+
+    with spine.write() as c:
+        for desc, iso in dates:
+            c.execute(
+                "INSERT INTO upcoming_changes(source_id,description,effective_date) VALUES(?,?,?)",
+                (source_row["id"], desc, iso),
+            )
+        c.execute(
+            "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
+            ("law_change", summary, source_row["client_id"]),
+        )
+        c.execute(
+            "UPDATE watch_state SET last_hash=?, last_checked=datetime('now'), last_content=? WHERE source_id=?",
+            (new_hash, text, source_row["id"]),
+        )
+        c.execute("INSERT INTO law_versions(source_id,content) VALUES(?,?)", (source_row["id"], text))
+
+    return Change(source_id=source_row["id"], url=source_row["url"], summary=summary, diff=diff)
+
+
+def check_all(spine, cfg, fetch=None) -> list[Change]:
+    rows = spine.read().execute("SELECT * FROM watch_sources WHERE active=1").fetchall()
+    changes = []
+    for row in rows:
+        ch = check_source(spine, cfg, row, fetch=fetch)
+        if ch:
+            changes.append(ch)
+    return changes
+
+
+def mark_stale(spine) -> int:
+    with spine.write() as c:
+        cur = c.execute(
+            "UPDATE documents SET stale=1 WHERE valid_until IS NOT NULL AND valid_until < date('now') AND stale=0"
+        )
+        return cur.rowcount
