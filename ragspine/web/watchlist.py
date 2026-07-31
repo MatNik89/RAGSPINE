@@ -55,15 +55,42 @@ def law_diff(old: str, new: str) -> list[str]:
     return diff
 
 
+def _gap(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
+    """Character distance between two spans; 0 if they touch/overlap."""
+    if a_end <= b_start:
+        return b_start - a_end
+    if b_end <= a_start:
+        return a_start - b_end
+    return 0
+
+
+def _sentence_span(text: str, start: int, end: int) -> tuple[int, int]:
+    """(start, end) of the sentence containing text[start:end], bounded by '.'."""
+    s = text.rfind(".", 0, start) + 1
+    e = text.find(".", end)
+    e = e + 1 if e != -1 else len(text)
+    return s, e
+
+
 def extract_rates(text: str) -> dict[str, str]:
-    """City → percentage, matching a city name within ~40 chars of a '%' number."""
+    """City → percentage, matching each city name to the NEAREST '%' number
+    (by character distance) within its own sentence — a page listing several
+    cities together would otherwise misattribute rates to the wrong city,
+    since raw nearest-distance alone can reach across a sentence boundary
+    into a neighboring city's rate."""
+    pcts = [(m.start(), m.end(), m.group(1)) for m in _RATE_RE.finditer(text)]
     rates: dict[str, str] = {}
     for city in CITIES:
         for m in re.finditer(re.escape(city), text):
-            window = text[max(0, m.start() - 40):m.end() + 40]
-            pm = _RATE_RE.search(window)
-            if pm:
-                rates[city] = pm.group(1).replace(",", ".")
+            sent_start, sent_end = _sentence_span(text, m.start(), m.end())
+            candidates = [
+                p for p in pcts
+                if sent_start <= p[0] and p[1] <= sent_end
+                and _gap(m.start(), m.end(), p[0], p[1]) <= 40
+            ]
+            if candidates:
+                nearest = min(candidates, key=lambda p: _gap(m.start(), m.end(), p[0], p[1]))
+                rates[city] = nearest[2].replace(",", ".")
     return rates
 
 
@@ -147,10 +174,21 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
 
 
 def check_all(spine, cfg, fetch=None) -> list[Change]:
+    """Check every active source. A single source's fetch/parse failure is
+    isolated (recorded as a watch_error notification) so it can't abort the
+    run for every other source."""
     rows = spine.read().execute("SELECT * FROM watch_sources WHERE active=1").fetchall()
     changes = []
     for row in rows:
-        ch = check_source(spine, cfg, row, fetch=fetch)
+        try:
+            ch = check_source(spine, cfg, row, fetch=fetch)
+        except Exception as e:
+            with spine.write() as c:
+                c.execute(
+                    "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
+                    ("watch_error", f"{row['url']}: {e}", row["client_id"]),
+                )
+            continue
         if ch:
             changes.append(ch)
     return changes

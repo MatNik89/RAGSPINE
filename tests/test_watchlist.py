@@ -22,3 +22,20 @@ def test_notification_created(spine, cfg):
     w.check_source(spine, cfg, w.get_source(spine, sid), fetch=lambda u, **k: HTML1)
     w.check_source(spine, cfg, w.get_source(spine, sid), fetch=lambda u, **k: HTML2)
     assert spine.read().execute("SELECT COUNT(*) FROM notifications").fetchone()[0] >= 1
+
+def test_extract_rates_picks_nearest_not_leftmost():
+    text = "Zagreb ima prirez 18%. Split ima prirez 10%."
+    assert w.extract_rates(text) == {"Zagreb": "18", "Split": "10"}
+
+def test_check_all_isolates_source_failure(spine, cfg):
+    sid1 = w.add_source(spine, "https://bad.example/a")
+    sid2 = w.add_source(spine, "https://x.example/z")
+    w.check_source(spine, cfg, w.get_source(spine, sid2), fetch=lambda u, **k: HTML1)
+
+    def fetch(u, **k):
+        if "bad" in u:
+            raise RuntimeError("network down")
+        return HTML2
+
+    changes = w.check_all(spine, cfg, fetch=fetch)
+    assert len(changes) == 1 and changes[0].source_id == sid2
