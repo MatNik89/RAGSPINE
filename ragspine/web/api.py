@@ -2,13 +2,24 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from ragspine.core import optional
+from ragspine.core.llm import LLMClient, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
+from ragspine.rag import pipeline
 from ragspine.web.deps import require_user
 
 
 class LoginBody(BaseModel):
     username: str
     password: str
+
+
+class ChatBody(BaseModel):
+    q: str
+
+
+class ChatCompletionsBody(BaseModel):
+    messages: list[dict]
+    model: str | None = None
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -33,5 +44,27 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/v1/models")
     def models(user: str = Depends(require_user)):
         return {"object": "list", "data": [{"id": cfg.llm_model or "ragspine", "object": "model"}]}
+
+    def _answer(query: str, user: str) -> dict:
+        try:
+            return pipeline.answer(spine, cfg, query, user, llm=LLMClient(cfg))
+        except LLMUnavailable:
+            return {"answer": "LLM nedostupan — provjerite konfiguraciju.", "lane": "chat",
+                    "confidence": 0, "sources": [], "cached": False}
+
+    @app.post("/chat")
+    def chat(body: ChatBody, user: str = Depends(require_user)):
+        return _answer(body.q, user)
+
+    @app.post("/v1/chat/completions")
+    def chat_completions(body: ChatCompletionsBody, user: str = Depends(require_user)):
+        user_msgs = [m for m in body.messages if m.get("role") == "user"]
+        query = user_msgs[-1]["content"] if user_msgs else ""
+        result = _answer(query, user)
+        return {
+            "choices": [{"message": {"role": "assistant", "content": result["answer"]}}],
+            "model": cfg.llm_model or "ragspine",
+            "usage": {},
+        }
 
     return app

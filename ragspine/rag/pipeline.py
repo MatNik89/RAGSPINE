@@ -1,0 +1,84 @@
+"""Chat orchestrator: wires router -> cache -> kb -> lane handlers -> retrieval/LLM/citations."""
+import json
+
+from ragspine.core.llm import LLMUnavailable
+from ragspine.knowledge import kb
+from ragspine.rag import cache, citations, composer, retrieval, router
+
+# Later tasks register sql/learn/web/graph/ocr handlers here.
+# Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
+LANE_HANDLERS: dict[str, callable] = {}
+
+_REJECT_MSG = "Ne mogu izvršiti taj zahtjev."
+_GREETING = "Bok! Kako vam mogu pomoći?"
+_LLM_DOWN = "LLM nedostupan — provjerite konfiguraciju."
+
+
+def _package(answer_text: str, lane: str, confidence: float, sources: list, cached: bool) -> dict:
+    return {"answer": answer_text, "lane": lane, "confidence": confidence,
+            "sources": sources, "cached": cached}
+
+
+def _record(spine, user: str, query: str, lane: str, answer_text: str, confidence: float) -> None:
+    cache.put(spine, query, answer_text, meta=json.dumps({"lane": lane, "confidence": confidence}))
+    with spine.write() as c:
+        c.execute(
+            "INSERT INTO interactions(user,query,lane,answer,confidence) VALUES(?,?,?,?,?)",
+            (user, query, lane, answer_text, confidence),
+        )
+
+
+def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
+    lane = router.route(query)
+
+    if lane == "reject":
+        return _package(_REJECT_MSG, "reject", 0, [], False)
+
+    if lane == "no_retrieval":
+        text = _GREETING
+        if llm is not None:
+            try:
+                text = llm.complete([{"role": "user", "content": query}]).text
+            except LLMUnavailable:
+                pass
+        return _package(text, "no_retrieval", 1.0, [], False)
+
+    cached_answer = cache.get(spine, query)
+    if cached_answer is not None:
+        return _package(cached_answer, "chat", 1.0, [], True)
+
+    kb_answer = kb.lookup(spine, query)
+    if kb_answer is not None:
+        return _package(kb_answer, "chat", 0.9, [], False)
+
+    handler = LANE_HANDLERS.get(lane)
+    if handler is not None:
+        res = handler(spine, cfg, query, llm)
+        if res is not None:
+            _record(spine, user, query, lane, res, 1.0)
+            return _package(res, lane, 1.0, [], False)
+
+    # chat lane (or unhandled lane falling through)
+    hits = retrieval.search(spine, query)
+    system, messages = composer.compose(query, hits)
+
+    if llm is None:
+        return _package(_LLM_DOWN, "chat", 0, [], False)
+    try:
+        result = llm.complete(messages, system=system)
+    except LLMUnavailable:
+        return _package(_LLM_DOWN, "chat", 0, [], False)
+
+    report = citations.verify(result.text, hits)
+    if not report.ok:
+        final_text, confidence, sources = citations.IDK, 0, []
+    else:
+        final_text = result.text
+        confidence = report.confidence
+        sources = [{"n": n, "title": hits[n - 1].title, "doc_id": hits[n - 1].doc_id}
+                   for n in report.cited]
+
+    _record(spine, user, query, "chat", final_text, confidence)
+    if report.ok:
+        kb.save(spine, query, final_text)
+    return _package(final_text, "chat", confidence, sources, False)
