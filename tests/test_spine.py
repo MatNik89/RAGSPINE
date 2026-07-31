@@ -33,3 +33,14 @@ def test_audit(tmp_path):
     sp.audit("ana", "pdv_sent", "client:3", "srpanj")
     r = sp.read().execute("SELECT user, action FROM audit_log").fetchone()
     assert (r["user"], r["action"]) == ("ana", "pdv_sent")
+
+def test_chunks_fts_update(tmp_path):
+    sp = _sp(tmp_path)
+    with sp.write() as c:
+        c.execute("INSERT INTO chunks(doc_id, seq, text, title) VALUES (1, 1, ?, ?)", ("hello world", "greeting"))
+    with sp.write() as c:
+        c.execute("UPDATE chunks SET text=? WHERE id=1", ("goodbye",))
+    rc = sp.read().execute("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'goodbye'").fetchone()[0]
+    assert rc == 1, "UPDATE should sync chunks_fts"
+    rc = sp.read().execute("SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'hello'").fetchone()[0]
+    assert rc == 0, "Old text should be removed from chunks_fts"

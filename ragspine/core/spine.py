@@ -1,4 +1,4 @@
-import sqlite3, threading, time
+import sqlite3, threading
 from contextlib import contextmanager
 
 SCHEMA = """
@@ -14,6 +14,9 @@ CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
   INSERT INTO chunks_fts(rowid, text, title) VALUES (new.id, new.text, new.title); END;
 CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
   INSERT INTO chunks_fts(chunks_fts, rowid, text, title) VALUES ('delete', old.id, old.text, old.title); END;
+CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, text, title) VALUES ('delete', old.id, old.text, old.title);
+  INSERT INTO chunks_fts(rowid, text, title) VALUES (new.id, new.text, new.title); END;
 CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY, name TEXT, oib TEXT UNIQUE,
   email TEXT, phone TEXT, owner TEXT, industry TEXT, pdv_status TEXT, nas_folder TEXT,
   active INTEGER DEFAULT 1);
