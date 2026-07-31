@@ -1,5 +1,5 @@
 """Configuration management for RAGSPINE."""
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import os, secrets
 from pathlib import Path
 
@@ -36,7 +36,8 @@ class Config:
                 secret = sf.read_text().strip()
             else:
                 secret = secrets.token_hex(32)
-                sf.write_text(secret); sf.chmod(0o600)
+                sf.touch(mode=0o600)
+                sf.write_text(secret)
         return cls(
             data_dir=data_dir,
             db_path=e("RAGSPINE_DB_PATH", str(Path(data_dir) / "ragspine.db")),
