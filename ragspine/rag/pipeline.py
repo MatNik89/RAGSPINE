@@ -3,7 +3,7 @@ import json
 
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import kb
-from ragspine.rag import cache, citations, composer, retrieval, router
+from ragspine.rag import cache, citations, composer, retrieval, router, selfrag
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
 # Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
@@ -59,7 +59,16 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
-    hits = retrieval.search(spine, query)
+    hits = retrieval.search(spine, query, k=selfrag.k_for(query))
+
+    if not selfrag.check_relevance(llm, query, hits):
+        web_handler = LANE_HANDLERS.get("web")
+        if web_handler is not None:
+            res = web_handler(spine, cfg, query, llm)
+            if res is not None:
+                _record(spine, user, query, "web", res, 1.0)
+                return _package(res, "web", 1.0, [], False)
+
     system, messages = composer.compose(query, hits)
 
     if llm is None:
