@@ -17,6 +17,10 @@ def test_password():
     h = sec.hash_password("lozinka1")
     assert sec.verify_password("lozinka1", h) and not sec.verify_password("x", h)
 
+def test_password_malformed_stored():
+    assert not sec.verify_password("x", "not-a-valid-format")
+    assert not sec.verify_password("x", "")
+
 def test_oib():
     assert sec.oib_valid("69435151530")      # validan testni OIB
     assert not sec.oib_valid("69435151531")
