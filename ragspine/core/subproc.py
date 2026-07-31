@@ -26,7 +26,10 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
         return proc.returncode, out, err
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            if hasattr(os, "killpg"):
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            else:
+                proc.kill()
         except ProcessLookupError:
             pass
         out, err = proc.communicate()

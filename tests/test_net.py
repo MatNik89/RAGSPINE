@@ -1,3 +1,4 @@
+import http.server, threading
 import pytest
 from ragspine.core.net import safe_fetch, EgressBlocked
 
@@ -10,3 +11,26 @@ def test_allowlist(cfg, monkeypatch):
     cfg.egress_allow.append("127.0.0.1")
     # dalje puca na connection refused, NE na EgressBlocked
     with pytest.raises(OSError): safe_fetch("http://127.0.0.1:1/x", timeout=1)
+
+def test_redirect_blocked(cfg):
+    # allow-listed host that tries to redirect us to a loopback target must NOT
+    # be silently followed — that would bypass the allowlist/IP check entirely.
+    cfg.egress_allow.append("127.0.0.1")
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:9/evil")
+            self.end_headers()
+        def log_message(self, *a): pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    port = server.server_address[1]
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    try:
+        with pytest.raises(EgressBlocked):
+            safe_fetch(f"http://127.0.0.1:{port}/x")
+    finally:
+        server.shutdown()
+        t.join(timeout=2)
