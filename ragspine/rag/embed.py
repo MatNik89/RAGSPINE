@@ -1,8 +1,11 @@
 """Optional dense-vector index (fastembed + sqlite-vec). No-op wherever either
 package or the model itself is unavailable — callers never need to branch."""
+import logging
 import os
 
 from ragspine.config import get_config
+
+log = logging.getLogger(__name__)
 
 _model = None
 _model_failed = False
@@ -26,12 +29,13 @@ def _get_model():
     global _model, _model_failed
     if _model is not None or _model_failed:
         return _model
+    cfg = get_config()
     try:
         from fastembed import TextEmbedding
-        cfg = get_config()
         local_only = os.environ.get("RAGSPINE_TEST_EMBED") != "1"
         _model = TextEmbedding(cfg.embed_model, local_files_only=local_only)
     except Exception:
+        log.warning("embed model load failed (%s) — vector search disabled", cfg.embed_model, exc_info=True)
         _model_failed = True
         _model = None
     return _model
@@ -68,7 +72,8 @@ def index_chunks(spine, chunk_ids: list[int]):
     if not rows:
         return
     import sqlite_vec
-    vecs = list(model.embed([r["text"] for r in rows]))
+    # e5 models expect a "passage: "/"query: " prefix for best retrieval quality.
+    vecs = list(model.embed([f"passage: {r['text']}" for r in rows]))
     ensure_vec_table(spine)
     with spine.write() as c:
         _load_vec(c)
@@ -90,7 +95,7 @@ def query_vec(spine, query: str, k: int) -> list[tuple[int, float]]:
     import sqlite_vec
     conn = spine.read()
     _load_vec(conn)
-    qvec = next(iter(model.embed([query])))
+    qvec = next(iter(model.embed([f"query: {query}"])))
     rows = conn.execute(
         "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? "
         "ORDER BY distance LIMIT ?",

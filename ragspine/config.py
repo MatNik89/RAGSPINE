@@ -46,7 +46,9 @@ class Config:
             llm_model=e("RAGSPINE_LLM_MODEL", ""),
             anthropic_base_url=e("RAGSPINE_ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
             ollama_url=e("RAGSPINE_OLLAMA_URL", "http://127.0.0.1:11434"),
-            ocr_url=e("RAGSPINE_OCR_URL", ""), embed_model=e("RAGSPINE_EMBED_MODEL", "BAAI/bge-m3"),
+            # ponytail: e5-large (fastembed-supported, 1024-dim, multilingual) — downloaded on first real use via setup warmup (Task 36), not here.
+            ocr_url=e("RAGSPINE_OCR_URL", ""),
+            embed_model=e("RAGSPINE_EMBED_MODEL", "intfloat/multilingual-e5-large"),
             nas_root=e("RAGSPINE_NAS_ROOT", ""), imap_host=e("RAGSPINE_IMAP_HOST", ""),
             imap_user=e("RAGSPINE_IMAP_USER", ""), imap_pass=e("RAGSPINE_IMAP_PASS", ""),
             jwt_secret=secret, redact_pii=e("RAGSPINE_REDACT_PII", "0") == "1",
