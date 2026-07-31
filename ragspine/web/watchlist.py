@@ -6,6 +6,7 @@ from xml.etree import ElementTree
 
 from ragspine.core.net import safe_fetch
 from ragspine.docs.ingest import ingest_text
+from ragspine.web.learn import HR_GRADOVI as CITIES
 
 INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "ugostiteljstvo": ["ugostitelj", "restoran", "kafic", "hrana", "pice", "turisticka pristojba"],
@@ -29,14 +30,6 @@ _DIACRITICS = str.maketrans("čćžšđ", "cczsd")
 
 def _normalize(text: str) -> str:
     return text.lower().translate(_DIACRITICS)
-
-CITIES = [
-    "Split", "Zagreb", "Rijeka", "Osijek", "Zadar", "Sisak", "Karlovac",
-    "Varaždin", "Šibenik", "Dubrovnik", "Pula", "Slavonski Brod", "Vinkovci",
-    "Vukovar", "Bjelovar", "Koprivnica", "Čakovec", "Virovitica", "Požega",
-    "Gospić", "Krapina", "Pazin", "Rovinj", "Velika Gorica", "Zaprešić",
-    "Samobor", "Kutina", "Đakovo", "Metković",
-]
 
 _RATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
 _EFFECTIVE_RE = re.compile(r"stupa na snagu\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\.?", re.I)

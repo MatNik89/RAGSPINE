@@ -24,9 +24,10 @@ def test_extract_city_rates_direct():
     assert l.extract_city_rates("Split 15%") == {"Split": "15"}
 
 
-def test_hr_gradovi_has_27_cities():
-    assert len(l.HR_GRADOVI) == 27
+def test_hr_gradovi_is_union_of_both_lists():
+    assert len(l.HR_GRADOVI) == 33
     assert "Zagreb" in l.HR_GRADOVI and "Makarska" in l.HR_GRADOVI
+    assert "Gospić" in l.HR_GRADOVI and "Kutina" in l.HR_GRADOVI  # ex-watchlist-only
 
 
 def test_lane_handler_with_url(spine, cfg):
@@ -40,3 +41,14 @@ def test_lane_handler_with_url(spine, cfg):
 def test_lane_handler_without_url(spine, cfg):
     reply = l.handle(spine, cfg, "nauci nesto", None)
     assert "URL" in reply or "https" in reply
+
+
+def test_lane_handler_strips_trailing_sentence_punctuation(spine, cfg):
+    seen_urls = []
+
+    def fetch(u, **k):
+        seen_urls.append(u)
+        return HTML
+
+    l.handle(spine, cfg, "nauci s https://porezna.example/prirez.", None, fetch=fetch)
+    assert seen_urls == ["https://porezna.example/prirez"]

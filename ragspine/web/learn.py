@@ -6,20 +6,20 @@ from html.parser import HTMLParser
 from ragspine.core.net import safe_fetch
 from ragspine.docs.ingest import ingest_text
 
-# ponytail: duplicates watchlist.CITIES (different 29-city list, same shape).
-# Kept separate rather than making watchlist import from here to avoid a
-# cross-module coupling neither side needs yet; upgrade path if they ever
-# must agree exactly = hoist one shared list both modules import.
+# Canonical city list — union of the original learn-lane 27 + watchlist's
+# original 29, so watchlist.py (which imports this) doesn't lose recall on
+# any city either module recognized before consolidation.
 HR_GRADOVI = [
     "Zagreb", "Split", "Rijeka", "Osijek", "Zadar", "Pula", "Sisak", "Karlovac",
     "Varaždin", "Šibenik", "Dubrovnik", "Slavonski Brod", "Vinkovci", "Vukovar",
     "Bjelovar", "Koprivnica", "Križevci", "Đakovo", "Požega", "Čakovec",
     "Virovitica", "Samobor", "Velika Gorica", "Kaštela", "Solin", "Metković",
-    "Makarska",
+    "Makarska", "Gospić", "Krapina", "Pazin", "Rovinj", "Zaprešić", "Kutina",
 ]
 
 _RATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
 _URL_RE = re.compile(r"https?://\S+")
+_TRAILING_PUNCT = ".,;:!?)]"
 
 
 class _TextExtractor(HTMLParser):
@@ -84,7 +84,8 @@ def handle(spine, cfg, query: str, llm, fetch=None) -> str:
     m = _URL_RE.search(query)
     if not m:
         return "Pošalji URL, npr: nauči s https://..."
-    result = learn_url(spine, cfg, m.group(0), "sustav", fetch=fetch)
+    url = m.group(0).rstrip(_TRAILING_PUNCT)
+    result = learn_url(spine, cfg, url, "sustav", fetch=fetch)
     if not result["overrides_set"]:
         return f"Naučeno s {result['url']}: stranica spremljena, brojke nisu prepoznate."
     parts = ", ".join(f"{c} ({r})" for c, r in result["overrides_set"].items())
