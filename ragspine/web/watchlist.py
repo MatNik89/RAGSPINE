@@ -1,10 +1,34 @@
 """Source watching: fetch, hash-diff, law diff, rate/date extraction,
 config overrides, upcoming changes, notifications."""
-import hashlib, html, re, sqlite3
+import hashlib, html, json, re, sqlite3
 from dataclasses import dataclass
+from xml.etree import ElementTree
 
 from ragspine.core.net import safe_fetch
 from ragspine.docs.ingest import ingest_text
+
+INDUSTRY_KEYWORDS: dict[str, list[str]] = {
+    "ugostiteljstvo": ["ugostitelj", "restoran", "kafic", "hrana", "pice", "turisticka pristojba"],
+    "gradevina": ["gradevin", "gradnja", "izvodac", "projektiranje", "nekretnin"],
+    "trgovina": ["trgovina", "maloprodaja", "veleprodaja", "prodavaonica", "roba"],
+    "prijevoz": ["prijevoz", "transport", "logistika", "vozila", "cestarina"],
+    "poljoprivreda": ["poljoprivreda", "ratarstvo", "stocarstvo", "subvencije", "opg"],
+    "it": ["informatika", "softver", "programiranje", "it usluge", "digitalne usluge"],
+    "turizam": ["turizam", "smjestaj", "apartman", "hotel", "najam"],
+    "proizvodnja": ["proizvodnja", "industrija", "tvornica", "pogon", "prerada"],
+}
+
+DEFAULT_RSS = [
+    ("https://narodne-novine.nn.hr/rss.aspx?tip=1", "sluzbeni"),
+    ("https://narodne-novine.nn.hr/rss.aspx?tip=2", "medjunarodni"),
+    ("https://narodne-novine.nn.hr/rss.aspx?tip=3", "oglasi"),  # ponytail: tip=3 unverified against live NN site; confirm when seeding in Task 36
+]
+
+_DIACRITICS = str.maketrans("čćžšđ", "cczsd")
+
+
+def _normalize(text: str) -> str:
+    return text.lower().translate(_DIACRITICS)
 
 CITIES = [
     "Split", "Zagreb", "Rijeka", "Osijek", "Zadar", "Sisak", "Karlovac",
@@ -187,6 +211,94 @@ def check_all(spine, cfg, fetch=None) -> list[Change]:
         if ch:
             changes.append(ch)
     return changes
+
+
+def parse_rss(xml_bytes: bytes) -> list[dict]:
+    """Parse an RSS 2.0 feed (<channel><item>...) into title/link/description/
+    date dicts. Malformed XML or missing channel/item structure -> []."""
+    try:
+        root = ElementTree.fromstring(xml_bytes)
+    except ElementTree.ParseError:
+        return []
+    items = []
+    for item in root.iter("item"):
+        items.append({
+            "title": (item.findtext("title") or "").strip(),
+            "link": (item.findtext("link") or "").strip(),
+            "description": (item.findtext("description") or "").strip(),
+            "date": (item.findtext("pubDate") or "").strip(),
+        })
+    return items
+
+
+def check_rss(spine, cfg, fetch=None) -> list[dict]:
+    """Check every active RSS source (kind='rss'). Only items whose link
+    hasn't been seen before are candidates; a candidate is relevant if its
+    text matches an industry keyword AND at least one active client is in
+    that industry. Relevant items get a notification and are returned.
+    Per-source try/except isolation, like check_all."""
+    fetch = fetch or safe_fetch
+    rows = spine.read().execute(
+        "SELECT * FROM watch_sources WHERE kind='rss' AND active=1"
+    ).fetchall()
+    client_industries = {
+        r["industry"] for r in spine.read().execute(
+            "SELECT DISTINCT industry FROM clients WHERE active=1"
+        ).fetchall() if r["industry"]
+    }
+
+    relevant: list[dict] = []
+    for row in rows:
+        try:
+            items = parse_rss(fetch(row["url"]))
+            state = spine.read().execute(
+                "SELECT * FROM watch_state WHERE source_id=?", (row["id"],)
+            ).fetchone()
+            seen = set(json.loads(state["last_content"])) if state and state["last_content"] else set()
+            new_items = [i for i in items if i["link"] not in seen]
+            seen |= {i["link"] for i in items}
+
+            with spine.write() as c:
+                if state is None:
+                    c.execute(
+                        "INSERT INTO watch_state(source_id,last_hash,last_checked,last_content) "
+                        "VALUES(?,?,datetime('now'),?)",
+                        (row["id"], "", json.dumps(sorted(seen))),
+                    )
+                else:
+                    c.execute(
+                        "UPDATE watch_state SET last_checked=datetime('now'), last_content=? WHERE source_id=?",
+                        (json.dumps(sorted(seen)), row["id"]),
+                    )
+
+                for item in new_items:
+                    text = _normalize(item["title"] + " " + item["description"])
+                    hit_industries = {
+                        ind for ind, keywords in INDUSTRY_KEYWORDS.items()
+                        if any(_normalize(kw) in text for kw in keywords)
+                    } & client_industries
+                    if not hit_industries:
+                        continue
+
+                    client = c.execute(
+                        f"SELECT id FROM clients WHERE active=1 AND industry IN "
+                        f"({','.join('?' * len(hit_industries))}) LIMIT 1",
+                        tuple(hit_industries),
+                    ).fetchone()
+                    c.execute(
+                        "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
+                        ("rss", f"{item['title']} {item['link']}", client["id"] if client else None),
+                    )
+                    relevant.append(item)
+        except Exception as e:
+            with spine.write() as c:
+                c.execute(
+                    "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
+                    ("watch_error", f"{row['url']}: {e}", row["client_id"]),
+                )
+            continue
+
+    return relevant
 
 
 def mark_stale(spine) -> int:
