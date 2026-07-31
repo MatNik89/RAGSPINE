@@ -1,3 +1,4 @@
+import pytest
 from ragspine.docs import ingest as ing
 
 def test_chunker_no_word_split():
@@ -19,6 +20,45 @@ def test_ingest_and_dedup(spine):
     assert ing.ingest_text(spine, "Zakon o PDV-u, stopa 25%.", "zakon-pdv") is None
     n = spine.read().execute("SELECT COUNT(*) FROM chunks WHERE doc_id=?", (d1,)).fetchone()[0]
     assert n >= 1
+
+def test_ingest_dedup_lost_race_returns_none(spine, monkeypatch):
+    text = "Tekst za race-dedup test, ne smije puknuti."
+    sha = ing._norm_sha(text)
+    with spine.write() as c:
+        c.execute(
+            "INSERT INTO documents(title,path,doc_type,client_id,sha256,source_url) VALUES(?,?,?,?,?,?)",
+            ("preexisting", "", "ostalo", None, sha, ""),
+        )
+
+    class _NoHit:
+        def fetchone(self):
+            return None
+
+    class _NoCheck:
+        def execute(self, *a, **k):
+            return _NoHit()
+
+    # simulate a concurrent writer winning the sha256 race: pre-check misses,
+    # but the row is already there so the INSERT itself must hit the UNIQUE
+    # constraint and ingest_text must still return None, not raise.
+    monkeypatch.setattr(spine, "read", lambda: _NoCheck())
+    assert ing.ingest_text(spine, text, "dup-race") is None
+
+def test_ingest_hooks_only_swallow_importerror(spine, monkeypatch):
+    import sys, types
+
+    fake_embed = types.ModuleType("ragspine.rag.embed")
+    def _boom(spine, ids):
+        raise RuntimeError("bad key")
+    fake_embed.index_chunks = _boom
+    fake_rag = types.ModuleType("ragspine.rag")
+    monkeypatch.setitem(sys.modules, "ragspine.rag", fake_rag)
+    monkeypatch.setitem(sys.modules, "ragspine.rag.embed", fake_embed)
+
+    # a real runtime error from a present embed module must propagate, not
+    # be silently swallowed as if the module were merely absent.
+    with pytest.raises(RuntimeError, match="bad key"):
+        ing.ingest_text(spine, "Tekst gdje embed puca s pravom greškom.", "boom-doc")
 
 def test_ingest_txt_file(spine, tmp_path):
     p = tmp_path / "a.txt"; p.write_text("Ugovor o radu sklopljen...")

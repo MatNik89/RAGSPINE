@@ -1,5 +1,5 @@
 """Document ingest pipeline: parser ladder, chunker, dedup, bulk."""
-import hashlib, os, re
+import hashlib, os, re, sqlite3
 from pathlib import Path
 
 from ragspine.core import optional
@@ -124,10 +124,14 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
         return None
     dtype = doc_type or detect_doc_type(text, path or title)
     with spine.write() as c:
-        doc_id = c.execute(
-            "INSERT INTO documents(title,path,doc_type,client_id,sha256,source_url) VALUES(?,?,?,?,?,?)",
-            (title, path, dtype, client_id, sha, source_url),
-        ).lastrowid
+        try:
+            doc_id = c.execute(
+                "INSERT INTO documents(title,path,doc_type,client_id,sha256,source_url) VALUES(?,?,?,?,?,?)",
+                (title, path, dtype, client_id, sha, source_url),
+            ).lastrowid
+        except sqlite3.IntegrityError:
+            # lost a dedup race: another writer inserted the same sha256 first
+            return None
         ids = []
         for seq, chunk in enumerate(chunk_text(text)):
             cid = c.execute(
@@ -139,12 +143,12 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
     try:
         from ragspine.rag import embed
         embed.index_chunks(spine, ids)
-    except Exception:
+    except ImportError:
         pass
     try:
         from ragspine.rag import graphrag
         graphrag.index_doc(spine, doc_id, text)
-    except Exception:
+    except ImportError:
         pass
     return doc_id
 
