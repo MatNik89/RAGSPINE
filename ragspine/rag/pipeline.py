@@ -1,7 +1,7 @@
 """Chat orchestrator: wires router -> cache -> kb -> lane handlers -> retrieval/LLM/citations."""
 import json
 
-from ragspine.core.llm import LLMUnavailable
+from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import kb
 from ragspine.rag import cache, citations, composer, retrieval, router
 
@@ -11,7 +11,7 @@ LANE_HANDLERS: dict[str, callable] = {}
 
 _REJECT_MSG = "Ne mogu izvršiti taj zahtjev."
 _GREETING = "Bok! Kako vam mogu pomoći?"
-_LLM_DOWN = "LLM nedostupan — provjerite konfiguraciju."
+_LLM_DOWN = "LLM trenutno nedostupan ili je vratio grešku."
 
 
 def _package(answer_text: str, lane: str, confidence: float, sources: list, cached: bool) -> dict:
@@ -39,7 +39,7 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
         if llm is not None:
             try:
                 text = llm.complete([{"role": "user", "content": query}]).text
-            except LLMUnavailable:
+            except (LLMUnavailable, LLMError):
                 pass
         return _package(text, "no_retrieval", 1.0, [], False)
 
@@ -66,7 +66,7 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
         return _package(_LLM_DOWN, "chat", 0, [], False)
     try:
         result = llm.complete(messages, system=system)
-    except LLMUnavailable:
+    except (LLMUnavailable, LLMError):
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
     report = citations.verify(result.text, hits)

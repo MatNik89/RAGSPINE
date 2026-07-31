@@ -32,3 +32,12 @@ def test_chat_completions_openai_compat(spine, cfg):
                 headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
     assert r.json()["choices"][0]["message"]["role"] == "assistant"
+
+
+def test_chat_completions_missing_content_no_500(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.post("/v1/chat/completions",
+                json={"messages": [{"role": "user"}]},
+                headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code in (200, 400)

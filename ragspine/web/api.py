@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from ragspine.core import optional
-from ragspine.core.llm import LLMClient, LLMUnavailable
+from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
 from ragspine.rag import pipeline
 from ragspine.web.deps import require_user
@@ -48,8 +48,8 @@ def create_app(spine, cfg) -> FastAPI:
     def _answer(query: str, user: str) -> dict:
         try:
             return pipeline.answer(spine, cfg, query, user, llm=LLMClient(cfg))
-        except LLMUnavailable:
-            return {"answer": "LLM nedostupan — provjerite konfiguraciju.", "lane": "chat",
+        except (LLMUnavailable, LLMError):
+            return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
 
     @app.post("/chat")
@@ -59,7 +59,9 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, user: str = Depends(require_user)):
         user_msgs = [m for m in body.messages if m.get("role") == "user"]
-        query = user_msgs[-1]["content"] if user_msgs else ""
+        query = user_msgs[-1].get("content", "") if user_msgs else ""
+        if not query:
+            raise HTTPException(400, "no user message content")
         result = _answer(query, user)
         return {
             "choices": [{"message": {"role": "assistant", "content": result["answer"]}}],
