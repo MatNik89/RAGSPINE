@@ -27,6 +27,14 @@ def test_extract_rates_picks_nearest_not_leftmost():
     text = "Zagreb ima prirez 18%. Split ima prirez 10%."
     assert w.extract_rates(text) == {"Zagreb": "18", "Split": "10"}
 
+def test_extract_rates_no_period_separator():
+    # real porezna pages often separate rows with newlines/tabs, or nothing
+    # but a single space, instead of periods — must not degrade to leftmost.
+    assert w.extract_rates("Zagreb ima prirez 18% Split ima prirez 10%") == \
+        {"Zagreb": "18", "Split": "10"}
+    assert w.extract_rates("Zagreb ima prirez 18%\nSplit ima prirez 10%") == \
+        {"Zagreb": "18", "Split": "10"}
+
 def test_check_all_isolates_source_failure(spine, cfg):
     sid1 = w.add_source(spine, "https://bad.example/a")
     sid2 = w.add_source(spine, "https://x.example/z")

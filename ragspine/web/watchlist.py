@@ -64,33 +64,28 @@ def _gap(a_start: int, a_end: int, b_start: int, b_end: int) -> int:
     return 0
 
 
-def _sentence_span(text: str, start: int, end: int) -> tuple[int, int]:
-    """(start, end) of the sentence containing text[start:end], bounded by '.'."""
-    s = text.rfind(".", 0, start) + 1
-    e = text.find(".", end)
-    e = e + 1 if e != -1 else len(text)
-    return s, e
-
-
 def extract_rates(text: str) -> dict[str, str]:
-    """City → percentage, matching each city name to the NEAREST '%' number
-    (by character distance) within its own sentence — a page listing several
-    cities together would otherwise misattribute rates to the wrong city,
-    since raw nearest-distance alone can reach across a sentence boundary
-    into a neighboring city's rate."""
-    pcts = [(m.start(), m.end(), m.group(1)) for m in _RATE_RE.finditer(text)]
+    """City → percentage, pairing each city with the '%' number that follows
+    it in reading order (one-city-one-rate, e.g. "Grad ... X%"), capped to a
+    sane distance. Sentence-boundary splitting alone isn't enough: real pages
+    often separate city/rate rows with newlines or tabs instead of periods,
+    or with no separator at all beyond a single space — so this walks city
+    and percentage matches together in text order and binds each percentage
+    to the nearest preceding, not-yet-bound city, rather than trusting
+    leftmost-in-a-window or sentence membership."""
+    tokens = [(m.start(), m.end(), "city", city)
+              for city in CITIES for m in re.finditer(re.escape(city), text)]
+    tokens += [(m.start(), m.end(), "pct", m.group(1)) for m in _RATE_RE.finditer(text)]
+    tokens.sort(key=lambda t: t[0])
+
     rates: dict[str, str] = {}
-    for city in CITIES:
-        for m in re.finditer(re.escape(city), text):
-            sent_start, sent_end = _sentence_span(text, m.start(), m.end())
-            candidates = [
-                p for p in pcts
-                if sent_start <= p[0] and p[1] <= sent_end
-                and _gap(m.start(), m.end(), p[0], p[1]) <= 40
-            ]
-            if candidates:
-                nearest = min(candidates, key=lambda p: _gap(m.start(), m.end(), p[0], p[1]))
-                rates[city] = nearest[2].replace(",", ".")
+    pending: tuple[int, int, str] | None = None  # (start, end, city) awaiting a rate
+    for start, end, kind, val in tokens:
+        if kind == "city":
+            pending = (start, end, val)
+        elif pending is not None and _gap(pending[0], pending[1], start, end) <= 40:
+            rates[pending[2]] = val.replace(",", ".")
+            pending = None
     return rates
 
 
