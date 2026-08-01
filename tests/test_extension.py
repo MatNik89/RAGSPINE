@@ -34,7 +34,7 @@ def test_popup_html_references_popup_js():
 
 def test_background_js_has_action_contract():
     src = (EXT / "background.js").read_text()
-    for action in ("navigate", "click", "type", "screenshot", "read"):
+    for action in ("navigate", "click", "type", "scroll", "screenshot", "read"):
         assert f'"{action}"' in src or f"'{action}'" in src, f"missing action {action}"
     assert "Authorization" in src and "Bearer" in src
     assert "/browser/cmd" in src
