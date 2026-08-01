@@ -18,6 +18,9 @@ from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
 from ragspine.docs import ocr
+from ragspine.knowledge import features as features_mod
+from ragspine.knowledge import patterns as patterns_mod
+from ragspine.knowledge import translate as translate_mod
 from ragspine.rag import pipeline
 from ragspine.web import watchlist
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
@@ -55,6 +58,17 @@ class NoteBody(BaseModel):
 
 class OcrBody(BaseModel):
     path: str
+
+
+class TranslateBody(BaseModel):
+    text: str
+    target: str
+
+
+class FeatureBody(BaseModel):
+    body: str
+    priority: int = 3
+    category: str = ""
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -235,6 +249,29 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(503, str(e)) from e
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    @app.post("/translate")
+    def translate_text(body: TranslateBody, user: str = Depends(require_user_web)):
+        try:
+            text = translate_mod.translate(LLMClient(cfg), body.text, body.target)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except (LLMUnavailable, LLMError) as e:
+            raise HTTPException(503, str(e)) from e
+        return {"translation": text}
+
+    @app.get("/features")
+    def features_list(user: str = Depends(require_user_web)):
+        return [dict(r) for r in features_mod.list_open(spine)]
+
+    @app.post("/features")
+    def features_add(body: FeatureBody, user: str = Depends(require_user_web)):
+        fid = features_mod.add(spine, user, body.body, body.priority, body.category)
+        return {"id": fid}
+
+    @app.get("/patterns")
+    def patterns_detect(user: str = Depends(require_user_web)):
+        return patterns_mod.detect(spine)
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
