@@ -14,6 +14,7 @@ from ragspine.business import kalendar
 from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
+from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
@@ -81,6 +82,11 @@ class Nis2Body(BaseModel):
 class BrowserResultBody(BaseModel):
     cmd_id: str
     result: dict
+
+
+class BrowserAgentBody(BaseModel):
+    task: str
+    url: str = ""
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -335,5 +341,9 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/browser/status")
     def browser_status(request: Request, user: str = Depends(require_user_web)):
         return {"pending": request.app.state.bridge.pending()}
+
+    @app.post("/browser/agent")
+    def browser_agent(body: BrowserAgentBody, user: str = Depends(require_user_web)):
+        return agent_mod.run_task(cfg, body.task, body.url)
 
     return app
