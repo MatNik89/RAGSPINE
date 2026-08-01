@@ -80,12 +80,23 @@ def redact_pii(text: str) -> str:
 
 
 def chain_append(spine, event: str) -> str:
+    # BEGIN IMMEDIATE takes the SQLite write lock up front, so the
+    # read-last-hash + insert is atomic across processes (not just
+    # in-process via spine's threading.Lock) — otherwise a concurrent
+    # CLI command and a live serve process can race and fork the chain.
     with spine.write() as c:
-        row = c.execute("SELECT hash FROM hash_chain ORDER BY id DESC LIMIT 1").fetchone()
-        prev_hash = row["hash"] if row else ""
-        h = hashlib.sha256((prev_hash + event).encode()).hexdigest()
-        c.execute("INSERT INTO hash_chain(event, prev_hash, hash) VALUES(?,?,?)",
-                  (event, prev_hash, h))
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            row = c.execute("SELECT hash FROM hash_chain ORDER BY id DESC LIMIT 1").fetchone()
+            prev_hash = row["hash"] if row else ""
+            h = hashlib.sha256((prev_hash + event).encode()).hexdigest()
+            c.execute("INSERT INTO hash_chain(event, prev_hash, hash) VALUES(?,?,?)",
+                      (event, prev_hash, h))
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+        else:
+            c.execute("COMMIT")
         return h
 
 

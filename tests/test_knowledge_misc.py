@@ -116,3 +116,13 @@ def test_api_translate_bad_lang_400(spine, cfg, monkeypatch):
     monkeypatch.setattr(api_mod, "LLMClient", lambda cfg: _FakeLLM(text="Hello"))
     r = c.post("/translate", json={"text": "Bok", "target": "xx"})
     assert r.status_code == 400
+
+
+def test_api_translate_llm_error_503_scrubbed(spine, cfg, monkeypatch):
+    # LLMError body must not leak provider internals ("boom") to the client.
+    c = _client(spine, cfg)
+    from ragspine.web import api as api_mod
+    monkeypatch.setattr(api_mod, "LLMClient", lambda cfg: _FakeLLM(raise_error=True))
+    r = c.post("/translate", json={"text": "Bok", "target": "en"})
+    assert r.status_code == 503
+    assert "boom" not in r.json()["detail"]

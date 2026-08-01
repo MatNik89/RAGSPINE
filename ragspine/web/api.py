@@ -18,14 +18,17 @@ from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
-from ragspine.core.security import jwt_encode, verify_password
+from ragspine.core.security import hash_password, jwt_encode, verify_password
 from ragspine.docs import ocr
 from ragspine.knowledge import features as features_mod
 from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
 from ragspine.ops import doctor, health, nis2
 from ragspine.rag import pipeline
+from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
+from ragspine.web import learn  # noqa: F401 — register learn lane handler
 from ragspine.web import watchlist
+from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
@@ -89,6 +92,12 @@ class BrowserAgentBody(BaseModel):
     url: str = ""
 
 
+# ponytail: fixed dummy hash for login timing — run a real verify_password
+# cost even when the username doesn't exist, so response latency doesn't
+# leak which usernames are registered.
+_DUMMY_PW_HASH = hash_password("nexus-dummy-pw-for-timing-only")
+
+
 def create_app(spine, cfg) -> FastAPI:
     app = FastAPI()
     app.state.spine = spine
@@ -123,16 +132,18 @@ def create_app(spine, cfg) -> FastAPI:
         row = spine.read().execute(
             "SELECT pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
-        if row is None or not verify_password(password, row["pw_hash"]):
+        if row is None:
+            verify_password(password, _DUMMY_PW_HASH)  # constant-time-ish: keep latency ~equal
+            raise HTTPException(401, "invalid credentials")
+        if not verify_password(password, row["pw_hash"]):
             raise HTTPException(401, "invalid credentials")
         token = jwt_encode({"sub": username, "role": row["role"]}, cfg.jwt_secret)
         # ponytail: CSRF for POST /obveze/mark deferred — SameSite=Lax already blocks
         # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
         # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
         resp = JSONResponse({"token": token}) if is_json else RedirectResponse("/obveze", status_code=303)
-        # ponytail: secure=True omitted — v1 is LAN/plain-HTTP. Upgrade path: set
-        # secure=True (or drive it from cfg, e.g. cfg.https_only) once served over HTTPS.
-        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400)
+        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400,
+                         secure=cfg.https_only)
         return resp
 
     @app.get("/v1/models")
@@ -276,7 +287,9 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except (LLMUnavailable, LLMError) as e:
-            raise HTTPException(503, str(e)) from e
+            # ponytail: don't surface provider error bodies to the client — could
+            # contain upstream noise/internals. Detail stays server-side only.
+            raise HTTPException(503, "Greška LLM providera.") from e
         return {"translation": text}
 
     @app.get("/features")

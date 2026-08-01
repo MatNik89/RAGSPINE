@@ -22,6 +22,27 @@ def test_bad_login(spine, cfg):
     assert _client(spine, cfg).post("/auth/login",
         json={"username": "ana", "password": "x"}).status_code == 401
 
+def test_unknown_user_login_401(spine, cfg):
+    # Timing-side-channel fix: unknown username must still run the dummy
+    # hash comparison and return the same 401 as a wrong password.
+    add_user(spine, "ana", "tajna")
+    r = _client(spine, cfg).post("/auth/login",
+        json={"username": "ne-postoji", "password": "bilo-sto"})
+    assert r.status_code == 401
+
+def test_login_cookie_not_secure_by_default(spine, cfg):
+    add_user(spine, "ana", "tajna")
+    r = _client(spine, cfg).post("/auth/login", data={"username": "ana", "password": "tajna"},
+                                  follow_redirects=False)
+    assert "Secure" not in r.headers.get("set-cookie", "")
+
+def test_login_cookie_secure_when_https_only(spine, cfg):
+    add_user(spine, "ana", "tajna")
+    cfg.https_only = True
+    r = _client(spine, cfg).post("/auth/login", data={"username": "ana", "password": "tajna"},
+                                  follow_redirects=False)
+    assert "Secure" in r.headers.get("set-cookie", "")
+
 def test_malformed_login_body_400(spine, cfg):
     c = _client(spine, cfg)
     r = c.post("/auth/login", content="not json", headers={"content-type": "application/json"})

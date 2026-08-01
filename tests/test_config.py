@@ -17,3 +17,12 @@ def test_jwt_secret_persisted(tmp_path, monkeypatch):
     s1 = Config.from_env().jwt_secret
     s2 = Config.from_env().jwt_secret
     assert s1 == s2 and len(s1) >= 32
+
+def test_https_only_default_false(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    assert Config.from_env().https_only is False
+
+def test_https_only_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("RAGSPINE_HTTPS_ONLY", "1")
+    assert Config.from_env().https_only is True

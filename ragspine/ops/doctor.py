@@ -119,9 +119,19 @@ _CHECKS = [
     _check_ollama, _check_ocr_server, _check_optional_deps, _check_db_writable,
 ]
 
+# ponytail: only these gate the CLI exit code — ollama/ocr_server/ntp/luks/
+# optional_deps are informational (e.g. ollama down is normal on a
+# cloud-LLM/OAuth host, not a real failure). Upgrade path: per-check
+# severity field if more nuance is needed later.
+REQUIRED_CHECKS = {"python_version", "disk_space", "db_writable"}
+
 
 def run(cfg) -> list[dict]:
     return [fn(cfg) for fn in _CHECKS]
+
+
+def required_ok(results: list[dict]) -> bool:
+    return all(r["ok"] for r in results if r["check"] in REQUIRED_CHECKS)
 
 
 def format_report(results: list[dict]) -> str:

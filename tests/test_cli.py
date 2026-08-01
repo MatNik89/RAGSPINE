@@ -1,4 +1,12 @@
 from ragspine.__main__ import main
+from ragspine.ops import doctor
+
+def test_doctor_exit_0_despite_ollama_down(tmp_path, monkeypatch, capsys):
+    # Ollama unreachable is expected on a non-Ollama (cloud-LLM/OAuth) host and
+    # must not hard-fail `ragspine doctor`'s exit code.
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(doctor, "_ollama_alive", lambda cfg: False)
+    assert main(["doctor"]) == 0
 
 def test_auth_add_and_doctor(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))

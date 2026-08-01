@@ -36,3 +36,17 @@ def test_chain(spine):
     assert sec.chain_verify(spine)
     with spine.write() as c: c.execute("UPDATE hash_chain SET event='tamper' WHERE id=1")
     assert not sec.chain_verify(spine)
+
+def test_chain_append_atomic_via_begin_immediate(spine):
+    # Two sequential appends must chain (second's prev_hash == first's hash) —
+    # the BEGIN IMMEDIATE transaction must not break normal single-process use.
+    h1 = sec.chain_append(spine, "e1")
+    h2 = sec.chain_append(spine, "e2")
+    assert h1 != h2
+    rows = spine.read().execute(
+        "SELECT event, prev_hash, hash FROM hash_chain ORDER BY id ASC"
+    ).fetchall()
+    assert rows[0]["hash"] == h1
+    assert rows[1]["prev_hash"] == h1
+    assert rows[1]["hash"] == h2
+    assert sec.chain_verify(spine)

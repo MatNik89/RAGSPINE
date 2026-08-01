@@ -43,7 +43,7 @@ def _cmd_doctor(args) -> int:
     cfg = get_config()
     results = doctor.run(cfg)
     print(doctor.format_report(results))
-    return 0 if all(r["ok"] for r in results) else 1
+    return 0 if doctor.required_ok(results) else 1
 
 
 def _cmd_health(args) -> int:

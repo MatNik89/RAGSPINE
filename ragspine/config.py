@@ -22,6 +22,7 @@ class Config:
     imap_pass: str
     jwt_secret: str
     redact_pii: bool
+    https_only: bool
     egress_allow: list[str]
 
     @classmethod
@@ -52,6 +53,7 @@ class Config:
             nas_root=e("RAGSPINE_NAS_ROOT", ""), imap_host=e("RAGSPINE_IMAP_HOST", ""),
             imap_user=e("RAGSPINE_IMAP_USER", ""), imap_pass=e("RAGSPINE_IMAP_PASS", ""),
             jwt_secret=secret, redact_pii=e("RAGSPINE_REDACT_PII", "0") == "1",
+            https_only=e("RAGSPINE_HTTPS_ONLY", "0") == "1",
             egress_allow=[h for h in e("RAGSPINE_EGRESS_ALLOW", "").split(",") if h])
 
 _cfg: Config | None = None

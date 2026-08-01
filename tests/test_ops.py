@@ -39,6 +39,23 @@ def test_format_report_is_string(cfg):
     assert "python_version" in report
 
 
+def test_required_ok_ignores_ollama_down(cfg):
+    # ollama unreachable is normal on a cloud-LLM/OAuth host — must not fail the gate.
+    results = doctor.run(cfg)
+    for r in results:
+        if r["check"] == "ollama":
+            r["ok"] = False
+    assert doctor.required_ok(results) is True
+
+
+def test_required_ok_false_when_required_check_fails(cfg):
+    results = doctor.run(cfg)
+    for r in results:
+        if r["check"] == "db_writable":
+            r["ok"] = False
+    assert doctor.required_ok(results) is False
+
+
 def test_health_check_fresh_spine(spine, cfg):
     result = health.check(spine, cfg)
     assert result["disk_free_mb"] > 0
