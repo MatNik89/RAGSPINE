@@ -71,6 +71,17 @@ def _cmd_auth(args) -> int:
     return 0
 
 
+def _cmd_digest(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import digest
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    print(digest.build_digest(spine, cfg))
+    return 0
+
+
 def _cmd_daemon(args) -> int:
     import signal
     import threading
@@ -221,6 +232,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("setup").set_defaults(func=_cmd_setup)
     sub.add_parser("daemon").set_defaults(func=_cmd_daemon)
+    sub.add_parser("digest").set_defaults(func=_cmd_digest)
     sub.add_parser("eval").set_defaults(func=_cmd_eval)
     sub.add_parser("stats").set_defaults(func=_cmd_stats)
 

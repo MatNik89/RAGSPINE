@@ -5,7 +5,7 @@ from datetime import date
 
 from ragspine.business import expiry, kalendar, obveze
 from ragspine.docs import imap_fetch
-from ragspine.ops import health
+from ragspine.ops import digest, health
 from ragspine.ops.scheduler import Job
 from ragspine.web import watchlist
 
@@ -79,3 +79,6 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))
+    sched.register(
+        Job(name="digest", fn=digest.digest_job, interval_s=0, daily=True, at_hour=sched.cfg.digest_hour)
+    )
