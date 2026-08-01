@@ -68,6 +68,7 @@ h2{font-size:1.05rem;margin:1.5rem 0 .5rem}
 .tile-num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:1.8rem;font-weight:600;
   color:var(--text);display:block;line-height:1.2}
 .tile-label{color:var(--muted);font-size:.8rem;margin-top:.25rem;display:block}
+.tile-num.bad{color:var(--bad)}
 
 /* ledger table */
 table.ledger{width:100%;border-collapse:collapse}
@@ -198,16 +199,152 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 </html>"""
 
 
-def home_page() -> str:
-    body = """<h1>Dobrodošli u RAGSPINE</h1>
-<p>Asistent za knjigovodstvo — odaberite alat:</p>
+_DASHBOARD_JS = """
+function $(id) { return document.getElementById(id); }
+
+function setNum(id, value) {
+  $(id).textContent = String(value);
+}
+
+function emptyMsg(container, text) {
+  const p = document.createElement('p');
+  p.className = 'meta';
+  p.textContent = text;
+  container.appendChild(p);
+}
+
+function dueChip(row) {
+  const chip = document.createElement('span');
+  chip.className = 'chip ' + (row.state || '');
+  const d = row.days_left;
+  chip.textContent = d < 0 ? ('kasni ' + Math.abs(d) + ' d.') : d === 0 ? 'danas' : ('za ' + d + ' d.');
+  return chip;
+}
+
+function renderDated(container, rows, emptyText, descOf, dateField) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, emptyText); return; }
+  rows.forEach(function (r) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row ' + (r.state || '');
+    const desc = document.createElement('span');
+    desc.textContent = descOf(r);
+    row.appendChild(desc);
+    row.appendChild(dueChip(r));
+    const due = document.createElement('span');
+    due.className = 'due';
+    due.textContent = r[dateField];
+    row.appendChild(due);
+    container.appendChild(row);
+  });
+}
+
+function renderUnsent(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Sve obveze poslane \\uD83C\\uDF89'); return; }
+  rows.forEach(function (r) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row bad';
+    const a = document.createElement('a');
+    a.href = '/ui/klijent/' + r.client_id;
+    a.textContent = r.client;
+    row.appendChild(a);
+    const chip = document.createElement('span');
+    chip.className = 'chip bad';
+    chip.textContent = r.kind;
+    row.appendChild(chip);
+    container.appendChild(row);
+  });
+}
+
+function renderNotifications(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Nema novih obavijesti.'); return; }
+  rows.forEach(function (r) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row';
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = r.kind;
+    row.appendChild(chip);
+    const body = document.createElement('span');
+    body.textContent = r.body;
+    row.appendChild(body);
+    container.appendChild(row);
+  });
+}
+
+async function loadDashboard() {
+  try {
+    const res = await fetch('/dashboard.json', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+
+    setNum('stat-clients', data.stats.active_clients);
+    setNum('stat-deadlines', data.stats.deadlines_this_week);
+    setNum('stat-unsent', data.unsent_obligations.length);
+    setNum('stat-notifications', data.stats.unseen_notifications);
+    $('stat-unsent').classList.toggle('bad', data.unsent_obligations.length > 0);
+
+    renderDated($('deadlines-list'), data.deadlines, 'Nema rokova u sljedećih 7 dana.',
+      function (r) { return r.description + ' (' + r.kind + ')'; }, 'due');
+    renderUnsent($('unsent-list'), data.unsent_obligations);
+    renderDated($('expiring-list'), data.expiring, 'Nema isteka dokumenata u sljedećih 30 dana.',
+      function (r) { return r.label + ' — ' + r.client_name; }, 'expires');
+    renderNotifications($('notifications-list'), data.notifications);
+
+    const peer = $('peer-summary');
+    peer.textContent = '';
+    if (data.peer.count > 0) {
+      peer.textContent = data.peer.count + ' neslaganja u knjiženju u zadnjih 30 dana.';
+    } else {
+      emptyMsg(peer, 'Nema neslaganja u knjiženju.');
+    }
+  } catch (err) {
+    const banner = $('dashboard-error');
+    banner.textContent = 'Greška pri učitavanju nadzorne ploče. Osvježite stranicu.';
+    banner.style.display = 'block';
+  }
+}
+
+loadDashboard();
+"""
+
+
+def dashboard_page() -> str:
+    body = f"""<h1>Nadzorna ploča</h1>
+<p class="meta">Što danas moram — pregled rokova, obveza i obavijesti.</p>
 <div class="grid">
-  <a class="card" href="/ui/chat"><h2>Chat</h2><p>Postavite pitanje asistentu.</p></a>
-  <a class="card" href="/ui/upute"><h2>Upute</h2><p>Interne procedure (SOP) — kreiranje i pregled.</p></a>
-  <a class="card" href="/obveze"><h2>Obveze</h2><p>PDV, doprinosi i ostale periodičke obveze.</p></a>
-  <a class="card" href="/ui/rokovi"><h2>Rokovi</h2><p>Nadolazeći rokovi i istekle stavke.</p></a>
-</div>"""
-    return page_shell("Početna", body, active="home")
+  <div class="tile"><span class="tile-num" id="stat-clients">–</span><span class="tile-label">Aktivni klijenti</span></div>
+  <div class="tile"><span class="tile-num" id="stat-deadlines">–</span><span class="tile-label">Rokovi ovaj tjedan</span></div>
+  <div class="tile"><span class="tile-num" id="stat-unsent">–</span><span class="tile-label">Neposlane obveze</span></div>
+  <div class="tile"><span class="tile-num" id="stat-notifications">–</span><span class="tile-label">Nepročitane obavijesti</span></div>
+</div>
+<div id="dashboard-error" class="chip bad" style="display:none;margin-top:1rem"></div>
+<div class="grid">
+  <div class="card">
+    <h2>Rokovi (7 dana)</h2>
+    <div id="deadlines-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Neposlane obveze</h2>
+    <div id="unsent-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Istek dokumenata (30 dana)</h2>
+    <div id="expiring-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Nove obavijesti</h2>
+    <div id="notifications-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Neslaganja u knjiženju</h2>
+    <div id="peer-summary"><p class="meta">Učitavanje…</p></div>
+  </div>
+</div>
+<script>{_DASHBOARD_JS}</script>"""
+    return page_shell("Nadzorna ploča", body, active="home")
 
 
 _CHAT_JS = """

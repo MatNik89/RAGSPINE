@@ -33,7 +33,7 @@ def test_home_page_authed_shows_nav(spine, cfg):
     assert "/ui/chat" in r.text
     assert "/ui/upute" in r.text
     assert "/obveze" in r.text
-    assert "Dobrodošli" in r.text or "Početna" in r.text
+    assert "Nadzorna ploča" in r.text
 
 
 def test_home_page_no_auth_redirects_to_login(spine, cfg):

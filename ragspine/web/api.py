@@ -46,7 +46,7 @@ from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
-from ragspine.web.templates_ui import chat_page, home_page, upute_page
+from ragspine.web.templates_ui import chat_page, dashboard_page, upute_page
 
 
 class ChatBody(BaseModel):
@@ -322,7 +322,11 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return home_page()
+        return dashboard_page()
+
+    @app.get("/dashboard.json")
+    def dashboard_json(user: str = Depends(require_user_web)):
+        return dashboard.home_data(spine)
 
     @app.get("/ui/chat", response_class=HTMLResponse)
     def ui_chat(request: Request):
