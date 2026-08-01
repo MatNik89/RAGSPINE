@@ -31,6 +31,7 @@ from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
 from ragspine.ops import doctor, health, nis2
 from ragspine.rag import pipeline
+from ragspine.rag import versioning
 from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
 from ragspine.web import learn  # noqa: F401 — register learn lane handler
 from ragspine.web import watchlist
@@ -152,6 +153,15 @@ class FeatureBody(BaseModel):
 class Nis2Body(BaseModel):
     control_id: str
     status: str
+
+
+class KnowledgeStatusBody(BaseModel):
+    status: str
+
+
+class KnowledgeSupersedeBody(BaseModel):
+    old_doc_id: int
+    new_doc_id: int
 
 
 class BrowserResultBody(BaseModel):
@@ -527,6 +537,37 @@ def create_app(spine, cfg) -> FastAPI:
     def nis2_set(body: Nis2Body, user: str = Depends(require_user_web)):
         nis2.set_status(spine, body.control_id, body.status)
         return {"id": body.control_id, "status": body.status}
+
+    @app.post("/knowledge/{doc_id}/status")
+    def knowledge_set_status(doc_id: int, body: KnowledgeStatusBody, user: str = Depends(require_user_web)):
+        try:
+            versioning.set_status(spine, doc_id, body.status, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"doc_id": doc_id, "status": body.status}
+
+    @app.post("/knowledge/supersede")
+    def knowledge_supersede(body: KnowledgeSupersedeBody, user: str = Depends(require_user_web)):
+        try:
+            versioning.supersede(spine, body.old_doc_id, body.new_doc_id, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"old_doc_id": body.old_doc_id, "new_doc_id": body.new_doc_id}
+
+    @app.get("/knowledge/{doc_id}/versions")
+    def knowledge_versions(doc_id: int, user: str = Depends(require_user_web)):
+        try:
+            return versioning.version_history(spine, doc_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/knowledge/{doc_id}/promote")
+    def knowledge_promote(doc_id: int, user: str = Depends(require_user_web)):
+        try:
+            versioning.promote_draft(spine, doc_id, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"doc_id": doc_id, "status": "active"}
 
     @app.get("/browser/cmd")
     def browser_cmd(request: Request, user: str = Depends(require_user_web)):

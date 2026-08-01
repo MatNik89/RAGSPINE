@@ -166,8 +166,24 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
     cat = (source_row["category"] or "").strip()
     summary = f"[{cat}] Promjena na {source_row['url']}" if cat else f"Promjena na {source_row['url']}"
 
-    ingest_text(spine, text, title=source_row["url"], source_url=source_row["url"],
-                client_id=source_row["client_id"])
+    prior = spine.read().execute(
+        "SELECT id FROM documents WHERE source_url=? AND status='active'", (source_row["url"],)
+    ).fetchone()
+
+    new_doc_id = ingest_text(spine, text, title=source_row["url"], source_url=source_row["url"],
+                              client_id=source_row["client_id"])
+
+    if prior is not None and new_doc_id is not None:
+        try:
+            from ragspine.rag import versioning
+            versioning.supersede(spine, prior["id"], new_doc_id)
+        except Exception:
+            # best-effort: never let versioning break the watch run
+            try:
+                with spine.write() as c:
+                    c.execute("UPDATE documents SET status='superseded' WHERE id=?", (prior["id"],))
+            except Exception:
+                pass
 
     with spine.write() as c:
         for desc, iso in dates:

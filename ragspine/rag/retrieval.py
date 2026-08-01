@@ -56,6 +56,7 @@ def search(spine, query: str, k: int = 8, freshness: bool = True) -> list[Hit]:
         freshness_sql = (
             " AND (d.stale IS NULL OR d.stale=0)"
             " AND (d.valid_until IS NULL OR d.valid_until='' OR d.valid_until >= date('now'))"
+            " AND (d.status IS NULL OR d.status='active')"
         )
     rows = conn.execute(
         f"""SELECT c.id AS chunk_id, c.doc_id, c.title, c.text, d.doc_type
