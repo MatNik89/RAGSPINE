@@ -24,6 +24,8 @@ class Config:
     redact_pii: bool
     https_only: bool
     egress_allow: list[str]
+    apprise_urls: list[str]
+    digest_hour: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -54,7 +56,9 @@ class Config:
             imap_user=e("RAGSPINE_IMAP_USER", ""), imap_pass=e("RAGSPINE_IMAP_PASS", ""),
             jwt_secret=secret, redact_pii=e("RAGSPINE_REDACT_PII", "0") == "1",
             https_only=e("RAGSPINE_HTTPS_ONLY", "0") == "1",
-            egress_allow=[h for h in e("RAGSPINE_EGRESS_ALLOW", "").split(",") if h])
+            egress_allow=[h for h in e("RAGSPINE_EGRESS_ALLOW", "").split(",") if h],
+            apprise_urls=[u for u in e("RAGSPINE_APPRISE_URLS", "").split(",") if u],
+            digest_hour=int(e("RAGSPINE_DIGEST_HOUR", "7")))
 
 _cfg: Config | None = None
 def get_config() -> Config:

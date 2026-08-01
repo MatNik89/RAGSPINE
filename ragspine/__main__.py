@@ -71,6 +71,32 @@ def _cmd_auth(args) -> int:
     return 0
 
 
+def _cmd_daemon(args) -> int:
+    import signal
+    import threading
+
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.ops.scheduler import build_default_scheduler
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    sched = build_default_scheduler(spine, cfg)
+    stop_event = threading.Event()
+
+    def _handle(signum, frame):
+        stop_event.set()
+
+    signal.signal(signal.SIGINT, _handle)
+    signal.signal(signal.SIGTERM, _handle)
+
+    poll_s = 30
+    print(f"RAGSPINE daemon pokrenut, poll {poll_s}s, Ctrl-C za stop")
+    sched.run(poll_s=poll_s, stop_event=stop_event)
+    print("RAGSPINE daemon zaustavljen")
+    return 0
+
+
 def _cmd_setup(args) -> int:
     from ragspine.config import get_config
     from ragspine.core.spine import init_spine
@@ -194,6 +220,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("setup").set_defaults(func=_cmd_setup)
+    sub.add_parser("daemon").set_defaults(func=_cmd_daemon)
     sub.add_parser("eval").set_defaults(func=_cmd_eval)
     sub.add_parser("stats").set_defaults(func=_cmd_stats)
 
