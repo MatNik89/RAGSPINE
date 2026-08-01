@@ -5,7 +5,7 @@ from datetime import date
 
 from ragspine.business import expiry, kalendar, obveze
 from ragspine.docs import imap_fetch
-from ragspine.ops import digest, health
+from ragspine.ops import digest, health, reminders_dump
 from ragspine.ops.scheduler import Job
 from ragspine.web import watchlist
 
@@ -71,6 +71,11 @@ def health_job(spine, cfg) -> None:
     health.check(spine, cfg)
 
 
+def reminders_dump_job(spine, cfg) -> None:
+    result = reminders_dump.dump(spine, cfg)
+    logger.info("reminders_dump_job: wrote %s (%d items)", result["path"], result["count"])
+
+
 def register_defaults(sched) -> None:
     sched.register(Job(name="watchlist", fn=watchlist_job, interval_s=3600))
     sched.register(Job(name="imap", fn=imap_job, interval_s=300))
@@ -82,3 +87,4 @@ def register_defaults(sched) -> None:
     sched.register(
         Job(name="digest", fn=digest.digest_job, interval_s=0, daily=True, at_hour=sched.cfg.digest_hour)
     )
+    sched.register(Job(name="reminders_dump", fn=reminders_dump_job, interval_s=3600))

@@ -191,17 +191,35 @@ def _cmd_ocr(args) -> int:
 
 
 def _cmd_reminders(args) -> int:
+    import re
+
     from ragspine.config import get_config
     from ragspine.core.spine import init_spine
 
-    spine = init_spine(get_config().db_path)
-    if getattr(args, "reminders_cmd", None) == "add":
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    reminders_cmd = getattr(args, "reminders_cmd", None)
+    if reminders_cmd == "add":
+        from ragspine.business.nldate import parse_date
+
         user = os.environ.get("RAGSPINE_USER", "sustav")
+        due = parse_date(args.due)
+        if due is None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.due):
+            due = args.due  # already ISO — parse_date only understands NL/dot dates
+        if due is None:
+            print("Ne razumijem datum")
+            return 1
         with spine.write() as c:
             c.execute(
                 "INSERT INTO reminders(user, body, due) VALUES(?,?,?)",
-                (user, args.text, args.due),
+                (user, args.text, due),
             )
+        return 0
+    if reminders_cmd == "dump":
+        from ragspine.ops.reminders_dump import dump
+
+        result = dump(spine, cfg)
+        print(result["path"])
         return 0
     rows = spine.read().execute(
         "SELECT id, user, body, due FROM reminders WHERE done=0 ORDER BY due"
@@ -241,6 +259,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_reminders_add = rem_sub.add_parser("add")
     p_reminders_add.add_argument("text")
     p_reminders_add.add_argument("due")
+    rem_sub.add_parser("dump")
     p_reminders.set_defaults(func=_cmd_reminders)
 
     p_ingest = sub.add_parser("ingest")

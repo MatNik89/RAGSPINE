@@ -78,4 +78,7 @@ def test_register_defaults_registers_all_jobs(spine, cfg):
     sched = Scheduler(spine, cfg)
     jobs.register_defaults(sched)
     names = {j.name for j in sched.jobs}
-    assert names == {"watchlist", "imap", "deadlines", "expiry", "obveze", "stale", "health", "digest"}
+    assert names == {
+        "watchlist", "imap", "deadlines", "expiry", "obveze", "stale", "health",
+        "digest", "reminders_dump",
+    }

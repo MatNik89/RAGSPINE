@@ -15,6 +15,7 @@ from ragspine.business import feedback_learn
 from ragspine.business import kalendar
 from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lane handler
 from ragspine.business import monthly
+from ragspine.business import nldate
 from ragspine.business import notes
 from ragspine.business import obveze
 from ragspine.business import peer_compare
@@ -66,6 +67,11 @@ class ExpiryBody(BaseModel):
 class NoteBody(BaseModel):
     client_id: int
     body: str
+
+
+class ReminderBody(BaseModel):
+    body: str
+    when: str
 
 
 class MessagingSendBody(BaseModel):
@@ -312,6 +318,13 @@ def create_app(spine, cfg) -> FastAPI:
     def expiry_add(body: ExpiryBody, user: str = Depends(require_user_web)):
         item_id = expiry_mod.add(spine, body.client_id, body.kind, body.label, body.expires)
         return {"id": item_id}
+
+    @app.post("/reminders")
+    def reminders_add_nl(body: ReminderBody, user: str = Depends(require_user_web)):
+        result = nldate.set_reminder_nl(spine, user, body.body, body.when)
+        if "error" in result:
+            raise HTTPException(400, result["error"])
+        return result
 
     @app.get("/checklist")
     def checklist_worst(user: str = Depends(require_user_web)):
