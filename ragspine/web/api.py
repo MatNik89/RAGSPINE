@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ragspine.business import auditlog
 from ragspine.business import checklist
+from ragspine.business import cjenik
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
@@ -87,6 +88,16 @@ class ClientMessagingBody(BaseModel):
     consent: int
     channel: str = ""
     target: str = ""
+
+
+class CjenikIzracunBody(BaseModel):
+    client_id: int
+    employees: int = 0
+    extras: list[str] | None = None
+
+
+class PausalBody(BaseModel):
+    pausal_eur: float
 
 
 class KnjizenjeBody(BaseModel):
@@ -347,6 +358,33 @@ def create_app(spine, cfg) -> FastAPI:
                 (body.consent, body.channel, body.target, client_id),
             )
         return {"client_id": client_id, "consent": body.consent}
+
+    @app.get("/cjenik")
+    def cjenik_list(user: str = Depends(require_user_web)):
+        return cjenik.price_list(spine)
+
+    @app.post("/cjenik/izracun")
+    def cjenik_izracun(body: CjenikIzracunBody, user: str = Depends(require_user_web)):
+        try:
+            return cjenik.izracunaj_cijenu(spine, body.client_id, employees=body.employees,
+                                            extras=body.extras)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.get("/cjenik/usporedba/{client_id}")
+    def cjenik_usporedba(client_id: int, user: str = Depends(require_user_web)):
+        try:
+            return cjenik.usporedi_s_trzistem(spine, client_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/clients/{client_id}/pausal")
+    def client_pausal_set(client_id: int, body: PausalBody, user: str = Depends(require_user_web)):
+        if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
+            raise HTTPException(404, "nepoznat klijent")
+        with spine.write() as c:
+            c.execute("UPDATE clients SET pausal_eur=? WHERE id=?", (body.pausal_eur, client_id))
+        return {"client_id": client_id, "pausal_eur": body.pausal_eur}
 
     @app.get("/dashboard")
     def dashboard_stats(user: str = Depends(require_user_web)):

@@ -1,5 +1,5 @@
 """DB seed data: kontni plan, watch defaults, dnevnice rates (+ kalendar/quickref via all())."""
-from ragspine.business import dnevnice, kalendar, quickref
+from ragspine.business import cjenik, dnevnice, kalendar, quickref
 from ragspine.web.watchlist import DEFAULT_RSS, add_source
 
 # ponytail: plausible RRIF-style konto raspored (razred = prva znamenka), ne
@@ -132,4 +132,5 @@ def all(spine, year: int) -> dict:
         "quickref": quickref.seed(spine),
         "kalendar": kalendar.seed(spine, year),
         "dnevnice": dnevnice_seed(spine),
+        "cjenik": cjenik.seed(spine),
     }

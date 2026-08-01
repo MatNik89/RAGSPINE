@@ -109,7 +109,10 @@ class Spine:
                 "messaging_consent": "INTEGER DEFAULT 0",
                 "messaging_channel": "TEXT DEFAULT ''",
                 "messaging_target": "TEXT DEFAULT ''",
+                "pausal_eur": "REAL DEFAULT 0",
             })
+            _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
+            c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
 
     def _conn(self) -> sqlite3.Connection:
         c = getattr(self._local, "conn", None)
