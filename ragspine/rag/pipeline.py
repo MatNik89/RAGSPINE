@@ -4,7 +4,10 @@ import json
 from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import features, kb
-from ragspine.rag import authority, cache, citations, clarify, composer, conversation, retrieval, router, selfrag
+from ragspine.rag import (
+    authority, cache, citations, clarify, client_context, composer, conversation,
+    retrieval, router, selfrag,
+)
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
 # Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
@@ -114,6 +117,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
     report = citations.verify(result.text, hits)
+    resolved_client = None
     if not report.ok:
         final_text, confidence, sources = citations.IDK, 0, []
     else:
@@ -129,6 +133,17 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
                 final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
         except Exception:
             pass
+        # W3: if the query names a specific client, append that client's own
+        # SOPs/notes as a "Napomena" — best-effort, must never break the answer.
+        try:
+            resolved_client = client_context.resolve_client(spine, query)
+            if resolved_client is not None:
+                block = client_context.client_note_block(
+                    spine, resolved_client["id"], resolved_client["name"], query)
+                if block:
+                    final_text = f"{final_text}\n\n{block}"
+        except Exception:
+            resolved_client = None
 
     _record(spine, user, query, "chat", final_text, confidence, cache_write=not has_history)
     try:
@@ -137,4 +152,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
     if report.ok:
         kb.save(spine, query, final_text)
-    return _package(final_text, "chat", confidence, sources, False)
+    result = _package(final_text, "chat", confidence, sources, False)
+    if resolved_client is not None:
+        result["client"] = {"id": resolved_client["id"], "name": resolved_client["name"]}
+    return result
