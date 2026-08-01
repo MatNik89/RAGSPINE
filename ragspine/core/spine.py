@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS message_log(id INTEGER PRIMARY KEY, client_id INTEGER
   status TEXT, subject TEXT, body_preview TEXT, at TEXT DEFAULT (datetime('now')));
 """
 
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    """Idempotent ALTER-TABLE migration: adds any column in `columns` (name ->
+    'coltype [DEFAULT ...]') missing from `table`. CREATE TABLE IF NOT EXISTS
+    is a no-op on a pre-existing DB, so new columns need this to actually
+    reach deployed databases."""
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for col, coldef in columns.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
+
+
 class Spine:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -94,6 +105,11 @@ class Spine:
         self._wlock = threading.Lock()
         with self.write() as c:
             c.executescript(SCHEMA)
+            _ensure_columns(c, "clients", {
+                "messaging_consent": "INTEGER DEFAULT 0",
+                "messaging_channel": "TEXT DEFAULT ''",
+                "messaging_target": "TEXT DEFAULT ''",
+            })
 
     def _conn(self) -> sqlite3.Connection:
         c = getattr(self._local, "conn", None)

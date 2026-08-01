@@ -1,5 +1,5 @@
 import threading
-from ragspine.core.spine import Spine
+from ragspine.core.spine import Spine, _ensure_columns
 
 def _sp(tmp_path): return Spine(str(tmp_path / "t.db"))
 
@@ -18,6 +18,54 @@ def test_override_roundtrip(tmp_path):
     assert sp.get_override("kalkulator", "prirez.Split", "0") == "0"
     sp.set_override("kalkulator", "prirez.Split", "15.0", "https://porezna.hr")
     assert sp.get_override("kalkulator", "prirez.Split") == "15.0"
+
+def test_ensure_columns_adds_missing_column_with_default(tmp_path):
+    sp = _sp(tmp_path)
+    with sp.write() as c:
+        c.execute("CREATE TABLE widgets(id INTEGER PRIMARY KEY, name TEXT)")
+        c.execute("INSERT INTO widgets(id, name) VALUES(1, 'a')")
+        _ensure_columns(c, "widgets", {"flag": "INTEGER DEFAULT 0"})
+    cols = {r["name"] for r in sp.read().execute("PRAGMA table_info(widgets)").fetchall()}
+    assert "flag" in cols
+    row = sp.read().execute("SELECT flag FROM widgets WHERE id=1").fetchone()
+    assert row["flag"] == 0  # existing rows backfilled with the column default
+
+
+def test_ensure_columns_idempotent_noop_when_present(tmp_path):
+    sp = _sp(tmp_path)
+    with sp.write() as c:
+        c.execute("CREATE TABLE widgets(id INTEGER PRIMARY KEY, name TEXT, flag INTEGER DEFAULT 0)")
+        _ensure_columns(c, "widgets", {"flag": "INTEGER DEFAULT 0"})  # must not raise (duplicate column)
+    cols = [r["name"] for r in sp.read().execute("PRAGMA table_info(widgets)").fetchall()]
+    assert cols.count("flag") == 1
+
+
+def test_clients_messaging_columns_present(tmp_path):
+    # real deployment gap this closes: CREATE TABLE IF NOT EXISTS is a no-op
+    # on a pre-existing DB, so the migration must actually add these columns.
+    sp = _sp(tmp_path)
+    cols = {r["name"] for r in sp.read().execute("PRAGMA table_info(clients)").fetchall()}
+    assert {"messaging_consent", "messaging_channel", "messaging_target"} <= cols
+
+
+def test_migration_adds_messaging_columns_to_preexisting_db(tmp_path):
+    # simulates a real deployed DB created before the messaging columns existed:
+    # clients table pre-exists WITHOUT them, so CREATE TABLE IF NOT EXISTS alone
+    # would be a no-op — the migration must still add them on next Spine init.
+    import sqlite3
+    db_path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE clients(id INTEGER PRIMARY KEY, name TEXT, oib TEXT UNIQUE)")
+    conn.execute("INSERT INTO clients(id, name, oib) VALUES(1, 'Stari', '1')")
+    conn.commit(); conn.close()
+
+    sp = Spine(db_path)
+
+    cols = {r["name"] for r in sp.read().execute("PRAGMA table_info(clients)").fetchall()}
+    assert {"messaging_consent", "messaging_channel", "messaging_target"} <= cols
+    row = sp.read().execute("SELECT messaging_consent FROM clients WHERE id=1").fetchone()
+    assert row["messaging_consent"] == 0
+
 
 def test_concurrent_writes(tmp_path):
     sp = _sp(tmp_path)

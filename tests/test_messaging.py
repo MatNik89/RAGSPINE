@@ -111,6 +111,24 @@ def test_message_log_body_preview_redacted_and_truncated(spine, cfg):
     assert len(row["body_preview"]) <= 120
 
 
+def test_message_log_body_preview_redacts_pii_straddling_truncation_cut(spine, cfg):
+    # OIB positioned so its 11 digits straddle the old truncate-then-redact
+    # cut at char 120 — redact must run on the FULL body before truncation,
+    # otherwise the split fragment slips past the regex unredacted.
+    cid = _client(spine, "Granica", "31", consent=0)
+    prefix = " " * 113  # word-boundary space so \b matches; OIB starts at 113, ends at 124 (past 120)
+    body = prefix + VALID_OIB + " ostatak teksta koji se odrezuje"
+
+    messaging.send_to_client(spine, cfg, cid, "Podsjetnik", body)
+
+    row = spine.read().execute(
+        "SELECT body_preview FROM message_log WHERE client_id=?", (cid,)
+    ).fetchone()
+    assert VALID_OIB not in row["body_preview"]
+    assert VALID_OIB[:5] not in row["body_preview"]  # no raw digit fragment either
+    assert len(row["body_preview"]) <= 120
+
+
 def test_consent_endpoint_then_send_no_longer_skipped(spine, cfg):
     cid = _client(spine, "Naknadni pristanak", "40", consent=0)
     c = TestClient(create_app(spine, cfg))

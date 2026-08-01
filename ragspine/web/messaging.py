@@ -16,11 +16,14 @@ def render_message(subject: str, body: str) -> str:
 
 
 def _log(spine, client_id: int, channel: str, status: str, subject: str, body: str) -> None:
-    preview = security.redact_pii(body[:120])
+    # redact THEN truncate — truncating first can cut a PII token in half and
+    # let the fragment through the regex unredacted.
+    subject_r = security.redact_pii(subject)
+    preview = security.redact_pii(body)[:120]
     with spine.write() as c:
         c.execute(
             "INSERT INTO message_log(client_id, channel, status, subject, body_preview) VALUES(?,?,?,?,?)",
-            (client_id, channel, status, subject, preview),
+            (client_id, channel, status, subject_r, preview),
         )
 
 
