@@ -54,11 +54,44 @@ def test_submit_draft_requires_draft_status(spine):
 
 def test_approve_draft_requires_submitted_status(spine):
     sop_id = sop.create_sop(spine, "ana", "Naslov", "kat", "sadržaj postupka o PDV-u")
+    docs_before = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
     with pytest.raises(ValueError):
         sop.approve_draft(spine, sop_id, "iva")  # still draft, not submitted
     # no ingest happened
     hits = retrieval.search(spine, "sadržaj postupka")
     assert hits == []
+    docs_after = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
+    assert docs_after == docs_before
+
+
+def test_approve_already_approved_raises_no_double_ingest(spine):
+    sop_id = sop.create_sop(spine, "ana", "Naslov jedinstven", "kat", "jedinstveni sadržaj postupka")
+    sop.submit_draft(spine, sop_id, "ana")
+    sop.approve_draft(spine, sop_id, "iva")
+    docs_before = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
+    with pytest.raises(ValueError):
+        sop.approve_draft(spine, sop_id, "iva")  # already approved
+    docs_after = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
+    assert docs_after == docs_before
+
+
+def test_resubmit_after_reject_works(spine):
+    sop_id = sop.create_sop(spine, "ana", "Naslov", "kat", "prvobitni sadržaj")
+    sop.submit_draft(spine, sop_id, "ana")
+    sop.reject_draft(spine, sop_id, "iva", reason="nedovoljno detalja")
+    sop.update_draft(spine, sop_id, "ana", "popravljeni sadržaj")
+    sop.submit_draft(spine, sop_id, "ana")  # resubmission after fixing rejection
+    assert _row(spine, sop_id)["status"] == "submitted"
+    doc_id = sop.approve_draft(spine, sop_id, "iva")
+    assert doc_id is not None
+
+
+def test_submit_from_approved_still_refused(spine):
+    sop_id = sop.create_sop(spine, "ana", "Naslov", "kat", "sadržaj")
+    sop.submit_draft(spine, sop_id, "ana")
+    sop.approve_draft(spine, sop_id, "iva")
+    with pytest.raises(ValueError):
+        sop.submit_draft(spine, sop_id, "ana")  # approved is not resubmittable
 
 
 def test_reject_draft_requires_submitted_status(spine):

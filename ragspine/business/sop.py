@@ -7,6 +7,7 @@ from ragspine.docs.ingest import ingest_text
 
 STATUSES = ("draft", "submitted", "approved", "rejected")
 EDITABLE_STATUSES = ("draft", "rejected")
+SUBMITTABLE_STATUSES = ("draft", "rejected")
 
 SOP_TEMPLATE = """# {title}
 
@@ -64,20 +65,25 @@ def create_sop(spine, author: str, title: str, category: str, content: str,
 
 def submit_draft(spine, sop_id: int, author: str) -> None:
     row = _require_row(spine, sop_id)
-    if row["status"] != "draft":
-        raise ValueError(f"SOP {sop_id} nije draft (status={row['status']!r})")
+    if row["status"] not in SUBMITTABLE_STATUSES:
+        raise ValueError(f"SOP {sop_id} nije draft/rejected (status={row['status']!r})")
     with spine.write() as c:
         c.execute(
             "UPDATE sop_pages SET status='submitted', updated_at=datetime('now') WHERE id=?",
             (sop_id,),
         )
-    spine.audit(author, "sop_submit", f"sop:{sop_id}")
+    action = "sop_resubmit" if row["status"] == "rejected" else "sop_submit"
+    spine.audit(author, action, f"sop:{sop_id}")
 
 
 def approve_draft(spine, sop_id: int, reviewer: str) -> int | None:
     row = _require_row(spine, sop_id)
     if row["status"] != "submitted":
         raise ValueError(f"SOP {sop_id} nije submitted (status={row['status']!r})")
+    # ponytail: ingest + status UPDATE aren't in one transaction — if the UPDATE
+    # failed after a successful ingest, an orphan corpus doc could remain.
+    # Acceptable fail-closed (worst case: unreferenced searchable doc, no data
+    # loss); upgrade path is wrapping both in a single spine.write() block.
     doc_id = ingest_text(spine, row["content"], title=f"SOP: {row['title']}",
                           doc_type="sop", client_id=row["client_id"])
     with spine.write() as c:
