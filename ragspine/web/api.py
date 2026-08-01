@@ -15,6 +15,7 @@ from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
 from ragspine.business import kalendar
+from ragspine.business import karton as karton_mod
 from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lane handler
 from ragspine.business import monthly
 from ragspine.business import nldate
@@ -46,7 +47,7 @@ from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
-from ragspine.web.templates_ui import chat_page, dashboard_page, upute_page
+from ragspine.web.templates_ui import chat_page, dashboard_page, klijent_page, klijenti_page, upute_page
 
 
 class ChatBody(BaseModel):
@@ -344,6 +345,22 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return upute_page(sop_mod.list_pending(spine))
 
+    @app.get("/ui/klijenti", response_class=HTMLResponse)
+    def ui_klijenti(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return klijenti_page()
+
+    @app.get("/ui/klijent/{client_id}", response_class=HTMLResponse)
+    def ui_klijent(request: Request, client_id: int):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return klijent_page(client_id)
+
     @app.get("/obveze", response_class=HTMLResponse)
     def obveze_page(request: Request, kind: str = "PDV", period: str | None = None):
         try:
@@ -512,6 +529,13 @@ def create_app(spine, cfg) -> FastAPI:
     def client_documents_list(client_id: int, user: str = Depends(require_user_web)):
         try:
             return onboarding.list_documents(spine, cfg, client_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.get("/clients/{client_id}/karton.json")
+    def client_karton(client_id: int, user: str = Depends(require_user_web)):
+        try:
+            return karton_mod.karton_data(spine, cfg, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 

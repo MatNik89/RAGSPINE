@@ -527,6 +527,435 @@ document.getElementById('sop-form').addEventListener('submit', async function (e
 """
 
 
+_KLIJENTI_JS = """
+function $(id) { return document.getElementById(id); }
+
+let ALL_CLIENTS = [];
+
+function renderRows(rows) {
+  const tbody = $('clients-tbody');
+  tbody.textContent = '';
+  if (!rows.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.className = 'meta';
+    td.textContent = ALL_CLIENTS.length
+      ? 'Nema klijenata koji odgovaraju pretrazi.'
+      : 'Još nema klijenata. Dodaj prvog.';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  rows.forEach(function (r) {
+    const tr = document.createElement('tr');
+
+    const tdName = document.createElement('td');
+    const a = document.createElement('a');
+    a.href = '/ui/klijent/' + r.id;
+    a.textContent = r.name;
+    tdName.appendChild(a);
+    tr.appendChild(tdName);
+
+    const tdOib = document.createElement('td');
+    tdOib.style.fontFamily = 'var(--font-mono)';
+    tdOib.textContent = r.oib || '–';
+    tr.appendChild(tdOib);
+
+    const tdPdv = document.createElement('td');
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = r.pdv_status || '–';
+    tdPdv.appendChild(chip);
+    tr.appendChild(tdPdv);
+
+    const tdInd = document.createElement('td');
+    tdInd.textContent = r.industry || '–';
+    tr.appendChild(tdInd);
+
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadClients() {
+  try {
+    const res = await fetch('/clients', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    ALL_CLIENTS = await res.json();
+    renderRows(ALL_CLIENTS);
+  } catch (err) {
+    const tbody = $('clients-tbody');
+    tbody.textContent = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 4;
+    td.textContent = 'Greška pri učitavanju klijenata. Osvježite stranicu.';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+}
+
+$('search').addEventListener('input', function () {
+  const term = $('search').value.trim().toLowerCase();
+  if (!term) { renderRows(ALL_CLIENTS); return; }
+  renderRows(ALL_CLIENTS.filter(function (r) {
+    return (r.name || '').toLowerCase().includes(term) || (r.oib || '').includes(term);
+  }));
+});
+
+$('toggle-add').addEventListener('click', function () {
+  const f = $('add-form');
+  f.style.display = f.style.display === 'none' ? 'flex' : 'none';
+});
+
+$('add-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  $('add-error').style.display = 'none';
+  const name = $('f-name').value.trim();
+  if (!name) return;
+  const body = {
+    name: name,
+    oib: $('f-oib').value.trim(),
+    email: $('f-email').value.trim(),
+    phone: $('f-phone').value.trim(),
+    industry: $('f-industry').value.trim(),
+    pdv_status: $('f-pdv').value,
+    pausal_eur: parseFloat($('f-pausal').value) || 0,
+  };
+  try {
+    const res = await fetch('/clients', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.status;
+      try { detail = (await res.json()).detail || detail; } catch (e2) {}
+      $('add-error').textContent = 'Greška: ' + detail;
+      $('add-error').style.display = 'block';
+      return;
+    }
+    const data = await res.json();
+    location.href = '/ui/klijent/' + data.id;
+  } catch (err) {
+    $('add-error').textContent = 'Greška u komunikaciji sa serverom.';
+    $('add-error').style.display = 'block';
+  }
+});
+
+loadClients();
+"""
+
+
+def klijenti_page() -> str:
+    body = f"""<h1>Klijenti</h1>
+<p class="meta">Svi klijenti ureda — otvori karton za pun pregled.</p>
+<div style="display:flex;gap:.5rem;align-items:center;margin:1rem 0;flex-wrap:wrap">
+  <input type="text" id="search" placeholder="Pretraži po imenu ili OIB-u...">
+  <button type="button" class="btn" id="toggle-add">Dodaj klijenta</button>
+</div>
+<form id="add-form" class="stack" style="display:none;margin-bottom:1.5rem">
+  <label for="f-name">Naziv</label>
+  <input type="text" id="f-name" required>
+  <label for="f-oib">OIB</label>
+  <input type="text" id="f-oib" placeholder="11 znamenki">
+  <label for="f-email">Email</label>
+  <input type="email" id="f-email">
+  <label for="f-phone">Telefon</label>
+  <input type="text" id="f-phone">
+  <label for="f-industry">Djelatnost</label>
+  <input type="text" id="f-industry">
+  <label for="f-pdv">PDV status</label>
+  <select id="f-pdv">
+    <option value="">-</option>
+    <option value="u sustavu PDV-a">U sustavu PDV-a</option>
+    <option value="nije u sustavu PDV-a">Nije u sustavu PDV-a</option>
+  </select>
+  <label for="f-pausal">Paušal (EUR/mj)</label>
+  <input type="number" id="f-pausal" step="0.01" min="0">
+  <button type="submit" class="btn">Spremi klijenta</button>
+</form>
+<div id="add-error" class="chip bad" style="display:none"></div>
+<table class="ledger">
+<thead><tr><th>Naziv</th><th>OIB</th><th>PDV status</th><th>Djelatnost</th></tr></thead>
+<tbody id="clients-tbody"><tr><td colspan="4" class="meta">Učitavanje…</td></tr></tbody>
+</table>
+<script>{_KLIJENTI_JS}</script>"""
+    return page_shell("Klijenti", body, active="klijenti")
+
+
+_KARTON_JS = """
+function $(id) { return document.getElementById(id); }
+
+function emptyMsg(container, text) {
+  container.textContent = '';
+  const p = document.createElement('p');
+  p.className = 'meta';
+  p.textContent = text;
+  container.appendChild(p);
+}
+
+function euro(n) {
+  const v = typeof n === 'number' ? n : parseFloat(n) || 0;
+  return v.toFixed(2) + ' €';
+}
+
+function renderMissing(container, missing) {
+  container.textContent = '';
+  missing.forEach(function (m) {
+    const chip = document.createElement('span');
+    chip.className = 'chip warn';
+    chip.style.marginRight = '.3rem';
+    chip.textContent = m;
+    container.appendChild(chip);
+  });
+}
+
+function renderNotes(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Još nema bilješki. Dodaj prvu.'); return; }
+  rows.forEach(function (n) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row';
+    const body = document.createElement('span');
+    body.textContent = n.body;
+    row.appendChild(body);
+    const meta = document.createElement('span');
+    meta.className = 'due';
+    meta.textContent = (n.author || '') + ' · ' + (n.created_at || '');
+    row.appendChild(meta);
+    container.appendChild(row);
+  });
+}
+
+function renderSops(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Nema odobrenih uputa za ovog klijenta.'); return; }
+  rows.forEach(function (s) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row';
+    const a = document.createElement('a');
+    a.href = '/ui/upute';
+    a.textContent = s.title;
+    row.appendChild(a);
+    container.appendChild(row);
+  });
+}
+
+function renderObligations(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Nema obveza za ovaj period.'); return; }
+  rows.forEach(function (o) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row ' + (o.sent ? 'ok' : 'bad');
+    const kind = document.createElement('span');
+    kind.textContent = o.kind;
+    row.appendChild(kind);
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + (o.sent ? 'ok' : 'bad');
+    chip.textContent = o.sent ? 'predano' : 'nije poslano';
+    row.appendChild(chip);
+    container.appendChild(row);
+  });
+}
+
+function renderExpiry(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Nema praćenih isteka dokumenata.'); return; }
+  rows.forEach(function (e) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row ' + (e.state || '');
+    const label = document.createElement('span');
+    label.textContent = e.label + ' (' + e.kind + ')';
+    row.appendChild(label);
+    const due = document.createElement('span');
+    due.className = 'due';
+    due.textContent = e.expires;
+    row.appendChild(due);
+    container.appendChild(row);
+  });
+}
+
+function renderEracuni(container, data) {
+  container.textContent = '';
+  const summary = document.createElement('p');
+  summary.className = 'meta';
+  summary.textContent = data.count + ' e-računa ukupno.';
+  container.appendChild(summary);
+  if (!data.recent.length) { emptyMsg(container, 'Nema e-računa.'); return; }
+  data.recent.forEach(function (r) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row';
+    const desc = document.createElement('span');
+    desc.textContent = (r.issued || '') + ' — ' + euro(r.total || 0);
+    row.appendChild(desc);
+    container.appendChild(row);
+  });
+}
+
+function renderDocuments(container, rows) {
+  container.textContent = '';
+  if (!rows.length) { emptyMsg(container, 'Još nema dokumenata. Učitaj prvi.'); return; }
+  rows.forEach(function (d) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row';
+    const name = document.createElement('span');
+    name.textContent = d.filename;
+    row.appendChild(name);
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + (d.ingested ? 'ok' : '');
+    chip.textContent = d.ingested ? 'obrađeno' : 'nije obrađeno';
+    row.appendChild(chip);
+    container.appendChild(row);
+  });
+}
+
+function readAsBase64(file) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      const result = reader.result;
+      resolve(result.substring(result.indexOf(',') + 1));
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadKarton() {
+  try {
+    const res = await fetch(KARTON_URL, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const data = await res.json();
+
+    $('k-name').textContent = data.client.name;
+    $('k-oib').textContent = data.client.oib || '–';
+    $('k-pdv').textContent = data.client.pdv_status || '–';
+    $('k-industry').textContent = data.client.industry || '–';
+    $('k-owner').textContent = data.client.owner || '–';
+    $('k-pausal').textContent = euro(data.client.pausal_eur || 0);
+
+    $('k-score').textContent = (data.checklist.score || 0) + '%';
+    renderMissing($('k-missing'), data.checklist.missing || []);
+
+    renderNotes($('k-notes'), data.notes || []);
+    renderSops($('k-sops'), data.sops || []);
+    renderObligations($('k-obligations'), data.obligations || []);
+    renderExpiry($('k-expiry'), data.expiry || []);
+
+    $('k-cjenik-ukupno').textContent = euro(data.cjenik.ukupno || 0);
+    $('k-cjenik-preporuka').textContent =
+      (data.cjenik.usporedba && data.cjenik.usporedba.preporuka) || '';
+
+    renderEracuni($('k-eracuni'), data.eracuni || { count: 0, recent: [] });
+    renderDocuments($('k-documents'), data.documents || []);
+  } catch (err) {
+    const banner = $('karton-error');
+    banner.textContent = 'Greška pri učitavanju kartona. Osvježite stranicu.';
+    banner.style.display = 'block';
+  }
+}
+
+$('note-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  const body = $('note-body').value.trim();
+  if (!body) return;
+  const res = await fetch('/notes', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: CLIENT_ID, body: body }),
+  });
+  if (!res.ok) { alert('Greška: ' + res.status); return; }
+  $('note-body').value = '';
+  loadKarton();
+});
+
+$('doc-upload').addEventListener('click', async function () {
+  const input = $('doc-file');
+  const file = input.files[0];
+  if (!file) return;
+  const data_base64 = await readAsBase64(file);
+  const res = await fetch('/clients/' + CLIENT_ID + '/document', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename: file.name, data_base64: data_base64 }),
+  });
+  if (!res.ok) { alert('Greška: ' + res.status); return; }
+  input.value = '';
+  loadKarton();
+});
+
+loadKarton();
+"""
+
+
+def klijent_page(client_id: int) -> str:
+    body = f"""<div id="karton-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
+<div class="card">
+  <h1 id="k-name">Učitavanje…</h1>
+  <div class="meta" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.3rem">
+    <span id="k-oib" style="font-family:var(--font-mono)"></span>
+    <span id="k-pdv" class="chip"></span>
+    <span id="k-industry"></span>
+    <span id="k-owner"></span>
+    <span id="k-pausal" style="font-family:var(--font-mono)"></span>
+  </div>
+</div>
+<div class="grid">
+  <div class="card">
+    <h2>Kompletnost</h2>
+    <span class="tile-num" id="k-score">–</span>
+    <div id="k-missing" style="margin-top:.5rem"></div>
+  </div>
+  <div class="card">
+    <h2>Bilješke</h2>
+    <div id="k-notes"><p class="meta">Učitavanje…</p></div>
+    <form id="note-form" class="stack" style="margin-top:.75rem">
+      <input type="text" id="note-body" placeholder="Nova bilješka...">
+      <button type="submit" class="btn">Dodaj bilješku</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>Upute (SOP-ovi)</h2>
+    <div id="k-sops"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Obveze</h2>
+    <div id="k-obligations"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Istek dokumenata</h2>
+    <div id="k-expiry"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Cjenik</h2>
+    <span class="tile-num" id="k-cjenik-ukupno">–</span>
+    <p class="meta" id="k-cjenik-preporuka"></p>
+  </div>
+  <div class="card">
+    <h2>E-računi</h2>
+    <div id="k-eracuni"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="card">
+    <h2>Dokumenti</h2>
+    <div id="k-documents"><p class="meta">Učitavanje…</p></div>
+    <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center">
+      <input type="file" id="doc-file">
+      <button type="button" class="btn" id="doc-upload">Učitaj dokument</button>
+    </div>
+  </div>
+</div>
+<script>
+const CLIENT_ID = {int(client_id)};
+const KARTON_URL = '/clients/{int(client_id)}/karton.json';
+</script>
+<script>{_KARTON_JS}</script>"""
+    return page_shell("Klijent", body, active="klijenti")
+
+
 def upute_page(pending_rows: list[dict]) -> str:
     rows_html = _pending_rows_html(pending_rows)
     body = f"""<h1>Upute (SOP)</h1>
