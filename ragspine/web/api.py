@@ -6,6 +6,8 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
+from ragspine.business import expiry as expiry_mod
+from ragspine.business import kalendar
 from ragspine.business import obveze
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
@@ -31,6 +33,13 @@ class WatchSourceBody(BaseModel):
     category: str = ""
     client_id: int | None = None
     kind: str = "page"
+
+
+class ExpiryBody(BaseModel):
+    client_id: int
+    kind: str
+    label: str
+    expires: str
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -165,5 +174,18 @@ def create_app(spine, cfg) -> FastAPI:
         if "application/json" in ctype:
             return {"obligation_id": obligation_id, "sent": sent}
         return RedirectResponse(f"/obveze?kind={quote(kind)}&period={quote(period)}", status_code=303)
+
+    @app.get("/kalendar")
+    def kalendar_upcoming(days: int = 14, user: str = Depends(require_user_web)):
+        return [dict(r) for r in kalendar.upcoming(spine, days)]
+
+    @app.get("/expiry")
+    def expiry_expiring(days: int = 60, user: str = Depends(require_user_web)):
+        return [dict(r) for r in expiry_mod.expiring(spine, days)]
+
+    @app.post("/expiry")
+    def expiry_add(body: ExpiryBody, user: str = Depends(require_user_web)):
+        item_id = expiry_mod.add(spine, body.client_id, body.kind, body.label, body.expires)
+        return {"id": item_id}
 
     return app
