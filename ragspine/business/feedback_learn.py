@@ -5,6 +5,15 @@ import re
 _DIACRITICS = str.maketrans("čćžšđČĆŽŠĐ", "cczsdCCZSD")
 _KEY_WORDS = 5
 
+# Generic Croatian accounting/connector words — dropped before overlap matching
+# so e.g. "racun" (appears in almost every expense description) can't fake a
+# match between two unrelated corrections. Already diacritic-free (matches
+# _norm() output).
+STOPWORDS = {
+    "racun", "racuni", "placanje", "trosak", "troskovi", "kupnja",
+    "usluga", "usluge", "za", "na", "od", "i", "u", "po", "novi", "nova",
+}
+
 
 def _norm(description: str) -> str:
     s = (description or "").translate(_DIACRITICS).lower()
@@ -12,7 +21,7 @@ def _norm(description: str) -> str:
 
 
 def _significant_words(norm: str, limit: int | None = _KEY_WORDS) -> list[str]:
-    words = [w for w in norm.split() if len(w) > 2]
+    words = [w for w in norm.split() if len(w) > 2 and w not in STOPWORDS]
     return words[:limit] if limit is not None else words
 
 
@@ -54,7 +63,14 @@ def suggest_from_feedback(spine, description: str) -> dict | None:
     counts: dict[str, int] = {}
     for row in rows:
         row_stems = {_stem(w) for w in _significant_words(row["description_norm"], limit=None)}
-        if row_stems & stems:
+        overlap = row_stems & stems
+        # >=2 shared stems is solid evidence on its own. A single shared stem
+        # is only trusted because STOPWORDS already stripped the generic
+        # Croatian accounting vocabulary (racun, trosak, usluga, ...) out of
+        # both sides — so anything left over is a genuinely distinctive word,
+        # not a corpus-wide term that would fake a match across unrelated
+        # descriptions (e.g. "racun" alone used to wrongly match everything).
+        if len(overlap) >= 2 or (len(overlap) == 1 and next(iter(overlap)) not in STOPWORDS):
             counts[row["corrected_konto"]] = counts.get(row["corrected_konto"], 0) + 1
 
     if not counts:

@@ -80,7 +80,7 @@ def suggest(spine, description: str) -> dict:
 
     return {"konto": cat["konto"], "naziv": cat["naziv"],
             "porezno_priznato": cat["porezno_priznato"], "note": cat["note"],
-            "confidence": 0.2, "source": "pravilo"}
+            "confidence": 0.2, "source": "nesigurno"}
 
 
 def handle(spine, cfg, query: str, llm) -> str:

@@ -38,3 +38,44 @@
   could theoretically collide on shared prefixes across unrelated words — acceptable given the small
   expected vocabulary of expense descriptions, but worth a real diagnostic look if false-positive learned
   suggestions show up in practice.
+
+## Fix round (review: 1 Critical + 1 Minor)
+
+### Critical — generic-word false match in `feedback_learn.suggest_from_feedback`
+Confirmed live: "racun" (Croatian for invoice/receipt) appears in almost every expense
+description, survived as a 5-char "significant" stem, so a single shared "racun" stem was
+enough for an unrelated stored correction (e.g. reprezentacija -> 4099) to wrongly override a
+completely different query (e.g. "racun za novi laptop"). Fixed both parts in
+`ragspine/business/feedback_learn.py`:
+- (a) Added `STOPWORDS` (racun, racuni, placanje, trosak, troskovi, kupnja, usluga, usluge, za,
+  na, od, i, u, po, novi, nova — diacritic-normalized), stripped inside `_significant_words()`
+  before any stem is ever built, on both the query side and every candidate row.
+- (b) `suggest_from_feedback()` now only counts a row as matching when the shared-stem overlap
+  is `>= 2`, or exactly `1` AND that stem is not itself a stopword (belt-and-suspenders check —
+  redundant today since stopwords never survive into a stem, but guards future changes to the
+  filtering pipeline).
+
+### Minor — ambiguous fallback source in `knjizenje.suggest`
+The tier-4 "nothing matched" fallback (confidence 0.2, generic "Ostali troškovi") reused
+`source="pravilo"`, indistinguishable from a real rule hit. Changed to `source="nesigurno"`.
+
+### New tests (`tests/test_knjizenje.py`, +4)
+- `test_suggest_from_feedback_ignores_generic_word_overlap` — stored reprezentacija correction
+  does NOT hijack "racun za novi laptop" (`suggest_from_feedback` returns `None`).
+- `test_suggest_falls_back_to_rule_when_only_generic_overlap` — `knjizenje.suggest` for that
+  same query falls through to the rule/kontni-plan tier, not `"naučeno"`.
+- `test_suggest_from_feedback_matches_single_distinctive_word` — a genuinely similar query
+  ("reprezentacija u kafiću", only one overlapping non-generic word, no "restoran") still
+  resolves to the learned konto 4099 — proves the fix didn't over-correct into requiring 2+
+  words for every legitimate match.
+- `test_unmatched_fallback_uses_nesigurno_source` — tier-4 fallback now reports
+  `source == "nesigurno"`.
+
+Existing learning tests (rule-beaten-by-correction, rising confidence, kontni_plan naziv
+enrichment) re-verified green with no changes needed.
+
+### Test command
+`python -m pytest tests/test_knjizenje.py -q` then `python -m pytest tests/ -q`
+
+### Result
+`tests/test_knjizenje.py`: 15 passed. Full suite: 320 passed, 1 skipped (was 316; +4 new, 0 broken).

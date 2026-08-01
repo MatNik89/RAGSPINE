@@ -50,6 +50,39 @@ def test_suggest_learns_from_correction_and_beats_rule(spine):
     assert suggestion2["confidence"] > first_confidence
 
 
+def test_suggest_from_feedback_ignores_generic_word_overlap(spine):
+    # "racun" alone is a generic Croatian word for "invoice/receipt" that
+    # appears in almost every expense description — a single shared "racun"
+    # must NOT be enough to fake a match between unrelated corrections.
+    desc = "racun za reprezentaciju u restoranu Zagreb"
+    feedback_learn.record_correction(spine, "ana", desc, "4004", "4099")
+    result = feedback_learn.suggest_from_feedback(spine, "racun za novi laptop")
+    assert result is None
+
+
+def test_suggest_falls_back_to_rule_when_only_generic_overlap(spine):
+    desc = "racun za reprezentaciju u restoranu Zagreb"
+    feedback_learn.record_correction(spine, "ana", desc, "4004", "4099")
+    r = knjizenje.suggest(spine, "racun za novi laptop")
+    assert r["source"] != "naučeno"
+    assert r["konto"] != "4099"
+
+
+def test_suggest_from_feedback_matches_single_distinctive_word(spine):
+    desc = "racun za reprezentaciju u restoranu Zagreb"
+    feedback_learn.record_correction(spine, "ana", desc, "4004", "4099")
+    # No "restoran" here, only "reprezentacija" overlaps — still distinctive
+    # enough (not in STOPWORDS) to count as a real match.
+    result = feedback_learn.suggest_from_feedback(spine, "reprezentacija u kafiću")
+    assert result is not None
+    assert result["konto"] == "4099"
+
+
+def test_unmatched_fallback_uses_nesigurno_source(spine):
+    r = knjizenje.suggest(spine, "nepoznati trošak xyz")
+    assert r["source"] == "nesigurno"
+
+
 def test_record_correction_writes_audit(spine):
     cid = feedback_learn.record_correction(spine, "ana", "gorivo za auto", "4005", "4020")
     assert isinstance(cid, int) and cid > 0
