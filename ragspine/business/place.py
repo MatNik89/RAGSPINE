@@ -13,8 +13,22 @@ STOPA_NIZA_DEFAULT = 20.0
 STOPA_VISA_DEFAULT = 30.0
 
 
+def _rate(spine, key: str, default: float) -> float:
+    """Read a percentage override, tolerating '12%', ' 12 ', '21,5', or missing/garbage."""
+    raw = spine.get_override("kalkulator", key, None)
+    if raw is None:
+        return default
+    try:
+        return float(str(raw).strip().rstrip("%").replace(",", "."))
+    except ValueError:
+        return default
+
+
 def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
                    invalidnost: bool = False, spine=None) -> dict:
+    if bruto is None or bruto < 0:
+        raise ValueError("bruto mora biti >= 0")
+
     detalji = []
 
     doprinosi = round(bruto * 0.20, 2)
@@ -34,8 +48,8 @@ def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
     stopa_niza = STOPA_NIZA_DEFAULT
     stopa_visa = STOPA_VISA_DEFAULT
     if spine is not None:
-        stopa_niza = float(spine.get_override("kalkulator", f"porez_niza.{city}", STOPA_NIZA_DEFAULT))
-        stopa_visa = float(spine.get_override("kalkulator", f"porez_visa.{city}", STOPA_VISA_DEFAULT))
+        stopa_niza = _rate(spine, f"porez_niza.{city}", STOPA_NIZA_DEFAULT)
+        stopa_visa = _rate(spine, f"porez_visa.{city}", STOPA_VISA_DEFAULT)
 
     niza_osnovica = min(osnovica, PRAG_OSNOVICE)
     visa_osnovica = max(0.0, osnovica - PRAG_OSNOVICE)
@@ -44,9 +58,9 @@ def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
 
     # legacy prirez (ukinut u HR 2024., ali override se poštuje radi kompatibilnosti)
     if spine is not None:
-        prirez = spine.get_override("kalkulator", f"prirez.{city}", None)
+        prirez = _rate(spine, f"prirez.{city}", None)
         if prirez is not None:
-            porez *= 1 + float(prirez) / 100
+            porez *= 1 + prirez / 100
             detalji.append(f"legacy prirez {prirez}% primijenjen")
 
     porez = round(porez, 2)
