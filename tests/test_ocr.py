@@ -1,7 +1,10 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from ragspine.core import optional
 from ragspine.docs import ocr
+from ragspine.web.api import create_app
+from ragspine.web.deps import add_user
 
 fitz = optional.need("fitz", "OCR/PDF")
 
@@ -73,6 +76,68 @@ def test_write_text_layer_invisible_and_searchable(tmp_path):
         assert "OCR tekst" in doc[0].get_text()
     finally:
         doc.close()
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_write_text_layer_large_text_not_dropped_on_overflow(tmp_path):
+    # insert_textbox() writes NOTHING when a piece overflows the box — a naive
+    # single-shot insert of a big OCR page silently produces an empty layer.
+    p = tmp_path / "blank.pdf"
+    _make_blank_pdf(str(p))
+    # base-14 helv font mangles non-ASCII diacritics, so keep this ASCII-only —
+    # the point of the test is overflow handling, not encoding.
+    big_text = ("Racun broj " * 2800) + "ZADNJI-REDAK-30000"  # ~30KB, ends distinctively
+    assert len(big_text) > 30000
+
+    out = ocr.write_text_layer(str(p), [big_text])
+
+    doc = fitz.open(out)
+    try:
+        extracted = doc[0].get_text()
+    finally:
+        doc.close()
+    assert "ZADNJI-REDAK-30000" in extracted, "text from the END of the page was dropped on overflow"
+    assert "Racun broj" in extracted
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_ocr_pdf_all_empty_ocr_skips_ingest(spine, cfg, tmp_path):
+    p = tmp_path / "scan.pdf"
+    _make_blank_pdf(str(p))
+
+    result = ocr.ocr_pdf(spine, cfg, str(p), transport=lambda u, h, b: {"unexpected": "shape"})
+
+    assert result["skipped"] is False
+    assert result.get("ocr_empty") is True
+    row = spine.read().execute("SELECT * FROM documents WHERE path=?", (str(p),)).fetchone()
+    assert row is None
+
+
+def _auth_headers(spine, cfg):
+    add_user(spine, "ana", "tajna")
+    c = TestClient(create_app(spine, cfg))
+    tok = c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
+    return c, {"Authorization": f"Bearer {tok}"}
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_ocr_endpoint_rejects_path_outside_root(spine, cfg):
+    c, headers = _auth_headers(spine, cfg)
+    r = c.post("/ocr", json={"path": "/etc/hosts"}, headers=headers)
+    assert r.status_code == 400
+    row = spine.read().execute("SELECT * FROM documents").fetchone()
+    assert row is None
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_ocr_endpoint_allows_path_inside_root(spine, cfg, tmp_path):
+    # cfg fixture points data_dir at tmp_path, so a file written under it is in-root.
+    p = tmp_path / "text.pdf"
+    _make_text_pdf(str(p))
+    c, headers = _auth_headers(spine, cfg)
+    r = c.post("/ocr", json={"path": str(p)}, headers=headers)
+    assert r.status_code == 200
+    assert r.json()["skipped"] is True
 
 
 @pytest.mark.skipif(fitz is None, reason="fitz not installed")

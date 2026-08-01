@@ -233,6 +233,8 @@ def create_app(spine, cfg) -> FastAPI:
             return ocr.ocr_pdf(spine, cfg, body.path)
         except ocr.OCRUnavailable as e:
             raise HTTPException(503, str(e)) from e
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
