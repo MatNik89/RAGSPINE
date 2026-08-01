@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2">
+  <cbc:ID>2026-1</cbc:ID>
+  <cbc:IssueDate>2026-07-15</cbc:IssueDate>
+  <cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>Firma A d.o.o.</cbc:Name></cac:PartyName>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>HR69435151530</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyName><cbc:Name>Kupac B d.o.o.</cbc:Name></cac:PartyName>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>11111111119</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>
+    </cac:Party>
+  </cac:AccountingCustomerParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="EUR">25.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="EUR">100.00</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="EUR">100.00</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="EUR">125.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="EUR">125.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+  <cac:InvoiceLine>
+    <cbc:ID>1</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">2</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="EUR">60.00</cbc:LineExtensionAmount>
+    <cac:Item>
+      <cbc:Name>Konzultantske usluge</cbc:Name>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="EUR">30.00</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>
+  <cac:InvoiceLine>
+    <cbc:ID>2</cbc:ID>
+    <cbc:InvoicedQuantity unitCode="C62">1</cbc:InvoicedQuantity>
+    <cbc:LineExtensionAmount currencyID="EUR">40.00</cbc:LineExtensionAmount>
+    <cac:Item>
+      <cbc:Name>Knjigovodstvene usluge</cbc:Name>
+    </cac:Item>
+    <cac:Price>
+      <cbc:PriceAmount currencyID="EUR">40.00</cbc:PriceAmount>
+    </cac:Price>
+  </cac:InvoiceLine>
+</Invoice>
