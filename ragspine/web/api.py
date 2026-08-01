@@ -21,7 +21,7 @@ from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import hash_password, jwt_encode, verify_password
-from ragspine.docs import ocr
+from ragspine.docs import doc_generator, ocr
 from ragspine.knowledge import features as features_mod
 from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
@@ -81,6 +81,12 @@ class OcrBody(BaseModel):
 class TranslateBody(BaseModel):
     text: str
     target: str
+
+
+class DocGenerateBody(BaseModel):
+    doc_type: str
+    client_id: int
+    extra: dict | None = None
 
 
 class FeatureBody(BaseModel):
@@ -313,6 +319,23 @@ def create_app(spine, cfg) -> FastAPI:
             # contain upstream noise/internals. Detail stays server-side only.
             raise HTTPException(503, "Greška LLM providera.") from e
         return {"translation": text}
+
+    @app.get("/doc/templates")
+    def doc_templates(user: str = Depends(require_user_web)):
+        return list(doc_generator.TEMPLATES)
+
+    @app.post("/doc/generate")
+    def doc_generate(body: DocGenerateBody, user: str = Depends(require_user_web)):
+        try:
+            result = doc_generator.generate_from_client(
+                spine, body.doc_type, body.client_id, extra=body.extra)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        out = {"text": result["text"],
+               "gate": {"ok": result["gate"].ok, "missing": result["gate"].missing}}
+        if "warning" in result:
+            out["warning"] = result["warning"]
+        return out
 
     @app.get("/features")
     def features_list(user: str = Depends(require_user_web)):
