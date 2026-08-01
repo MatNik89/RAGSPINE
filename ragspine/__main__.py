@@ -71,6 +71,18 @@ def _cmd_auth(args) -> int:
     return 0
 
 
+def _cmd_browser(args) -> int:
+    if args.sub != "status":
+        return _stub(args)
+    # ponytail: CLI runs in its own process, separate from `serve`'s Bridge —
+    # this reports 0 (a fresh queue), not the live server's pending count.
+    # Upgrade path: HTTP GET /browser/status against the running server.
+    from ragspine.browser.bridge import Bridge
+
+    print(f"pending={Bridge().pending()}")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ragspine")
     sub = p.add_subparsers(dest="cmd")
@@ -98,7 +110,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_browser = sub.add_parser("browser")
     p_browser.add_argument("sub")
-    p_browser.set_defaults(func=_stub)
+    p_browser.set_defaults(func=_cmd_browser)
 
     p_watch = sub.add_parser("watch")
     p_watch.add_subparsers(dest="watch_cmd").add_parser("run")

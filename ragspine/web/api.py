@@ -14,6 +14,7 @@ from ragspine.business import kalendar
 from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
+from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
@@ -77,10 +78,16 @@ class Nis2Body(BaseModel):
     status: str
 
 
+class BrowserResultBody(BaseModel):
+    cmd_id: str
+    result: dict
+
+
 def create_app(spine, cfg) -> FastAPI:
     app = FastAPI()
     app.state.spine = spine
     app.state.cfg = cfg
+    app.state.bridge = Bridge()
 
     @app.get("/health")
     def health():
@@ -301,5 +308,31 @@ def create_app(spine, cfg) -> FastAPI:
     def nis2_set(body: Nis2Body, user: str = Depends(require_user_web)):
         nis2.set_status(spine, body.control_id, body.status)
         return {"id": body.control_id, "status": body.status}
+
+    @app.get("/browser/cmd")
+    def browser_cmd(request: Request, user: str = Depends(require_user_web)):
+        cmd = request.app.state.bridge.next_cmd(timeout=25)
+        if cmd is None:
+            return JSONResponse(None, status_code=204)
+        return cmd
+
+    @app.post("/browser/result")
+    def browser_result(request: Request, body: BrowserResultBody, user: str = Depends(require_user_web)):
+        request.app.state.bridge.post_result(body.cmd_id, body.result)
+        return {"ok": True}
+
+    @app.post("/browser/run")
+    async def browser_run(request: Request, user: str = Depends(require_user_web)):
+        action = await request.json()
+        bridge = request.app.state.bridge
+        cmd_id = bridge.enqueue(action)
+        result = bridge.wait_result(cmd_id, timeout=bridge.run_timeout)
+        if result is None:
+            return JSONResponse({"error": "timeout"}, status_code=504)
+        return result
+
+    @app.get("/browser/status")
+    def browser_status(request: Request, user: str = Depends(require_user_web)):
+        return {"pending": request.app.state.bridge.pending()}
 
     return app
