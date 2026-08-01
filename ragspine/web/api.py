@@ -6,8 +6,11 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
+from ragspine.business import auditlog
+from ragspine.business import checklist
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import kalendar
+from ragspine.business import notes
 from ragspine.business import obveze
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
@@ -40,6 +43,11 @@ class ExpiryBody(BaseModel):
     kind: str
     label: str
     expires: str
+
+
+class NoteBody(BaseModel):
+    client_id: int
+    body: str
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -187,5 +195,25 @@ def create_app(spine, cfg) -> FastAPI:
     def expiry_add(body: ExpiryBody, user: str = Depends(require_user_web)):
         item_id = expiry_mod.add(spine, body.client_id, body.kind, body.label, body.expires)
         return {"id": item_id}
+
+    @app.get("/checklist")
+    def checklist_worst(user: str = Depends(require_user_web)):
+        return checklist.worst_first(spine)
+
+    @app.get("/notes")
+    def notes_search(client_id: int | None = None, q: str | None = None,
+                      user: str = Depends(require_user_web)):
+        return [dict(r) for r in notes.search(spine, term=q, client_id=client_id)]
+
+    @app.post("/notes")
+    def notes_add(body: NoteBody, user: str = Depends(require_user_web)):
+        note_id = notes.add(spine, body.client_id, user, body.body)
+        return {"id": note_id}
+
+    @app.get("/audit")
+    def audit_search(client: str | None = None, user: str | None = None,
+                      action: str | None = None, _auth: str = Depends(require_user_web)):
+        rows = auditlog.search(spine, client=client, user=user, action=action)
+        return [dict(r) for r in rows]
 
     return app
