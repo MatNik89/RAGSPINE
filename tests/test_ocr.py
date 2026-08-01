@@ -84,8 +84,8 @@ def test_write_text_layer_large_text_not_dropped_on_overflow(tmp_path):
     # single-shot insert of a big OCR page silently produces an empty layer.
     p = tmp_path / "blank.pdf"
     _make_blank_pdf(str(p))
-    # base-14 helv font mangles non-ASCII diacritics, so keep this ASCII-only —
-    # the point of the test is overflow handling, not encoding.
+    # Kept ASCII-only deliberately — this test isolates overflow handling from
+    # encoding; diacritic fidelity is covered by test_write_text_layer_diacritics.
     big_text = ("Racun broj " * 2800) + "ZADNJI-REDAK-30000"  # ~30KB, ends distinctively
     assert len(big_text) > 30000
 
@@ -98,6 +98,28 @@ def test_write_text_layer_large_text_not_dropped_on_overflow(tmp_path):
         doc.close()
     assert "ZADNJI-REDAK-30000" in extracted, "text from the END of the page was dropped on overflow"
     assert "Racun broj" in extracted
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+@pytest.mark.skipif(not ocr._find_unicode_font(), reason="no Unicode TTF found on this host")
+def test_write_text_layer_diacritics(tmp_path):
+    # base-14 helv is WinAnsi-encoded and has no glyphs for č/ć/š/ž/đ — without
+    # a Unicode TTF this would extract back as "?????", breaking the whole
+    # point of a searchable text layer for Croatian OCR output.
+    p = tmp_path / "blank.pdf"
+    _make_blank_pdf(str(p))
+
+    out = ocr.write_text_layer(str(p), ["Račun čćšžđ ČĆŠŽĐ"])
+
+    doc = fitz.open(out)
+    try:
+        extracted = doc[0].get_text()
+    finally:
+        doc.close()
+    assert "Račun" in extracted
+    assert "čćšžđ" in extracted
+    assert "ČĆŠŽĐ" in extracted
+    assert "?????" not in extracted
 
 
 @pytest.mark.skipif(fitz is None, reason="fitz not installed")

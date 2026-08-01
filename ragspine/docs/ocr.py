@@ -1,6 +1,7 @@
 """Unlimited-OCR client: rasterize PDF, OCR via VLM server, invisible text layer, bulk skip-if-text."""
 import base64
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -8,9 +9,34 @@ import urllib.request
 from ragspine.core import optional
 from ragspine.docs.ingest import ingest_text
 
+_log = logging.getLogger(__name__)
+
 
 class OCRUnavailable(Exception):
     pass
+
+
+# ponytail: probed system paths, first hit wins — no fontconfig dependency, no
+# cfg knob yet. Upgrade path: add cfg.ocr_font override once someone needs a
+# non-default font/host.
+_UNICODE_FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
+_unicode_font_path: str | None = None  # None = not probed yet, "" = probed, none found
+_warned_no_unicode_font = False
+
+
+def _find_unicode_font() -> str:
+    """First existing Unicode TTF from _UNICODE_FONT_CANDIDATES, probed once per
+    process. Base-14 PDF fonts (helv) use WinAnsi encoding and have no glyphs
+    for č/ć/š/ž/đ — without a Unicode TTF the OCR text layer would extract as
+    '?????' for Croatian text."""
+    global _unicode_font_path
+    if _unicode_font_path is None:
+        _unicode_font_path = next((p for p in _UNICODE_FONT_CANDIDATES if os.path.exists(p)), "")
+    return _unicode_font_path
 
 
 def _fitz():
@@ -65,7 +91,8 @@ def ocr_page(png: bytes, cfg, transport=None) -> str:
         return ""
 
 
-def _insert_all(page, text: str, fontsize: int = 6, min_fontsize: int = 3, chunk: int = 4000):
+def _insert_all(page, text: str, fontsize: int = 6, min_fontsize: int = 3, chunk: int = 4000,
+                 fontname: str = "helv", fontfile: str | None = None):
     """Place ALL of text into invisible stacked boxes over page.rect.
 
     insert_textbox() writes NOTHING when the piece doesn't fit (negative
@@ -80,7 +107,8 @@ def _insert_all(page, text: str, fontsize: int = 6, min_fontsize: int = 3, chunk
     while rest and guard < 5000:
         guard += 1
         piece = rest[:chunk]
-        rc = page.insert_textbox(page.rect, piece, fontsize=fontsize, render_mode=3)
+        rc = page.insert_textbox(page.rect, piece, fontsize=fontsize, render_mode=3,
+                                  fontname=fontname, fontfile=fontfile)
         if rc >= 0:
             rest = rest[len(piece):]
             chunk = 4000
@@ -99,11 +127,25 @@ def _insert_all(page, text: str, fontsize: int = 6, min_fontsize: int = 3, chunk
 
 def write_text_layer(path: str, page_texts: list[str], out_path: str | None = None) -> str:
     fitz = _fitz()
+    font_path = _find_unicode_font()
+    if font_path:
+        fontname, fontfile = "ragspineU", font_path
+    else:
+        global _warned_no_unicode_font
+        if not _warned_no_unicode_font:
+            # ponytail: degrade, don't crash — a missing font shouldn't block OCR.
+            # Upgrade path: install one of _UNICODE_FONT_CANDIDATES on the host.
+            _log.warning(
+                "no Unicode TTF found (checked %s) — OCR text layer diacritics "
+                "(č/ć/š/ž/đ) will render as '?' in the on-disk searchable PDF; "
+                "the RAG index text is unaffected.", _UNICODE_FONT_CANDIDATES)
+            _warned_no_unicode_font = True
+        fontname, fontfile = "helv", None
     doc = fitz.open(path)
     try:
         for page, text in zip(doc, page_texts):
             if text:
-                _insert_all(page, text)
+                _insert_all(page, text, fontname=fontname, fontfile=fontfile)
         out = out_path or f"{os.path.splitext(path)[0]}_ocr.pdf"
         doc.save(out)
         return out
