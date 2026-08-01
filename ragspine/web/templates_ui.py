@@ -205,7 +205,7 @@ def home_page() -> str:
   <a class="card" href="/ui/chat"><h2>Chat</h2><p>Postavite pitanje asistentu.</p></a>
   <a class="card" href="/ui/upute"><h2>Upute</h2><p>Interne procedure (SOP) — kreiranje i pregled.</p></a>
   <a class="card" href="/obveze"><h2>Obveze</h2><p>PDV, doprinosi i ostale periodičke obveze.</p></a>
-  <a class="card" href="/kalendar"><h2>Rokovi</h2><p>Nadolazeći rokovi i istekle stavke.</p></a>
+  <a class="card" href="/ui/rokovi"><h2>Rokovi</h2><p>Nadolazeći rokovi i istekle stavke.</p></a>
 </div>"""
     return page_shell("Početna", body, active="home")
 
