@@ -1,8 +1,9 @@
 import dataclasses
 from datetime import date
+from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from ragspine.business import obveze
@@ -11,13 +12,9 @@ from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
 from ragspine.rag import pipeline
 from ragspine.web import watchlist
-from ragspine.web.deps import require_user
+from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
+from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
-
-
-class LoginBody(BaseModel):
-    username: str
-    password: str
 
 
 class ChatBody(BaseModel):
@@ -45,15 +42,34 @@ def create_app(spine, cfg) -> FastAPI:
     def health():
         return {"status": "ok", "missing": optional.missing()}
 
+    @app.get("/login", response_class=HTMLResponse)
+    def login_page():
+        return render_login()
+
+    @app.get("/logout")
+    def logout():
+        resp = RedirectResponse("/login", status_code=303)
+        resp.delete_cookie(COOKIE_NAME)
+        return resp
+
     @app.post("/auth/login")
-    def login(body: LoginBody):
+    async def login(request: Request):
+        ctype = request.headers.get("content-type", "")
+        is_json = "application/json" in ctype
+        body = await request.json() if is_json else dict(await request.form())
+        username, password = body.get("username", ""), body.get("password", "")
         row = spine.read().execute(
-            "SELECT pw_hash, role FROM users WHERE username=?", (body.username,)
+            "SELECT pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
-        if row is None or not verify_password(body.password, row["pw_hash"]):
+        if row is None or not verify_password(password, row["pw_hash"]):
             raise HTTPException(401, "invalid credentials")
-        token = jwt_encode({"sub": body.username, "role": row["role"]}, cfg.jwt_secret)
-        return {"token": token}
+        token = jwt_encode({"sub": username, "role": row["role"]}, cfg.jwt_secret)
+        # ponytail: CSRF for POST /obveze/mark deferred — SameSite=Lax already blocks
+        # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
+        # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
+        resp = JSONResponse({"token": token}) if is_json else RedirectResponse("/obveze", status_code=303)
+        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400)
+        return resp
 
     @app.get("/v1/models")
     def models(user: str = Depends(require_user)):
@@ -98,8 +114,13 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": sid}
 
     @app.get("/obveze", response_class=HTMLResponse)
-    def obveze_page(kind: str = "PDV", period: str | None = None,
-                     user: str = Depends(require_user)):
+    def obveze_page(request: Request, kind: str = "PDV", period: str | None = None):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        if kind not in obveze.KINDS:
+            raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         obveze.ensure_period(spine, kind, period)
         rows = obveze.list_period(spine, kind, period)
@@ -107,12 +128,14 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/obveze.json")
     def obveze_json(kind: str = "PDV", period: str | None = None,
-                     user: str = Depends(require_user)):
+                     user: str = Depends(require_user_web)):
+        if kind not in obveze.KINDS:
+            raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         return obveze.list_period(spine, kind, period)
 
     @app.post("/obveze/mark")
-    async def obveze_mark(request: Request, user: str = Depends(require_user)):
+    async def obveze_mark(request: Request, user: str = Depends(require_user_web)):
         ctype = request.headers.get("content-type", "")
         if "application/json" in ctype:
             body = await request.json()
@@ -123,12 +146,17 @@ def create_app(spine, cfg) -> FastAPI:
             obligation_id = int(body["obligation_id"])
         except (KeyError, TypeError, ValueError):
             raise HTTPException(400, "obligation_id required")
-        sent = str(body.get("sent", "1")) not in ("0", "false", "False")
-        obveze.mark_sent(spine, obligation_id, user, sent)
-        if "application/json" in ctype:
-            return {"obligation_id": obligation_id, "sent": sent}
         kind = body.get("kind", "PDV")
         period = body.get("period", date.today().strftime("%Y-%m"))
-        return RedirectResponse(f"/obveze?kind={kind}&period={period}", status_code=303)
+        if kind not in obveze.KINDS:
+            raise HTTPException(400, f"nepoznat kind: {kind!r}")
+        sent = str(body.get("sent", "1")) not in ("0", "false", "False")
+        try:
+            obveze.mark_sent(spine, obligation_id, user, sent)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        if "application/json" in ctype:
+            return {"obligation_id": obligation_id, "sent": sent}
+        return RedirectResponse(f"/obveze?kind={quote(kind)}&period={quote(period)}", status_code=303)
 
     return app

@@ -39,6 +39,8 @@ def list_period(spine, kind: str, period: str) -> list[dict]:
 
 def mark_sent(spine, obligation_id: int, user: str, sent: bool = True) -> None:
     with spine.write() as c:
+        if c.execute("SELECT 1 FROM obligations WHERE id=?", (obligation_id,)).fetchone() is None:
+            raise ValueError(f"nepoznata obveza: {obligation_id}")
         c.execute(
             """INSERT INTO obligation_status(obligation_id, sent, sent_by, sent_at)
                VALUES(?,?,?,datetime('now'))

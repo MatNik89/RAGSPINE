@@ -36,6 +36,12 @@ def test_ensure_period_idempotent(spine):
     assert len(rows) == 2
 
 
+def test_mark_sent_unknown_obligation_raises(spine):
+    import pytest
+    with pytest.raises(ValueError):
+        obveze.mark_sent(spine, 999, "ana")
+
+
 def _client(spine, cfg):
     return TestClient(create_app(spine, cfg))
 
@@ -57,3 +63,44 @@ def test_api_obveze_html_escapes_client_name(spine, cfg):
     assert "text/html" in r.headers["content-type"]
     assert "<script>Zloća</script>" not in r.text
     assert "&lt;script&gt;Zloća&lt;/script&gt;" in r.text
+
+
+def test_login_sets_cookie(spine, cfg):
+    c = _client(spine, cfg)
+    add_user(spine, "ana", "tajna")
+    r = c.post("/auth/login", json={"username": "ana", "password": "tajna"})
+    assert r.status_code == 200
+    assert "ragspine_token" in r.cookies
+
+
+def test_obveze_via_cookie_only(spine, cfg):
+    _seed(spine)
+    c = _client(spine, cfg)
+    add_user(spine, "ana", "tajna")
+    c.post("/auth/login", json={"username": "ana", "password": "tajna"})
+    assert "ragspine_token" in c.cookies  # persisted on the client's cookie jar
+    r = c.get("/obveze?kind=PDV&period=2026-07")  # no Authorization header
+    assert r.status_code == 200
+    assert "Alfa" in r.text
+
+
+def test_obveze_no_auth_redirects_to_login(spine, cfg):
+    c = _client(spine, cfg)
+    r = c.get("/obveze", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
+
+
+def test_obveze_invalid_kind_400(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.get("/obveze?kind=BOGUS", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 400
+
+
+def test_obveze_mark_unknown_obligation_404(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.post("/obveze/mark", json={"obligation_id": 999},
+                headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 404
