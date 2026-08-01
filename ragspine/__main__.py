@@ -112,6 +112,47 @@ def _cmd_stats(args) -> int:
     return 0
 
 
+def _cmd_forget(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.docs.forget import forget
+
+    spine = init_spine(get_config().db_path)
+    result = forget(spine, args.term, dry=args.dry)
+    print(result)
+    return 0
+
+
+def _cmd_watch(args) -> int:
+    if getattr(args, "watch_cmd", None) != "run":
+        return _stub(args)
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.web.watchlist import check_all
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    changes = check_all(spine, cfg)
+    print(f"changes={len(changes)}")
+    return 0
+
+
+def _cmd_ocr(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.docs.ocr import ocr_pdf, OCRUnavailable
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    try:
+        result = ocr_pdf(spine, cfg, args.path)
+    except (OCRUnavailable, ValueError) as e:
+        print(e)
+        return 1
+    print(result)
+    return 0
+
+
 def _cmd_reminders(args) -> int:
     from ragspine.config import get_config
     from ragspine.core.spine import init_spine
@@ -170,7 +211,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_forget = sub.add_parser("forget")
     p_forget.add_argument("term")
-    p_forget.set_defaults(func=_stub)
+    p_forget.add_argument("--dry", action="store_true")
+    p_forget.set_defaults(func=_cmd_forget)
 
     p_auth = sub.add_parser("auth")
     auth_sub = p_auth.add_subparsers(dest="auth_cmd")
@@ -184,11 +226,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_watch = sub.add_parser("watch")
     p_watch.add_subparsers(dest="watch_cmd").add_parser("run")
-    p_watch.set_defaults(func=_stub)
+    p_watch.set_defaults(func=_cmd_watch)
 
     p_ocr = sub.add_parser("ocr")
     p_ocr.add_argument("path")
-    p_ocr.set_defaults(func=_stub)
+    p_ocr.set_defaults(func=_cmd_ocr)
 
     return p
 
