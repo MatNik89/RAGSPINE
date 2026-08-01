@@ -21,6 +21,7 @@ from ragspine.docs import ocr
 from ragspine.knowledge import features as features_mod
 from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
+from ragspine.ops import doctor, health, nis2
 from ragspine.rag import pipeline
 from ragspine.web import watchlist
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
@@ -69,6 +70,11 @@ class FeatureBody(BaseModel):
     body: str
     priority: int = 3
     category: str = ""
+
+
+class Nis2Body(BaseModel):
+    control_id: str
+    status: str
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -278,5 +284,22 @@ def create_app(spine, cfg) -> FastAPI:
                       action: str | None = None, _auth: str = Depends(require_user_web)):
         rows = auditlog.search(spine, client=client, user=user, action=action)
         return [dict(r) for r in rows]
+
+    @app.get("/doctor")
+    def doctor_run(user: str = Depends(require_user_web)):
+        return doctor.run(cfg)
+
+    @app.get("/health/full")
+    def health_full(user: str = Depends(require_user_web)):
+        return health.check(spine, cfg)
+
+    @app.get("/nis2")
+    def nis2_report(user: str = Depends(require_user_web)):
+        return nis2.report(spine)
+
+    @app.post("/nis2")
+    def nis2_set(body: Nis2Body, user: str = Depends(require_user_web)):
+        nis2.set_status(spine, body.control_id, body.status)
+        return {"id": body.control_id, "status": body.status}
 
     return app

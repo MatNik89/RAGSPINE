@@ -36,6 +36,27 @@ def _cmd_ingest(args) -> int:
     return 0
 
 
+def _cmd_doctor(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.ops import doctor
+
+    cfg = get_config()
+    results = doctor.run(cfg)
+    print(doctor.format_report(results))
+    return 0 if all(r["ok"] for r in results) else 1
+
+
+def _cmd_health(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import health
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    print(health.check(spine, cfg))
+    return 0
+
+
 def _cmd_auth(args) -> int:
     if getattr(args, "auth_cmd", None) != "add":
         return _stub(args)
@@ -55,7 +76,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("serve").set_defaults(func=_cmd_serve)
-    for name in ("setup", "doctor", "health", "eval", "stats", "reminders"):
+    sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
+    sub.add_parser("health").set_defaults(func=_cmd_health)
+    for name in ("setup", "eval", "stats", "reminders"):
         sub.add_parser(name).set_defaults(func=_stub)
 
     p_ingest = sub.add_parser("ingest")
