@@ -60,7 +60,9 @@ def decay_all(spine, half_life_days: float = 14.0, now_fn=None) -> int:
     exponentially with the given half-life since last_access. Floors at
     _FLOOR so a memory never hits zero/negative. Returns rows updated."""
     now = (now_fn or datetime.now)()
-    rows = spine.read().execute("SELECT id, hot_score, last_access FROM memory").fetchall()
+    rows = spine.read().execute(
+        "SELECT id, hot_score, last_access FROM memory WHERE user != 'scheduler'"
+    ).fetchall()
     updated = 0
     with spine.write() as c:
         for row in rows:
@@ -86,7 +88,11 @@ def hot_memories(spine, user: str, limit: int = 10, min_score: float = 0.0) -> l
 
 def forget_cold(spine, threshold: float = 0.05) -> int:
     """Delete fully-faded memories (hot_score below threshold). Returns count
-    deleted. Optional — call from the decay job if pruning is desired."""
+    deleted. Optional — call from the decay job if pruning is desired.
+    Excludes user='scheduler' — that's the scheduler's own lastrun.{job}
+    bookkeeping (see ops/scheduler.py), never user memory to forget."""
     with spine.write() as c:
-        cur = c.execute("DELETE FROM memory WHERE hot_score < ?", (threshold,))
+        cur = c.execute(
+            "DELETE FROM memory WHERE hot_score < ? AND user != 'scheduler'", (threshold,)
+        )
         return cur.rowcount

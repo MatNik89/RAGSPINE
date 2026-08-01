@@ -3,6 +3,7 @@ from ragspine.core.spine import Spine
 from ragspine.docs import ingest as ing
 from ragspine.rag import authority as auth
 from ragspine.rag import pipeline
+from ragspine.rag import versioning
 from ragspine.rag.retrieval import Hit
 
 ZAKON_HIT = Hit(1, 1, "Zakon o PDV-u", "Stopa je 25%.", 1.0, "zakon")
@@ -111,6 +112,42 @@ def test_index_and_related_documents(spine):
     hits = [Hit(1, doc_a, "Dokument A", "", 1.0, "zakon")]
     related = auth.related_documents(spine, hits)
     assert any(r["doc_id"] == doc_b for r in related)
+
+
+def test_related_documents_excludes_superseded(spine):
+    # T4xT11 cross-feature: supersede() marks doc_b status='superseded' but
+    # leaves its 'cites' kg_edges intact — related_documents must still filter
+    # it out, mirroring retrieval.py's freshness filter.
+    doc_a = ing.ingest_text(spine, "Zakon o PDV-u propisuje obveze poreznog obveznika.",
+                             "Dokument A", doc_type="zakon")
+    doc_b = ing.ingest_text(spine, "Prema Zakonu o PDV-u obveznik podnosi prijavu.",
+                             "Dokument B", doc_type="zakon")
+    doc_c = ing.ingest_text(spine, "Zakon o PDV-u nova verzija.",
+                             "Dokument C", doc_type="zakon")
+    assert doc_a is not None and doc_b is not None and doc_c is not None
+
+    hits = [Hit(1, doc_a, "Dokument A", "", 1.0, "zakon")]
+    related_before = auth.related_documents(spine, hits)
+    assert any(r["doc_id"] == doc_b for r in related_before)
+    assert any(r["doc_id"] == doc_c for r in related_before)
+
+    versioning.set_status(spine, doc_b, "superseded")
+    related_after = auth.related_documents(spine, hits)
+    assert not any(r["doc_id"] == doc_b for r in related_after)
+    assert any(r["doc_id"] == doc_c for r in related_after)
+
+
+def test_related_documents_excludes_draft(spine):
+    doc_a = ing.ingest_text(spine, "Zakon o PDV-u propisuje obveze poreznog obveznika.",
+                             "Dokument A", doc_type="zakon")
+    doc_b = ing.ingest_text(spine, "Prema Zakonu o PDV-u obveznik podnosi prijavu.",
+                             "Dokument B (draft)", doc_type="zakon")
+    assert doc_a is not None and doc_b is not None
+
+    versioning.set_status(spine, doc_b, "draft")
+    hits = [Hit(1, doc_a, "Dokument A", "", 1.0, "zakon")]
+    related = auth.related_documents(spine, hits)
+    assert not any(r["doc_id"] == doc_b for r in related)
 
 
 # --- pipeline integration ---

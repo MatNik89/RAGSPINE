@@ -10,6 +10,18 @@ from ragspine.core import optional, security
 
 logger = logging.getLogger(__name__)
 
+# ponytail: known-safe apprise notification schemes — providers with their own
+# fixed endpoint (mail relay, chat-bot API), not a generic webhook-to-anywhere.
+# Operator can extend this set later if a new provider is needed.
+ALLOWED_TARGET_SCHEMES = {
+    "mailto", "mailtos", "tgram", "discord", "slack", "twilio", "ntfy", "pover", "pushover",
+}
+
+
+def _target_scheme_ok(target: str) -> bool:
+    scheme = target.split("://", 1)[0].strip().lower() if "://" in target else ""
+    return scheme in ALLOWED_TARGET_SCHEMES
+
 
 def render_message(subject: str, body: str) -> str:
     return f"{subject}\n\n{body}"
@@ -33,6 +45,14 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
 
     if row is None or not row["messaging_consent"] or not row["messaging_target"]:
         status = "skipped_no_consent"
+        _log(spine, client_id, channel, status, subject, body)
+        return {"status": status, "client_id": client_id}
+
+    if not _target_scheme_ok(row["messaging_target"]):
+        # SSRF guard: an arbitrary http(s)/json target would let apprise make
+        # its own outbound connection to any host, bypassing cfg.egress_allow.
+        status = "skipped_bad_target"
+        logger.warning("messaging target rejected: disallowed scheme (client %s)", client_id)
         _log(spine, client_id, channel, status, subject, body)
         return {"status": status, "client_id": client_id}
 

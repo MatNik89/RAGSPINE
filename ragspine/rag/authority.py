@@ -209,7 +209,9 @@ def related_documents(spine, hits, limit: int = 5) -> list[dict]:
 
     ph5 = ",".join("?" * len(other_doc_ids))
     rows = conn.execute(
-        f"SELECT id AS doc_id, title FROM documents WHERE id IN ({ph5})",
+        f"""SELECT id AS doc_id, title FROM documents WHERE id IN ({ph5})
+            AND (status IS NULL OR status='active')
+            AND (stale IS NULL OR stale=0)""",
         tuple(other_doc_ids),
     ).fetchall()
     return [{"title": r["title"], "doc_id": r["doc_id"]} for r in rows][:limit]

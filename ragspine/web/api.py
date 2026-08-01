@@ -419,6 +419,8 @@ def create_app(spine, cfg) -> FastAPI:
                               user: str = Depends(require_user_web)):
         if body.consent not in (0, 1):
             raise HTTPException(400, "consent mora biti 0 ili 1")
+        if body.target and not messaging._target_scheme_ok(body.target):
+            raise HTTPException(400, "nedozvoljen kanal")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         with spine.write() as c:

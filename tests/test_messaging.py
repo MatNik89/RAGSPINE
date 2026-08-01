@@ -193,6 +193,52 @@ def test_api_send_requires_consent(spine, cfg):
     assert r.json()["status"] == "skipped_no_consent"
 
 
+def test_client_messaging_set_rejects_disallowed_scheme(spine, cfg):
+    # SSRF guard: http(s)/json targets let apprise dial an arbitrary host,
+    # bypassing cfg.egress_allow — reject at the consent-set endpoint.
+    cid = _client(spine, "SSRF pokusaj", "80", consent=0)
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "ana", "tajna")
+    tok = c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
+
+    r = c.post(
+        f"/clients/{cid}/messaging",
+        json={"consent": 1, "channel": "apprise", "target": "http://127.0.0.1/x"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code == 400
+    assert "nedozvoljen" in r.json()["detail"]
+
+
+def test_client_messaging_set_allows_mailto(spine, cfg):
+    cid = _client(spine, "Mailto OK", "81", consent=0)
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "ana", "tajna")
+    tok = c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
+
+    r = c.post(
+        f"/clients/{cid}/messaging",
+        json={"consent": 1, "channel": "apprise", "target": "mailto://a@b.com"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code == 200
+
+
+def test_send_to_client_bad_target_scheme_skipped(spine, cfg):
+    cid = _client(spine, "Los cilj", "82", consent=1, target="json://internal-host/hook")
+    result = messaging.send_to_client(spine, cfg, cid, "Podsjetnik", "tekst", dry_run=False)
+    assert result["status"] == "skipped_bad_target"
+    rows = spine.read().execute("SELECT * FROM message_log WHERE client_id=?", (cid,)).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["status"] == "skipped_bad_target"
+
+
+def test_send_to_client_mailto_target_passes_scheme_check(spine, cfg):
+    cid = _client(spine, "Mailto slanje", "83", consent=1, target="mailto://a@b.com")
+    result = messaging.send_to_client(spine, cfg, cid, "Podsjetnik", "tekst")
+    assert result["status"] == "dry_run"  # still dry_run by default, but not blocked by scheme gate
+
+
 def test_api_messaging_log(spine, cfg):
     cid = _client(spine, "Log", "70", consent=0)
     messaging.send_to_client(spine, cfg, cid, "Podsjetnik", "tekst")

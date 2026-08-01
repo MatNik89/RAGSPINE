@@ -144,6 +144,38 @@ def test_forget_cold_deletes_below_threshold(spine):
     assert remaining == {"fresh"}
 
 
+def test_decay_all_skips_scheduler_namespace(spine):
+    # T13 hardening: scheduler persists lastrun.{job} under user='scheduler' —
+    # decay_all must never touch it (harmless here since it only lowers
+    # hot_score, but the namespace should stay untouched on principle).
+    now = datetime(2026, 1, 1, 0, 0, 0)
+    memory.write_memory(spine, "scheduler", "lastrun.digest", "2026-01-01", now_fn=lambda: now)
+    much_later = now + timedelta(days=3650)
+    memory.decay_all(spine, half_life_days=14.0, now_fn=lambda: much_later)
+    row = spine.read().execute(
+        "SELECT * FROM memory WHERE user='scheduler' AND key='lastrun.digest'"
+    ).fetchone()
+    assert row["hot_score"] == 1.0
+
+
+def test_forget_cold_never_deletes_scheduler_namespace(spine):
+    now = datetime(2026, 1, 1, 0, 0, 0)
+    much_later = now + timedelta(days=3650)
+    memory.write_memory(spine, "scheduler", "lastrun.digest", "2026-01-01", now_fn=lambda: now)
+    memory.write_memory(spine, "ana", "stale", "v", now_fn=lambda: now)
+    memory.decay_all(spine, half_life_days=14.0, now_fn=lambda: much_later)
+
+    # scheduler row was never decayed (hot_score still 1.0, above threshold),
+    # but even if it HAD decayed below threshold, forget_cold must not delete it.
+    with spine.write() as c:
+        c.execute("UPDATE memory SET hot_score=0.0 WHERE user='scheduler'")
+
+    deleted = memory.forget_cold(spine, threshold=0.05)
+    assert deleted == 1  # only ana's stale row
+    remaining = {r["user"] for r in spine.read().execute("SELECT user FROM memory").fetchall()}
+    assert remaining == {"scheduler"}
+
+
 def test_memory_decay_job_calls_decay_all(spine, cfg, monkeypatch):
     called = {}
 
