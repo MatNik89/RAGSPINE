@@ -1,4 +1,5 @@
 """GDPR sweep: delete every row across user-data tables matching a search term."""
+import hashlib
 
 # ponytail: LIKE substring match is O(rows) full scan, no index — fine at this
 # scale (single-tenant SQLite, sweep is rare/manual). Upgrade path: add
@@ -8,72 +9,87 @@ SIMPLE_TABLES = {
     "notes": ("body", "author"),
     "eracuni": ("supplier_oib", "customer_oib", "raw_path"),
     "interactions": ("query", "answer", "user"),
-    "knowledge": ("question", "answer"),
+    "knowledge": ("question", "answer", "tags"),
     "memory": ("key", "value"),
     "expiry_items": ("label",),
     "audit_log": ("detail", "entity", "user"),
     "notifications": ("body",),
+    "reminders": ("body", "user"),
+    "feedback": ("query", "comment"),
 }
+
+# subquery predicates (no Python-side id lists — sidesteps SQLite's ~999 bound
+# param ceiling entirely instead of batching IN(...) lists).
+_DOC_WHERE = "title LIKE ? ESCAPE '\\' OR path LIKE ? ESCAPE '\\' OR source_url LIKE ? ESCAPE '\\'"
+_NODE_WHERE = "value LIKE ? ESCAPE '\\'"
+
+
+def _escape_pattern(term: str) -> str:
+    """Build a LIKE pattern with %, _ and the escape char itself escaped, so a
+    term containing literal % or _ is matched verbatim instead of acting as a
+    wildcard (which would over-match and DELETE unrelated rows)."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
 
 
 def _count(c, table, cols, pattern):
-    where = " OR ".join(f"{col} LIKE ?" for col in cols)
+    where = " OR ".join(f"{col} LIKE ? ESCAPE '\\'" for col in cols)
     return c.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", [pattern] * len(cols)).fetchone()[0]
 
 
 def _delete(c, table, cols, pattern):
-    where = " OR ".join(f"{col} LIKE ?" for col in cols)
+    where = " OR ".join(f"{col} LIKE ? ESCAPE '\\'" for col in cols)
     c.execute(f"DELETE FROM {table} WHERE {where}", [pattern] * len(cols))
 
 
 def forget(spine, term: str, dry: bool = False) -> dict:
-    pattern = f"%{term}%"
+    pattern = _escape_pattern(term)
     result: dict[str, int] = {}
 
     with spine.write() as c:
+        result["documents"] = c.execute(
+            f"SELECT COUNT(*) FROM documents WHERE {_DOC_WHERE}", (pattern,) * 3).fetchone()[0]
+        result["chunks"] = c.execute(
+            f"SELECT COUNT(*) FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE {_DOC_WHERE})",
+            (pattern,) * 3).fetchone()[0]
         if not dry:
-            # audit the request BEFORE sweeping, in the same transaction. The
-            # row's own detail=term so it matches the audit_log sweep below
-            # too — that's fine, the request is still atomic with its effect.
-            c.execute("INSERT INTO audit_log(user,action,entity,detail) VALUES(?,?,?,?)",
-                      ("system", "forget", "gdpr_sweep", term))
+            # chunks before documents: keeps chunks_fts trigger-consistent and
+            # avoids orphaning chunks under a still-matching-but-not-yet-
+            # deleted parent mid-sweep.
+            c.execute(
+                f"DELETE FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE {_DOC_WHERE})",
+                (pattern,) * 3)
+            c.execute(f"DELETE FROM documents WHERE {_DOC_WHERE}", (pattern,) * 3)
 
-        doc_ids = [r["id"] for r in c.execute(
-            "SELECT id FROM documents WHERE title LIKE ? OR path LIKE ? OR source_url LIKE ?",
-            (pattern, pattern, pattern)).fetchall()]
-        result["documents"] = len(doc_ids)
-        if doc_ids:
-            ph = ",".join("?" * len(doc_ids))
-            result["chunks"] = c.execute(
-                f"SELECT COUNT(*) FROM chunks WHERE doc_id IN ({ph})", doc_ids).fetchone()[0]
-            if not dry:
-                # chunks before documents: keeps chunks_fts trigger-consistent
-                # and avoids orphaning chunks under a deleted doc mid-sweep.
-                c.execute(f"DELETE FROM chunks WHERE doc_id IN ({ph})", doc_ids)
-                c.execute(f"DELETE FROM documents WHERE id IN ({ph})", doc_ids)
-        else:
-            result["chunks"] = 0
-
-        node_ids = [r["id"] for r in c.execute(
-            "SELECT id FROM kg_nodes WHERE value LIKE ?", (pattern,)).fetchall()]
-        result["kg_nodes"] = len(node_ids)
-        if node_ids:
-            ph = ",".join("?" * len(node_ids))
-            result["kg_edges"] = c.execute(
-                f"SELECT COUNT(*) FROM kg_edges WHERE src IN ({ph}) OR dst IN ({ph})",
-                node_ids + node_ids).fetchone()[0]
-            if not dry:
-                c.execute(f"DELETE FROM kg_edges WHERE src IN ({ph}) OR dst IN ({ph})",
-                          node_ids + node_ids)
-                c.execute(f"DELETE FROM kg_nodes WHERE id IN ({ph})", node_ids)
-        else:
-            result["kg_edges"] = 0
+        result["kg_nodes"] = c.execute(
+            f"SELECT COUNT(*) FROM kg_nodes WHERE {_NODE_WHERE}", (pattern,)).fetchone()[0]
+        result["kg_edges"] = c.execute(
+            f"SELECT COUNT(*) FROM kg_edges WHERE src IN (SELECT id FROM kg_nodes WHERE {_NODE_WHERE}) "
+            f"OR dst IN (SELECT id FROM kg_nodes WHERE {_NODE_WHERE})",
+            (pattern, pattern)).fetchone()[0]
+        if not dry:
+            c.execute(
+                f"DELETE FROM kg_edges WHERE src IN (SELECT id FROM kg_nodes WHERE {_NODE_WHERE}) "
+                f"OR dst IN (SELECT id FROM kg_nodes WHERE {_NODE_WHERE})",
+                (pattern, pattern))
+            c.execute(f"DELETE FROM kg_nodes WHERE {_NODE_WHERE}", (pattern,))
 
         for table, cols in SIMPLE_TABLES.items():
             n = _count(c, table, cols, pattern)
             result[table] = n
             if not dry and n:
                 _delete(c, table, cols, pattern)
+
+        if not dry:
+            # Proof-of-erasure row, written AFTER the sweep so it can't be
+            # swept by its own audit_log match, and redacted (hash, not the
+            # raw term) so the erased PII isn't reintroduced into the DB by
+            # the very row that proves it was erased.
+            digest = hashlib.sha256(term.encode()).hexdigest()[:16]
+            total = sum(result.values())
+            c.execute(
+                "INSERT INTO audit_log(user,action,entity,detail) VALUES(?,?,?,?)",
+                ("system", "gdpr_forget", "gdpr_sweep", f"gdpr_forget hash={digest} rows={total}"))
 
     if not dry:
         with spine.write() as c:
