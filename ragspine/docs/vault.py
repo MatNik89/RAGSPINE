@@ -52,6 +52,21 @@ def scan_directory(spine, root: str, ingest_new: bool = True) -> dict:
 
     rows = [dict(r) for r in spine.read().execute(
         "SELECT id, path, file_sha, stale FROM documents").fetchall()]
+
+    # Backfill pass: legacy docs (ingested before file_sha existed, or never
+    # touched by a vault scan) get their identity hash now, BEFORE the by_sha
+    # map is built — otherwise a legacy doc that moves is misclassified as
+    # delete+new (loses doc_id/chunks, exactly what this module prevents).
+    for r in rows:
+        if not r["file_sha"] and r["path"] and os.path.exists(r["path"]):
+            try:
+                fsha = _file_sha(r["path"])
+            except OSError:
+                continue
+            with spine.write() as c:
+                c.execute("UPDATE documents SET file_sha=? WHERE id=?", (fsha, r["id"]))
+            r["file_sha"] = fsha
+
     by_path = {r["path"]: r for r in rows if r["path"]}
     by_sha: dict[str, list[dict]] = {}
     for r in rows:
@@ -83,6 +98,10 @@ def scan_directory(spine, root: str, ingest_new: bool = True) -> dict:
                 result["details"].append({"type": "changed", "doc_id": db_row["id"], "path": fpath})
                 if ingest_new:
                     ingest_mod.ingest_file(spine, fpath)
+                    # old row's content no longer matches what's on disk at this
+                    # path — supersede it so retrieval only surfaces the new one.
+                    with spine.write() as c:
+                        c.execute("UPDATE documents SET stale=1 WHERE id=?", (db_row["id"],))
             continue
 
         candidates = [c for c in by_sha.get(fsha, [])

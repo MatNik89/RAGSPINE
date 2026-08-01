@@ -2,6 +2,7 @@ import os
 
 from ragspine.docs import ingest
 from ragspine.docs import vault
+from ragspine.rag import retrieval
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
 from fastapi.testclient import TestClient
@@ -114,6 +115,65 @@ def test_scan_changed_content_same_path(spine, tmp_path):
     rows = spine.read().execute("SELECT * FROM documents WHERE path=?", (str(p),)).fetchall()
     assert any("drugaciji" not in "" for _ in rows)  # sanity: rows exist
     assert len(rows) >= 1
+
+
+def test_scan_changed_marks_old_row_stale_only_new_active(spine, tmp_path):
+    root = tmp_path / "vault"
+    root.mkdir()
+    p = root / "doc.txt"
+    p.write_text("originalni sadrzaj dokumenta prije izmjene")
+    old_id = ingest.ingest_file(spine, str(p))
+
+    p.write_text("posve drugaciji novi sadrzaj nakon izmjene datoteke")
+    result = vault.scan_directory(spine, str(root))
+    assert result["changed"] == 1
+
+    old_row = spine.read().execute("SELECT stale FROM documents WHERE id=?", (old_id,)).fetchone()
+    assert old_row["stale"] == 1  # superseded, not left active
+
+    new_row = spine.read().execute(
+        "SELECT id, stale FROM documents WHERE path=? AND id!=?", (str(p), old_id)).fetchone()
+    assert new_row is not None
+    assert new_row["stale"] == 0
+
+    hits = retrieval.search(spine, "drugaciji")
+    assert any(h.doc_id == new_row["id"] for h in hits)
+    assert not any(h.doc_id == old_id for h in hits)  # freshness filter excludes stale old row
+
+
+def test_scan_backfills_legacy_file_sha_then_detects_move(spine, tmp_path):
+    root = tmp_path / "vault"
+    root.mkdir()
+    p = root / "legacy.txt"
+    p.write_text("legacy dokument ingestiran prije nego je file_sha stupac postojao")
+
+    with spine.write() as c:
+        doc_id = c.execute(
+            "INSERT INTO documents(title, path, doc_type, sha256) VALUES (?,?,?,?)",
+            ("legacy.txt", str(p), "ostalo", "legacy-fake-text-sha-unique-001"),
+        ).lastrowid
+
+    assert spine.read().execute(
+        "SELECT file_sha FROM documents WHERE id=?", (doc_id,)).fetchone()["file_sha"] is None
+
+    result1 = vault.scan_directory(spine, str(root))
+    assert result1["moved"] + result1["renamed"] == 0  # file hasn't moved yet, just backfilled
+
+    backfilled = spine.read().execute(
+        "SELECT file_sha FROM documents WHERE id=?", (doc_id,)).fetchone()["file_sha"]
+    assert backfilled
+
+    new_path = root / "legacy-preimenovan.txt"
+    os.rename(p, new_path)
+    result2 = vault.scan_directory(spine, str(root))
+
+    assert result2["moved"] + result2["renamed"] == 1
+    assert result2["new"] == 0
+    assert result2["deleted"] == 0
+
+    final = spine.read().execute("SELECT id, path FROM documents WHERE id=?", (doc_id,)).fetchone()
+    assert final["id"] == doc_id  # doc_id preserved, not delete+new
+    assert final["path"] == str(new_path)
 
 
 def test_scan_deleted_soft_deletes_not_hard(spine, tmp_path):
