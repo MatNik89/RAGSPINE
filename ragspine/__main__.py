@@ -82,6 +82,57 @@ def _cmd_setup(args) -> int:
     return 0
 
 
+def _cmd_eval(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.ops import evalrun
+
+    report = evalrun.run(get_config())
+    print(report)
+    return 0 if report["pass"] else 1
+
+
+def _cmd_stats(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+
+    spine = init_spine(get_config().db_path)
+    conn = spine.read()
+    print("interactions po laneu:")
+    for row in conn.execute(
+        "SELECT lane, COUNT(*) AS n FROM interactions GROUP BY lane ORDER BY n DESC"
+    ):
+        print(f"  {row['lane']}: {row['n']}")
+    total_cache = conn.execute("SELECT COUNT(*) AS n FROM query_cache").fetchone()["n"]
+    print(f"cache entries: {total_cache}")
+    print("top 5 upita:")
+    for row in conn.execute(
+        "SELECT query, COUNT(*) AS n FROM interactions GROUP BY query ORDER BY n DESC LIMIT 5"
+    ):
+        print(f"  {row['n']}x {row['query']}")
+    return 0
+
+
+def _cmd_reminders(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+
+    spine = init_spine(get_config().db_path)
+    if getattr(args, "reminders_cmd", None) == "add":
+        user = os.environ.get("RAGSPINE_USER", "sustav")
+        with spine.write() as c:
+            c.execute(
+                "INSERT INTO reminders(user, body, due) VALUES(?,?,?)",
+                (user, args.text, args.due),
+            )
+        return 0
+    rows = spine.read().execute(
+        "SELECT id, user, body, due FROM reminders WHERE done=0 ORDER BY due"
+    ).fetchall()
+    for r in rows:
+        print(f"[{r['id']}] {r['due']} — {r['body']} ({r['user']})")
+    return 0
+
+
 def _cmd_browser(args) -> int:
     if args.sub != "status":
         return _stub(args)
@@ -102,8 +153,15 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("setup").set_defaults(func=_cmd_setup)
-    for name in ("eval", "stats", "reminders"):
-        sub.add_parser(name).set_defaults(func=_stub)
+    sub.add_parser("eval").set_defaults(func=_cmd_eval)
+    sub.add_parser("stats").set_defaults(func=_cmd_stats)
+
+    p_reminders = sub.add_parser("reminders")
+    rem_sub = p_reminders.add_subparsers(dest="reminders_cmd")
+    p_reminders_add = rem_sub.add_parser("add")
+    p_reminders_add.add_argument("text")
+    p_reminders_add.add_argument("due")
+    p_reminders.set_defaults(func=_cmd_reminders)
 
     p_ingest = sub.add_parser("ingest")
     p_ingest.add_argument("path", nargs="?")
