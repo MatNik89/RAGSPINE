@@ -71,6 +71,17 @@ def _cmd_auth(args) -> int:
     return 0
 
 
+def _cmd_setup(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import setup
+
+    cfg = get_config()
+    init_spine(cfg.db_path)
+    print(setup.run(cfg))
+    return 0
+
+
 def _cmd_browser(args) -> int:
     if args.sub != "status":
         return _stub(args)
@@ -90,7 +101,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("serve").set_defaults(func=_cmd_serve)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
-    for name in ("setup", "eval", "stats", "reminders"):
+    sub.add_parser("setup").set_defaults(func=_cmd_setup)
+    for name in ("eval", "stats", "reminders"):
         sub.add_parser(name).set_defaults(func=_stub)
 
     p_ingest = sub.add_parser("ingest")
