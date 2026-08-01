@@ -20,6 +20,7 @@ from ragspine.business import monthly
 from ragspine.business import nldate
 from ragspine.business import notes
 from ragspine.business import obveze
+from ragspine.business import onboarding
 from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
 from ragspine.business import sop_images
@@ -101,6 +102,21 @@ class MessagingCampaignBody(BaseModel):
     kind: str | None = None
     period: str | None = None
     days: int = 30
+
+
+class ClientCreateBody(BaseModel):
+    name: str
+    oib: str | None = None
+    email: str = ""
+    phone: str = ""
+    industry: str = ""
+    pdv_status: str = ""
+    pausal_eur: float = 0
+
+
+class ClientDocumentBody(BaseModel):
+    filename: str
+    data_base64: str
 
 
 class ClientMessagingBody(BaseModel):
@@ -447,6 +463,49 @@ def create_app(spine, cfg) -> FastAPI:
                 "SELECT * FROM message_log ORDER BY at DESC LIMIT 50"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    @app.post("/clients")
+    def client_create(body: ClientCreateBody, user: str = Depends(require_user_web)):
+        try:
+            result = onboarding.create_client(spine, cfg, body.model_dump(), user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": result["id"], "nas_folder": result["nas_folder"]}
+
+    @app.get("/clients")
+    def clients_list(user: str = Depends(require_user_web)):
+        rows = spine.read().execute(
+            "SELECT id, name, oib, pdv_status, industry, active FROM clients ORDER BY name"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.get("/clients/{client_id}")
+    def client_get(client_id: int, user: str = Depends(require_user_web)):
+        row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznat klijent")
+        return dict(row)
+
+    @app.post("/clients/{client_id}/document")
+    def client_document_add(client_id: int, body: ClientDocumentBody,
+                             user: str = Depends(require_user_web)):
+        try:
+            data = base64.b64decode(body.data_base64, validate=True)
+        except binascii.Error as e:
+            raise HTTPException(400, "neispravan base64") from e
+        if len(data) > 25 * 1024 * 1024:
+            raise HTTPException(400, "dokument prevelik (max 25MB)")
+        try:
+            return onboarding.add_document(spine, cfg, client_id, body.filename, data, owner=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/clients/{client_id}/documents")
+    def client_documents_list(client_id: int, user: str = Depends(require_user_web)):
+        try:
+            return onboarding.list_documents(spine, cfg, client_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
 
     @app.post("/clients/{client_id}/messaging")
     def client_messaging_set(client_id: int, body: ClientMessagingBody,
