@@ -4,7 +4,7 @@ import json
 from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import features, kb
-from ragspine.rag import authority, cache, citations, composer, conversation, retrieval, router, selfrag
+from ragspine.rag import authority, cache, citations, clarify, composer, conversation, retrieval, router, selfrag
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
 # Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
@@ -50,6 +50,20 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
             except (LLMUnavailable, LLMError):
                 pass
         return _package(text, "no_retrieval", 1.0, [], False)
+
+    # W2 clarify gate: an under-specified how-to ("kako se radi plaća") with
+    # ≥2 approved SOP variants (different client/type) gets asked back
+    # instead of guessed. Only on the plain chat path; best-effort so a
+    # clarify bug never blocks a normal answer.
+    if lane == "chat":
+        try:
+            clarification = clarify.needs_clarification(spine, query)
+        except Exception:
+            clarification = None
+        if clarification is not None:
+            return {"answer": clarification["question"], "lane": "clarify", "confidence": 1.0,
+                    "sources": [], "cached": False, "clarify": True,
+                    "variants": clarification["variants"]}
 
     # Fetch history early: a user with prior turns is mid-conversation, so a
     # text-keyed cache hit/write for their query would silently splice in (or
