@@ -67,6 +67,11 @@ def test_fetch_new_sanitizes_traversal_filename(spine, cfg):
     expected = os.path.join(inbox, "evil.xml")
     assert result["attachments"] == [expected]
     assert os.path.exists(expected)
-    assert os.path.realpath(expected) == os.path.realpath(expected)
-    assert os.path.commonpath([os.path.realpath(expected), os.path.realpath(inbox)]) == os.path.realpath(inbox)
-    assert not os.path.exists(os.path.realpath(os.path.join(inbox, "..", "..", "evil.xml")))
+
+    real_inbox = os.path.realpath(inbox)
+    assert os.path.realpath(expected) == os.path.join(real_inbox, "evil.xml")
+    assert os.path.commonpath([os.path.realpath(expected), real_inbox]) == real_inbox
+
+    escape_path = os.path.realpath(os.path.join(inbox, "..", "..", "evil.xml"))
+    assert escape_path != os.path.realpath(expected)
+    assert not os.path.exists(escape_path)
