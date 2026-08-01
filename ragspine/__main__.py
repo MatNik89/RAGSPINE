@@ -22,6 +22,20 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _cmd_ingest(args) -> int:
+    if not args.imap:
+        return _stub(args)
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.docs.imap_fetch import fetch_new
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    result = fetch_new(spine, cfg)
+    print(f"fetched={result['fetched']} attachments={len(result['attachments'])}")
+    return 0
+
+
 def _cmd_auth(args) -> int:
     if getattr(args, "auth_cmd", None) != "add":
         return _stub(args)
@@ -45,8 +59,9 @@ def _build_parser() -> argparse.ArgumentParser:
         sub.add_parser(name).set_defaults(func=_stub)
 
     p_ingest = sub.add_parser("ingest")
-    p_ingest.add_argument("path")
-    p_ingest.set_defaults(func=_stub)
+    p_ingest.add_argument("path", nargs="?")
+    p_ingest.add_argument("--imap", action="store_true")
+    p_ingest.set_defaults(func=_cmd_ingest)
 
     p_forget = sub.add_parser("forget")
     p_forget.add_argument("term")
