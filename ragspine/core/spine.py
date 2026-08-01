@@ -19,7 +19,8 @@ CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
   INSERT INTO chunks_fts(rowid, text, title) VALUES (new.id, new.text, new.title); END;
 CREATE TABLE IF NOT EXISTS clients(id INTEGER PRIMARY KEY, name TEXT, oib TEXT UNIQUE,
   email TEXT, phone TEXT, owner TEXT, industry TEXT, pdv_status TEXT, nas_folder TEXT,
-  active INTEGER DEFAULT 1);
+  active INTEGER DEFAULT 1, messaging_consent INTEGER DEFAULT 0,
+  messaging_channel TEXT DEFAULT '', messaging_target TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE,
   pw_hash TEXT, role TEXT DEFAULT 'radnik', created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS config_overrides(module TEXT, key TEXT, value TEXT,
@@ -82,6 +83,8 @@ CREATE TABLE IF NOT EXISTS eracuni(id INTEGER PRIMARY KEY, doc_id INTEGER, suppl
   customer_oib TEXT, total REAL, vat REAL, currency TEXT, issued TEXT, raw_path TEXT);
 CREATE TABLE IF NOT EXISTS konto_corrections(id INTEGER PRIMARY KEY, user TEXT, description TEXT,
   description_norm TEXT, original_konto TEXT, corrected_konto TEXT, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS message_log(id INTEGER PRIMARY KEY, client_id INTEGER, channel TEXT,
+  status TEXT, subject TEXT, body_preview TEXT, at TEXT DEFAULT (datetime('now')));
 """
 
 class Spine:

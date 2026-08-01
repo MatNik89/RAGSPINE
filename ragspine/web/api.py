@@ -16,6 +16,7 @@ from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lan
 from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
+from ragspine.web import messaging
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
@@ -62,6 +63,29 @@ class ExpiryBody(BaseModel):
 class NoteBody(BaseModel):
     client_id: int
     body: str
+
+
+class MessagingSendBody(BaseModel):
+    client_id: int
+    subject: str
+    body: str
+    dry_run: bool = True
+
+
+class MessagingCampaignBody(BaseModel):
+    filter: str
+    subject: str
+    body: str
+    dry_run: bool = True
+    kind: str | None = None
+    period: str | None = None
+    days: int = 30
+
+
+class ClientMessagingBody(BaseModel):
+    consent: int
+    channel: str = ""
+    target: str = ""
 
 
 class KnjizenjeBody(BaseModel):
@@ -278,6 +302,50 @@ def create_app(spine, cfg) -> FastAPI:
     def notes_add(body: NoteBody, user: str = Depends(require_user_web)):
         note_id = notes.add(spine, body.client_id, user, body.body)
         return {"id": note_id}
+
+    @app.post("/messaging/send")
+    def messaging_send(body: MessagingSendBody, user: str = Depends(require_user_web)):
+        return messaging.send_to_client(spine, cfg, body.client_id, body.subject, body.body,
+                                         dry_run=body.dry_run)
+
+    @app.post("/messaging/campaign")
+    def messaging_campaign(body: MessagingCampaignBody, user: str = Depends(require_user_web)):
+        kw = {"days": body.days}
+        if body.kind is not None:
+            kw["kind"] = body.kind
+        if body.period is not None:
+            kw["period"] = body.period
+        try:
+            return messaging.send_to_filter(spine, cfg, body.filter, body.subject, body.body,
+                                             dry_run=body.dry_run, **kw)
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/messaging/log")
+    def messaging_log(client_id: int | None = None, user: str = Depends(require_user_web)):
+        if client_id is not None:
+            rows = spine.read().execute(
+                "SELECT * FROM message_log WHERE client_id=? ORDER BY at DESC LIMIT 50", (client_id,)
+            ).fetchall()
+        else:
+            rows = spine.read().execute(
+                "SELECT * FROM message_log ORDER BY at DESC LIMIT 50"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.post("/clients/{client_id}/messaging")
+    def client_messaging_set(client_id: int, body: ClientMessagingBody,
+                              user: str = Depends(require_user_web)):
+        if body.consent not in (0, 1):
+            raise HTTPException(400, "consent mora biti 0 ili 1")
+        if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
+            raise HTTPException(404, "nepoznat klijent")
+        with spine.write() as c:
+            c.execute(
+                "UPDATE clients SET messaging_consent=?, messaging_channel=?, messaging_target=? WHERE id=?",
+                (body.consent, body.channel, body.target, client_id),
+            )
+        return {"client_id": client_id, "consent": body.consent}
 
     @app.get("/dashboard")
     def dashboard_stats(user: str = Depends(require_user_web)):
