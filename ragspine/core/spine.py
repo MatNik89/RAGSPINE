@@ -91,6 +91,8 @@ CREATE TABLE IF NOT EXISTS sop_pages(id INTEGER PRIMARY KEY, title TEXT, client_
   category TEXT, content TEXT, status TEXT DEFAULT 'draft', author TEXT, reviewer TEXT,
   base_version INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS sop_images(id INTEGER PRIMARY KEY, sop_id INTEGER, filename TEXT,
+  path TEXT, ocr_text TEXT, caption TEXT, at TEXT DEFAULT (datetime('now')));
 """
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:

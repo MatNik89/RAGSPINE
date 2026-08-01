@@ -3,6 +3,7 @@
 # Odobreni SOP se ingestira u RAG korpus (doc_type='sop') pa postaje
 # pretraživ/citabilan (authority.detect_authority prepoznaje "SOP:" naslov
 # kao interna_procedura).
+from ragspine.business import sop_images
 from ragspine.docs.ingest import ingest_text
 
 STATUSES = ("draft", "submitted", "approved", "rejected")
@@ -80,11 +81,22 @@ def approve_draft(spine, sop_id: int, reviewer: str) -> int | None:
     row = _require_row(spine, sop_id)
     if row["status"] != "submitted":
         raise ValueError(f"SOP {sop_id} nije submitted (status={row['status']!r})")
+    content = row["content"]
+    # ponytail: image OCR text is fetched best-effort — a broken images table
+    # or a stray exception must never block SOP approval.
+    try:
+        images = sop_images.list_images(spine, sop_id)
+        img_text = "\n\n".join(img["ocr_text"] for img in images if img["ocr_text"])
+        if img_text:
+            content = f"{content}\n\n## Slike (OCR)\n{img_text}"
+    except Exception:
+        pass
+
     # ponytail: ingest + status UPDATE aren't in one transaction — if the UPDATE
     # failed after a successful ingest, an orphan corpus doc could remain.
     # Acceptable fail-closed (worst case: unreferenced searchable doc, no data
     # loss); upgrade path is wrapping both in a single spine.write() block.
-    doc_id = ingest_text(spine, row["content"], title=f"SOP: {row['title']}",
+    doc_id = ingest_text(spine, content, title=f"SOP: {row['title']}",
                           doc_type="sop", client_id=row["client_id"])
     with spine.write() as c:
         c.execute(

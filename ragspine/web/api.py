@@ -1,3 +1,5 @@
+import base64
+import binascii
 import dataclasses
 from datetime import date
 from urllib.parse import quote
@@ -20,6 +22,7 @@ from ragspine.business import notes
 from ragspine.business import obveze
 from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
+from ragspine.business import sop_images
 from ragspine.web import messaging
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
@@ -171,6 +174,12 @@ class SopBody(BaseModel):
 
 class SopRejectBody(BaseModel):
     reason: str = ""
+
+
+class SopImageBody(BaseModel):
+    filename: str
+    data_base64: str
+    caption: str = ""
 
 
 class KnowledgeStatusBody(BaseModel):
@@ -657,6 +666,33 @@ def create_app(spine, cfg) -> FastAPI:
         if row is None:
             raise HTTPException(404, "nepoznat SOP")
         return row
+
+    @app.post("/sop/{sop_id}/image")
+    def sop_image_add(sop_id: int, body: SopImageBody, user: str = Depends(require_user_web)):
+        try:
+            data = base64.b64decode(body.data_base64, validate=True)
+        except binascii.Error as e:
+            raise HTTPException(400, "neispravan base64") from e
+        if len(data) > 10 * 1024 * 1024:
+            raise HTTPException(400, "slika prevelika (max 10MB)")
+        try:
+            result = sop_images.add_image(spine, cfg, sop_id, body.filename, data,
+                                           caption=body.caption)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": result["id"], "ocr_text_len": len(result["ocr_text"])}
+
+    @app.get("/sop/{sop_id}/images")
+    def sop_image_list(sop_id: int, user: str = Depends(require_user_web)):
+        return sop_images.list_images(spine, sop_id)
+
+    @app.get("/sop/image/{image_id}")
+    def sop_image_get(image_id: int, user: str = Depends(require_user_web)):
+        result = sop_images.image_bytes(spine, cfg, image_id)
+        if result is None:
+            raise HTTPException(404, "slika nije pronađena")
+        data, mime = result
+        return Response(content=data, media_type=mime)
 
     @app.get("/browser/cmd")
     def browser_cmd(request: Request, user: str = Depends(require_user_web)):
