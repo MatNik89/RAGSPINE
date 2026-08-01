@@ -41,12 +41,30 @@ def test_next_cmd_empty_queue_returns_none():
     assert b.next_cmd(timeout=0.2) is None
 
 
+def test_post_result_unknown_cmd_id_is_noop():
+    b = Bridge()
+    b.post_result("nonexistent", {"x": 1})
+    assert b._results == {}
+
+
+def test_post_result_after_wait_timeout_leaves_no_orphan():
+    b = Bridge()
+    cmd_id = b.enqueue({"action": "click"})
+    assert b.wait_result(cmd_id, timeout=0.2) is None
+    b.post_result(cmd_id, {"late": True})
+    assert b._results == {}
+    assert b._events == {}
+
+
 def test_api_browser_cmd_empty_204(spine, cfg):
-    c = TestClient(create_app(spine, cfg))
+    app = create_app(spine, cfg)
+    app.state.bridge.cmd_timeout = 0.2
+    c = TestClient(app)
     add_user(spine, "ana", "tajna")
     tok = c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
     r = c.get("/browser/cmd", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 204
+    assert r.content == b""
 
 
 def test_api_browser_cmd_requires_auth(spine, cfg):

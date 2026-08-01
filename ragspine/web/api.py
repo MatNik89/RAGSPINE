@@ -3,7 +3,7 @@ from datetime import date
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 
 from ragspine.business import auditlog
@@ -311,9 +311,10 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/browser/cmd")
     def browser_cmd(request: Request, user: str = Depends(require_user_web)):
-        cmd = request.app.state.bridge.next_cmd(timeout=25)
+        bridge = request.app.state.bridge
+        cmd = bridge.next_cmd(timeout=bridge.cmd_timeout)
         if cmd is None:
-            return JSONResponse(None, status_code=204)
+            return Response(status_code=204)
         return cmd
 
     @app.post("/browser/result")

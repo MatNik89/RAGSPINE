@@ -17,6 +17,7 @@ class Bridge:
         self._events: dict[str, threading.Event] = {}
         self._results: dict[str, dict] = {}
         self.run_timeout = 30
+        self.cmd_timeout = 25
 
     def enqueue(self, cmd: dict) -> str:
         cmd_id = uuid.uuid4().hex
@@ -34,10 +35,11 @@ class Bridge:
 
     def post_result(self, cmd_id: str, result: dict) -> None:
         with self._lock:
-            self._results[cmd_id] = result
             event = self._events.get(cmd_id)
-        if event is not None:
-            event.set()
+            if event is None:
+                return  # unknown or already-timed-out cmd_id — drop it
+            self._results[cmd_id] = result
+        event.set()
 
     def wait_result(self, cmd_id: str, timeout: float = 30) -> dict | None:
         with self._lock:
