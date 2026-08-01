@@ -59,6 +59,16 @@ def test_post_render_gate_plain_format():
     assert report.ok is True
 
 
+def test_post_render_gate_does_not_tear_number_from_date():
+    # "01.08.2026." must NOT be misread as the money figure 1.08
+    report = dg.post_render_gate("Datum 01.08.2026. Ukupno 250,00 EUR", [1.08])
+    assert report.ok is False
+    assert 1.08 in report.missing
+
+    report2 = dg.post_render_gate("Datum 01.08.2026. Ukupno 250,00 EUR", [250.00])
+    assert report2.ok is True
+
+
 def test_generate_from_client_computes_ukupno(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,email,phone,owner) VALUES(?,?,?,?,?)",
@@ -89,6 +99,15 @@ def test_generate_from_client_opomena(spine):
 def test_generate_from_client_missing_client_raises(spine):
     with pytest.raises(ValueError):
         dg.generate_from_client(spine, "ponuda", 999, extra={"stavke": []})
+
+
+def test_generate_from_client_malformed_stavka_raises(spine):
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name,oib,email,phone,owner) VALUES(?,?,?,?,?)",
+                   ("Firma X", "12345678901", "x@firma.hr", "091", "Ana"))
+
+    with pytest.raises(ValueError):
+        dg.generate_from_client(spine, "ponuda", 1, extra={"stavke": [{"naziv": "X"}]})
 
 
 def test_generate_warns_on_gate_failure(monkeypatch, spine):

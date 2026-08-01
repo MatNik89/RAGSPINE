@@ -4,7 +4,7 @@ from computed numbers, and a post-render gate that catches numeric hallucination
 import re
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from ragspine.core import optional
 
@@ -54,8 +54,14 @@ _MONEY_SLOTS = {
 }
 
 _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
-# HR thousands-dot/decimal-comma (1.234,56) OR plain (1234.56 / 1234,56)
-_NUMBER_RE = re.compile(r"\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2}")
+# HR thousands-dot/decimal-comma (1.234,56) OR plain (1234.56 / 1234,56).
+# Bounded on both sides (not preceded/followed by a digit, not followed by
+# another ".digit") so a currency amount can't be torn out of a date
+# ("01.08.2026." must not yield 01.08) or a bare thousands-integer
+# ("1.234" with no cents must not yield 1.23).
+_NUMBER_RE = re.compile(
+    r"(?<!\d)(?:\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2})(?!\d)(?!\.\d)"
+)
 
 
 @dataclass
@@ -90,6 +96,16 @@ def _slot_number(value) -> float:
 
 def _today() -> str:
     return date.today().strftime("%d.%m.%Y.")
+
+
+def _stavka_iznos(stavka) -> Decimal:
+    """Validate one {"naziv","iznos"} quote line; raise ValueError on bad shape."""
+    if not isinstance(stavka, dict) or "naziv" not in stavka or "iznos" not in stavka:
+        raise ValueError("neispravna stavka")
+    try:
+        return Decimal(str(stavka["iznos"]))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError("neispravna stavka") from None
 
 
 def fill_template(doc_type: str, values: dict) -> str:
@@ -162,11 +178,12 @@ def generate_from_client(spine, doc_type: str, client_id: int,
 
     if doc_type == "ponuda":
         stavke = extra.get("stavke", [])
-        iznosi = [float(s["iznos"]) for s in stavke]
-        ukupno = sum(iznosi)
-        values["stavke"] = "\n".join(f"- {s['naziv']}: {_fmt_money(s['iznos'])}" for s in stavke)
-        values["ukupno"] = _fmt_money(ukupno)
-        values["_stavke_iznosi"] = iznosi
+        iznosi_dec = [_stavka_iznos(s) for s in stavke]  # raises ValueError on bad shape
+        ukupno_dec = sum(iznosi_dec, Decimal("0")).quantize(Decimal("0.01"))
+        values["stavke"] = "\n".join(
+            f"- {s['naziv']}: {_fmt_money(d)}" for s, d in zip(stavke, iznosi_dec))
+        values["ukupno"] = _fmt_money(ukupno_dec)
+        values["_stavke_iznosi"] = [float(d) for d in iznosi_dec]
         prompt = f"Napiši kratak profesionalan uvod za ponudu klijentu {row['name']}."
         default_prose = f"Poštovani {row['name']},\n\nu nastavku Vam dostavljamo ponudu."
     elif doc_type == "opomena":
@@ -180,6 +197,9 @@ def generate_from_client(spine, doc_type: str, client_id: int,
         default_prose = f"Poštovani {row['name']},"
 
     prose_key = next(iter(prose_slots))
+    # ponytail: /doc/generate (web/api.py) never passes an llm, so it always uses
+    # default_prose below — real LLM-authored prose wiring is deferred until the
+    # API route grows an explicit "use_llm" opt-in.
     if llm is not None:
         prose_text = llm.complete([{"role": "user", "content": prompt}]).text
     else:

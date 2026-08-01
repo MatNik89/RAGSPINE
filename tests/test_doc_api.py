@@ -39,3 +39,16 @@ def test_doc_generate_returns_text_and_gate(spine, cfg):
     body = r.json()
     assert "Firma X" in body["text"]
     assert body["gate"]["ok"] is True
+
+
+def test_doc_generate_malformed_stavka_returns_400(spine, cfg):
+    with spine.write() as conn:
+        conn.execute("INSERT INTO clients(name,oib,email,phone,owner) VALUES(?,?,?,?,?)",
+                      ("Firma X", "12345678901", "x@firma.hr", "091", "Ana"))
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.post("/doc/generate",
+               json={"doc_type": "ponuda", "client_id": 1,
+                     "extra": {"stavke": [{"naziv": "X"}]}},
+               headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 400
