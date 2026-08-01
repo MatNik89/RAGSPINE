@@ -1,7 +1,7 @@
 import pytest
 
 from ragspine.docs import ingest as ing
-from ragspine.rag import conversation, pipeline
+from ragspine.rag import cache, conversation, pipeline
 from ragspine.core.llm import LLMClient
 
 
@@ -105,6 +105,27 @@ def test_pipeline_survives_history_lookup_failure(spine, cfg, monkeypatch):
     llm, _ = _llm_capture(cfg, "Prirez u Splitu je 15% [1].")
     r = pipeline.answer(spine, cfg, "koliki je prirez za Split?", "ana", llm=llm)
     assert r["lane"] == "chat" and r["confidence"] > 0
+
+
+def test_pipeline_cache_bypassed_once_user_has_history(spine, cfg):
+    """query_cache is text-keyed. A short elliptical follow-up like "a za
+    Zadar?" can repeat verbatim across unrelated conversations; once a user
+    has prior turns, that text must NOT short-circuit through some earlier
+    conversation's cached answer for the same text (that would silently
+    skip history+citations and surface a stale, wrong-context reply). Only a
+    user's genuinely context-free first turn is safe to serve from cache."""
+    cache.put(spine, "a za Zadar?", "STALE ODGOVOR IZ DRUGOG KONTEKSTA")
+    _insert(spine, "ana", "koliki je prirez za Split?", "Prirez u Splitu je 15%.")
+
+    llm2, cap2 = _llm_capture(cfg, "Odgovor iz trenutnog konteksta.")
+    r2 = pipeline.answer(spine, cfg, "a za Zadar?", "ana", llm=llm2)
+
+    assert r2["cached"] is False
+    assert r2["answer"] != "STALE ODGOVOR IZ DRUGOG KONTEKSTA"
+    assert cap2  # LLM was actually called, not served from the stale cache entry
+    # prior turn's Q&A must be present as history ahead of the current message
+    contents = [m["content"] for m in cap2[-1]]
+    assert "koliki je prirez za Split?" in contents[:-1]
 
 
 def test_pipeline_fresh_flag_skips_history(spine, cfg):

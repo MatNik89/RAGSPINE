@@ -20,8 +20,10 @@ def _package(answer_text: str, lane: str, confidence: float, sources: list, cach
             "sources": sources, "cached": cached}
 
 
-def _record(spine, user: str, query: str, lane: str, answer_text: str, confidence: float) -> None:
-    cache.put(spine, query, answer_text, meta=json.dumps({"lane": lane, "confidence": confidence}))
+def _record(spine, user: str, query: str, lane: str, answer_text: str, confidence: float,
+            cache_write: bool = True) -> None:
+    if cache_write:
+        cache.put(spine, query, answer_text, meta=json.dumps({"lane": lane, "confidence": confidence}))
     with spine.write() as c:
         c.execute(
             "INSERT INTO interactions(user,query,lane,answer,confidence) VALUES(?,?,?,?,?)",
@@ -49,9 +51,21 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
                 pass
         return _package(text, "no_retrieval", 1.0, [], False)
 
-    cached_answer = cache.get(spine, query)
-    if cached_answer is not None:
-        return _package(cached_answer, "chat", 1.0, [], True)
+    # Fetch history early: a user with prior turns is mid-conversation, so a
+    # text-keyed cache hit/write for their query would silently splice in (or
+    # leak into) an unrelated conversation's context. Only cache first turns.
+    prior_turns = []
+    if not fresh:
+        try:
+            prior_turns = conversation.recent_turns(spine, user)
+        except Exception:
+            prior_turns = []  # ponytail: memory is best-effort — never break the answer
+    has_history = bool(prior_turns)
+
+    if not has_history:
+        cached_answer = cache.get(spine, query)
+        if cached_answer is not None:
+            return _package(cached_answer, "chat", 1.0, [], True)
 
     kb_answer = kb.lookup(spine, query)
     if kb_answer is not None:
@@ -61,7 +75,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
     if handler is not None:
         res = handler(spine, cfg, query, llm)
         if res is not None:
-            _record(spine, user, query, lane, res, 1.0)
+            _record(spine, user, query, lane, res, 1.0, cache_write=not has_history)
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
@@ -72,17 +86,11 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         if web_handler is not None:
             res = web_handler(spine, cfg, query, llm)
             if res is not None:
-                _record(spine, user, query, "web", res, 1.0)
+                _record(spine, user, query, "web", res, 1.0, cache_write=not has_history)
                 return _package(res, "web", 1.0, [], False)
 
     system, messages = composer.compose(query, hits)
-    prior = []
-    if not fresh:
-        try:
-            prior = conversation.as_messages(conversation.recent_turns(spine, user))
-        except Exception:
-            pass  # ponytail: memory is best-effort — never break the answer
-    messages = prior + messages
+    messages = conversation.as_messages(prior_turns) + messages
 
     if llm is None:
         return _package(_LLM_DOWN, "chat", 0, [], False)
@@ -108,7 +116,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         except Exception:
             pass
 
-    _record(spine, user, query, "chat", final_text, confidence)
+    _record(spine, user, query, "chat", final_text, confidence, cache_write=not has_history)
     if report.ok:
         kb.save(spine, query, final_text)
     return _package(final_text, "chat", confidence, sources, False)

@@ -31,7 +31,11 @@ def test_no_citation_idk(spine, cfg):
 def test_cache_second_call(spine, cfg):
     ing.ingest_text(spine, "Stopa PDV-a je 25 posto.", "pdv", doc_type="zakon")
     pipeline.answer(spine, cfg, "stopa pdv?", "ana", llm=_llm(cfg, "25% [1]."))
-    r2 = pipeline.answer(spine, cfg, "stopa pdv?", "ana", llm=None)  # bez LLM-a — mora iz cachea
+    # fresh=True: a stateless repeat of the same query is exactly the
+    # context-free case the text-keyed cache is safe for. A non-fresh repeat
+    # is deliberately NOT served from cache once the user has history — see
+    # test_conversation.py::test_pipeline_cache_bypassed_once_user_has_history.
+    r2 = pipeline.answer(spine, cfg, "stopa pdv?", "ana", llm=None, fresh=True)  # bez LLM-a — mora iz cachea
     assert r2["cached"]
 
 

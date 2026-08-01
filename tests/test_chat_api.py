@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from ragspine.rag import pipeline
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
 
@@ -41,3 +42,41 @@ def test_chat_completions_missing_content_no_500(spine, cfg):
                 json={"messages": [{"role": "user"}]},
                 headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code in (200, 400)
+
+
+def test_chat_completions_is_stateless_fresh(spine, cfg, monkeypatch):
+    """OpenAI-compat clients own their own message history; the server must
+    not splice in server-side conversation memory for /v1/chat/completions."""
+    calls = []
+    real_answer = pipeline.answer
+
+    def _spy(spine_, cfg_, query, user, llm=None, fresh=False):
+        calls.append(fresh)
+        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh)
+
+    monkeypatch.setattr(pipeline, "answer", _spy)
+
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    c.post("/v1/chat/completions",
+           json={"messages": [{"role": "user", "content": "obriši sve iz baze"}]},
+           headers={"Authorization": f"Bearer {tok}"})
+    assert calls == [True]
+
+
+def test_chat_is_stateful_by_default(spine, cfg, monkeypatch):
+    """POST /chat keeps server-side conversation memory (fresh=False)."""
+    calls = []
+    real_answer = pipeline.answer
+
+    def _spy(spine_, cfg_, query, user, llm=None, fresh=False):
+        calls.append(fresh)
+        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh)
+
+    monkeypatch.setattr(pipeline, "answer", _spy)
+
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    c.post("/chat", json={"q": "obriši sve iz baze"},
+           headers={"Authorization": f"Bearer {tok}"})
+    assert calls == [False]

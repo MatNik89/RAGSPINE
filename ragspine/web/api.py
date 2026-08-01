@@ -210,7 +210,7 @@ def create_app(spine, cfg) -> FastAPI:
         query = user_msgs[-1].get("content", "") if user_msgs else ""
         if not query:
             raise HTTPException(400, "no user message content")
-        result = _answer(query, user)
+        result = _answer(query, user, fresh=True)  # OpenAI-compat clients own their own history
         return {
             "choices": [{"message": {"role": "assistant", "content": result["answer"]}}],
             "model": cfg.llm_model or "ragspine",
