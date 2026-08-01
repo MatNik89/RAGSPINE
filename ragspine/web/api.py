@@ -1,14 +1,18 @@
 import dataclasses
+from datetime import date
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
+from ragspine.business import obveze
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
 from ragspine.rag import pipeline
 from ragspine.web import watchlist
 from ragspine.web.deps import require_user
+from ragspine.web.templates_obveze import render_obveze
 
 
 class LoginBody(BaseModel):
@@ -92,5 +96,39 @@ def create_app(spine, cfg) -> FastAPI:
     def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user)):
         sid = watchlist.add_source(spine, body.url, body.category, body.client_id, user, body.kind)
         return {"id": sid}
+
+    @app.get("/obveze", response_class=HTMLResponse)
+    def obveze_page(kind: str = "PDV", period: str | None = None,
+                     user: str = Depends(require_user)):
+        period = period or date.today().strftime("%Y-%m")
+        obveze.ensure_period(spine, kind, period)
+        rows = obveze.list_period(spine, kind, period)
+        return render_obveze(kind, period, rows)
+
+    @app.get("/obveze.json")
+    def obveze_json(kind: str = "PDV", period: str | None = None,
+                     user: str = Depends(require_user)):
+        period = period or date.today().strftime("%Y-%m")
+        return obveze.list_period(spine, kind, period)
+
+    @app.post("/obveze/mark")
+    async def obveze_mark(request: Request, user: str = Depends(require_user)):
+        ctype = request.headers.get("content-type", "")
+        if "application/json" in ctype:
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        try:
+            obligation_id = int(body["obligation_id"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "obligation_id required")
+        sent = str(body.get("sent", "1")) not in ("0", "false", "False")
+        obveze.mark_sent(spine, obligation_id, user, sent)
+        if "application/json" in ctype:
+            return {"obligation_id": obligation_id, "sent": sent}
+        kind = body.get("kind", "PDV")
+        period = body.get("period", date.today().strftime("%Y-%m"))
+        return RedirectResponse(f"/obveze?kind={kind}&period={period}", status_code=303)
 
     return app
