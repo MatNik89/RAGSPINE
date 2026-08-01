@@ -39,6 +39,7 @@ from ragspine.web.templates_obveze import render_obveze
 
 class ChatBody(BaseModel):
     q: str
+    fresh: bool = False
 
 
 class ChatCompletionsBody(BaseModel):
@@ -192,16 +193,16 @@ def create_app(spine, cfg) -> FastAPI:
     def models(user: str = Depends(require_user)):
         return {"object": "list", "data": [{"id": cfg.llm_model or "ragspine", "object": "model"}]}
 
-    def _answer(query: str, user: str) -> dict:
+    def _answer(query: str, user: str, fresh: bool = False) -> dict:
         try:
-            return pipeline.answer(spine, cfg, query, user, llm=LLMClient(cfg))
+            return pipeline.answer(spine, cfg, query, user, llm=LLMClient(cfg), fresh=fresh)
         except (LLMUnavailable, LLMError):
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
 
     @app.post("/chat")
     def chat(body: ChatBody, user: str = Depends(require_user)):
-        return _answer(body.q, user)
+        return _answer(body.q, user, fresh=body.fresh)
 
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, user: str = Depends(require_user)):

@@ -4,7 +4,7 @@ import json
 from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import kb
-from ragspine.rag import authority, cache, citations, composer, retrieval, router, selfrag
+from ragspine.rag import authority, cache, citations, composer, conversation, retrieval, router, selfrag
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
 # Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
@@ -29,7 +29,7 @@ def _record(spine, user: str, query: str, lane: str, answer_text: str, confidenc
         )
 
 
-def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
+def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> dict:
     lane = router.route(query)
 
     if lane == "reject":
@@ -76,6 +76,13 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
                 return _package(res, "web", 1.0, [], False)
 
     system, messages = composer.compose(query, hits)
+    prior = []
+    if not fresh:
+        try:
+            prior = conversation.as_messages(conversation.recent_turns(spine, user))
+        except Exception:
+            pass  # ponytail: memory is best-effort — never break the answer
+    messages = prior + messages
 
     if llm is None:
         return _package(_LLM_DOWN, "chat", 0, [], False)
