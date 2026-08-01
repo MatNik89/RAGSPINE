@@ -61,6 +61,14 @@ def test_build_digest_empty_state(spine, cfg):
     assert "Nema hitnih obveza" in text
 
 
+def test_build_digest_eracun_only_suppresses_empty_state(spine, cfg):
+    with spine.write() as c:
+        c.execute("INSERT INTO notifications(kind, body) VALUES('eracun','novi e-racun')")
+    text = digest.build_digest(spine, cfg, now_fn=lambda: date(2026, 8, 1))
+    assert "Novi e-računi: 1" in text
+    assert "Nema hitnih obveza" not in text
+
+
 def test_build_digest_filters_by_worker(spine, cfg):
     today = date(2026, 8, 1)
     cid_ana = _client(spine, "Ana Klijent", owner="ana")

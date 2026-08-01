@@ -43,3 +43,28 @@
   apprise package installed/mocked here, so the actual network-call code path
   is unverified beyond code review (matches the task's "no real network/apprise
   in tests" constraint).
+
+## Review fix round 1
+
+Two small issues from coordinator review, both in `ragspine/ops/digest.py`:
+
+1. **Empty-state contradiction**: the "Nema hitnih obveza danas." check omitted
+   `eracun_count`, so a digest with only new e-računi (nothing else pending)
+   printed both "Novi e-računi: N" and the contradictory "nothing pending"
+   line. Fixed by adding `eracun_count` to the `if not (...)` guard — the
+   friendly empty-state line now only appears when literally every section,
+   including e-računi, is empty. Added
+   `test_build_digest_eracun_only_suppresses_empty_state` (seeds one
+   `kind='eracun'` notification, asserts the count line is present and "Nema
+   hitnih obveza" is absent).
+2. **Credential-in-log risk**: `deliver()`'s except handler logged
+   `str(e)` — apprise exception text can embed the target URL/credentials
+   (e.g. `mailto://user:pass@host`, `tgram://bottoken@...`). Changed to log
+   only `type(e).__name__`, never the exception string or the URLs; still
+   returns `"error"`. Confirmed separately: `cfg.apprise_urls` is never
+   written into the `notifications` INSERT anywhere in the module (only
+   `build_digest`'s Croatian text and the fixed subject string are stored).
+
+Test command: `python -m pytest tests/test_digest.py -q` → **11 passed**.
+Full suite: `python -m pytest tests/ -q` → **306 passed, 1 skipped** (305 + 1
+new test).

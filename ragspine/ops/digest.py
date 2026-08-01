@@ -83,7 +83,7 @@ def build_digest(spine, cfg, worker: str | None = None, now_fn=None) -> str:
         lines.append("")
         lines.append(f"Novi e-računi: {eracun_count}")
 
-    if not (deadlines or unsent or expiring or law_changes):
+    if not (deadlines or unsent or expiring or law_changes or eracun_count):
         lines.append("")
         lines.append("Nema hitnih obveza danas.")
 
@@ -108,7 +108,9 @@ def deliver(cfg, subject: str, body: str) -> str:
         ok = app.notify(title=subject, body=body)
         return "apprise" if ok else "error"
     except Exception as e:
-        logger.warning("digest deliver failed: %s", e)
+        # ponytail: never log str(e) or the urls here — apprise exception text
+        # can embed target credentials (mailto://user:pass@host, tgram://token@...).
+        logger.warning("digest deliver failed (apprise, %s)", type(e).__name__)
         return "error"
 
 
