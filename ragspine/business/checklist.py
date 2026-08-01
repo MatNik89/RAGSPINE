@@ -20,7 +20,7 @@ def score_client(spine, client_id: int) -> dict:
     score = 0
     missing = []
     for col, label in FIELDS:
-        if row[col]:
+        if row[col] and str(row[col]).strip():
             score += FIELD_WEIGHT
         else:
             missing.append(label)

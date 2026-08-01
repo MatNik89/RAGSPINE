@@ -32,6 +32,14 @@ def test_score_client_complete(spine):
     assert result["missing"] == []
 
 
+def test_score_client_whitespace_field_treated_as_missing(spine):
+    cid = _client(spine, name="Gama", oib="123", email="a@b.hr", phone="   ",
+                  owner="Ana", industry="IT", pdv_status="u sustavu pdv")
+    result = checklist.score_client(spine, cid)
+    assert "telefon" in result["missing"]
+    assert result["score"] == 50  # 5 real fields * 10; phone + both doc weights missing
+
+
 def test_worst_first_orders_ascending(spine):
     good = _client(spine, name="Beta", oib="1", email="a@b.hr", phone="099",
                     owner="Ana", industry="IT", pdv_status="u sustavu pdv")
