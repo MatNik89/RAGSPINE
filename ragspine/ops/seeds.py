@@ -55,10 +55,18 @@ KONTNI_PLAN: list[tuple[str, str, str]] = [
     ("9030", "Gubitak razdoblja", "9"),
 ]
 
-# ponytail: URL unverified against live porezna-uprava.gov.hr (no network
-# access at write time), same caveat as web/watchlist.py DEFAULT_RSS tip=3.
-# Operater ispravlja preko spine.set_override ako se promijeni.
-TAX_CALENDAR_URL = "https://www.porezna-uprava.gov.hr/kalendar-poreznih-obveza"
+# Provjereni izvori (2026-08-01, svi vraćaju HTTP 200). Porezna uprava nema
+# zasebnu "kalendar" stranicu — nove stope/pravilnici/obavijesti objavljuju se na
+# stranici vijesti; hash-diff + law_diff + extract_rates hvataju promjene odatle.
+POREZNA_VIJESTI_URL = "https://porezna-uprava.gov.hr/hr/vijesti/8"
+
+# Narodne novine (nema RSS-a): prati listu izdanja po dijelovima kao 'page'.
+# sortiraj=4 = po datumu (najnovije gore), kategorija: 1=službeni, 2=međunarodni, 3=oglasni.
+NN_LISTINGS = [
+    ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=1", "nn-sluzbeni"),
+    ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=2", "nn-medjunarodni"),
+    ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=3", "nn-oglasni"),
+]
 
 
 def kontni_plan(spine) -> int:
@@ -75,7 +83,8 @@ def kontni_plan(spine) -> int:
 
 def watch_defaults(spine) -> int:
     n = 0
-    sources = [(TAX_CALENDAR_URL, "kalendar", "page")]
+    sources = [(POREZNA_VIJESTI_URL, "porezna-vijesti", "page")]
+    sources += [(url, category, "page") for url, category in NN_LISTINGS]
     sources += [(url, category, "rss") for url, category in DEFAULT_RSS]
     for url, category, kind in sources:
         existing = spine.read().execute(

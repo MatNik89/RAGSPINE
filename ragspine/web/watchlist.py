@@ -19,11 +19,13 @@ INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "proizvodnja": ["proizvodnja", "industrija", "tvornica", "pogon", "prerada"],
 }
 
-DEFAULT_RSS = [
-    ("https://narodne-novine.nn.hr/rss.aspx?tip=1", "sluzbeni"),
-    ("https://narodne-novine.nn.hr/rss.aspx?tip=2", "medjunarodni"),
-    ("https://narodne-novine.nn.hr/rss.aspx?tip=3", "oglasi"),  # ponytail: tip=3 unverified against live NN site; confirm when seeding in Task 36
-]
+# Narodne novine ne nudi klasični RSS feed — objavljuje kroz HTML/RDF/JSON-LD
+# (provjereno 2026-08-01: nema rss.aspx endpointa). Zato nema default rss izvora;
+# službeni/međunarodni/oglasni dio prate se kao 'page' hash-diff izvori (vidi
+# ops/seeds.py NN_LISTINGS). Industry-keyword RSS matching (check_rss) ostaje
+# dostupan za bilo koji pravi RSS koji radnik doda kroz /watchlist/sources kind='rss'.
+# ponytail: ako NN jednom uvede RSS, dodaj ga ovdje i seeds.watch_defaults ga pokupi.
+DEFAULT_RSS: list[tuple[str, str]] = []
 
 _DIACRITICS = str.maketrans("čćžšđ", "cczsd")
 
