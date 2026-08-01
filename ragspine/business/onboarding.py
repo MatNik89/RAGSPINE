@@ -1,11 +1,14 @@
 # Client onboarding: add a client, create its NAS folder, upload + ingest
 # its documents. Backend for the "Dodaj novog klijenta" UI (built later).
+import logging
 import os
 import re
 import sqlite3
 
 from ragspine.core import security
 from ragspine.docs.ingest import ingest_file
+
+_log = logging.getLogger(__name__)
 
 _EXT_ALLOW = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".xlsx", ".txt", ".md"}
 
@@ -40,6 +43,12 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
     if oib and not security.oib_valid(oib):
         raise ValueError("neispravan OIB")
 
+    # ponytail: INSERT + nas_folder UPDATE must land in the SAME transaction —
+    # otherwise there's a window where the row exists with nas_folder="" and a
+    # concurrent add_document for this client_id would resolve to nas_root
+    # itself (defeats per-client folder isolation). Disk folder is created
+    # only after that transaction commits.
+    root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     try:
         with spine.write() as c:
             client_id = c.execute(
@@ -49,16 +58,13 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
                  data.get("industry") or "", data.get("pdv_status") or "",
                  data.get("pausal_eur") or 0),
             ).lastrowid
+            folder_path = _client_root(cfg, client_id, name)
+            nas_folder = os.path.relpath(folder_path, root)
+            c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas_folder, client_id))
     except sqlite3.IntegrityError as e:
         raise ValueError("klijent s tim OIB-om već postoji") from e
 
-    root = os.path.realpath(cfg.nas_root or cfg.data_dir)
-    folder_path = _client_root(cfg, client_id, name)
-    nas_folder = os.path.relpath(folder_path, root)
     os.makedirs(folder_path, exist_ok=True)
-    with spine.write() as c:
-        c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas_folder, client_id))
-
     spine.audit(owner, "client_create", str(client_id), name)
     return {"id": client_id, "name": name, "nas_folder": nas_folder, "folder_path": folder_path}
 
@@ -85,6 +91,15 @@ def add_document(spine, cfg, client_id, filename, data: bytes, owner: str = "") 
         raise ValueError(f"nedozvoljen naziv/ekstenzija dokumenta: {filename!r}")
 
     os.makedirs(client_dir, exist_ok=True)
+
+    # collision guard: never silently overwrite an existing upload — uniquify
+    # like sop_images.add_image does (stem_2.ext, stem_3.ext, ...).
+    stem, ext = os.path.splitext(safe_name)
+    n = 1
+    while os.path.exists(os.path.join(client_dir, safe_name)):
+        n += 1
+        safe_name = f"{stem}_{n}{ext}"
+
     dest = os.path.realpath(os.path.join(client_dir, safe_name))
     if os.path.commonpath([dest, client_dir]) != client_dir:
         raise ValueError("path traversal blocked")
@@ -96,7 +111,8 @@ def add_document(spine, cfg, client_id, filename, data: bytes, owner: str = "") 
     # lose the file already written to disk — degrade to doc_id=None.
     try:
         doc_id = ingest_file(spine, dest, client_id=client_id)
-    except Exception:
+    except Exception as e:
+        _log.warning("ingest failed for %s: %s", dest, e)
         doc_id = None
 
     spine.audit(owner, "client_document_add", str(client_id), safe_name)

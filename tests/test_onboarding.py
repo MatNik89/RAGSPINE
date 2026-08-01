@@ -36,6 +36,15 @@ def test_create_client_valid_inserts_row_and_creates_folder(spine, cfg):
     assert row["nas_folder"] == result["nas_folder"]
 
 
+def test_create_client_nas_folder_never_empty_right_after_create(spine, cfg):
+    result = onboarding.create_client(spine, cfg, {"name": "Atomic Klijent"}, "ana")
+    row = spine.read().execute(
+        "SELECT nas_folder FROM clients WHERE id=?", (result["id"],)
+    ).fetchone()
+    assert row["nas_folder"]
+    assert row["nas_folder"] == result["nas_folder"]
+
+
 def test_create_client_bad_oib_raises(spine, cfg):
     with pytest.raises(ValueError):
         onboarding.create_client(spine, cfg, {"name": "Test d.o.o.", "oib": BAD_OIB}, "ana")
@@ -125,6 +134,19 @@ def test_add_document_unknown_client_raises(spine, cfg):
         onboarding.add_document(spine, cfg, 999999, "a.pdf", b"x", owner="ana")
 
 
+def test_add_document_filename_collision_uniquified(spine, cfg):
+    client = onboarding.create_client(spine, cfg, {"name": "Klijent Kolizija"}, "ana")
+    r1 = onboarding.add_document(spine, cfg, client["id"], "a.pdf", b"first upload", owner="ana")
+    r2 = onboarding.add_document(spine, cfg, client["id"], "a.pdf", b"second upload", owner="ana")
+    assert r1["path"] != r2["path"]
+    with open(r1["path"], "rb") as f:
+        assert f.read() == b"first upload"
+    with open(r2["path"], "rb") as f:
+        assert f.read() == b"second upload"
+    docs = onboarding.list_documents(spine, cfg, client["id"])
+    assert len(docs) == 2
+
+
 def test_list_documents_shows_files_and_ingested_flag(spine, cfg):
     client = onboarding.create_client(spine, cfg, {"name": "Klijent Lista"}, "ana")
     onboarding.add_document(spine, cfg, client["id"], "a.pdf", b"binary junk", owner="ana")
@@ -193,6 +215,16 @@ def test_api_upload_document_and_list(spine, cfg):
     r = c.get(f"/clients/{client_id}/documents", headers=headers)
     assert r.status_code == 200
     assert len(r.json()) == 1
+
+
+def test_api_upload_document_unknown_client_404(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    headers = {"Authorization": f"Bearer {tok}"}
+    b64 = base64.b64encode(b"x").decode()
+    r = c.post("/clients/9999/document", json={"filename": "a.pdf", "data_base64": b64},
+               headers=headers)
+    assert r.status_code == 404
 
 
 def test_api_list_and_get_client(spine, cfg):

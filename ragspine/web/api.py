@@ -489,6 +489,8 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/clients/{client_id}/document")
     def client_document_add(client_id: int, body: ClientDocumentBody,
                              user: str = Depends(require_user_web)):
+        if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
+            raise HTTPException(404, "nepoznat klijent")
         try:
             data = base64.b64decode(body.data_base64, validate=True)
         except binascii.Error as e:
