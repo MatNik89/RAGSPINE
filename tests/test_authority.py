@@ -41,6 +41,13 @@ def test_detect_unknown_default():
     assert auth.detect_authority("Nešto sasvim drugo") == ("default", 0.5)
 
 
+def test_detect_strukovno_beats_interna_on_multi_match():
+    # "Interna procedura Hrvatske komore" hits both the strukovno (komora) and
+    # interna_procedura (interna/procedura) keyword sets; the higher-weight
+    # tier (strukovno, 0.75) must win over the lower one (interna, 0.7).
+    assert auth.detect_authority("Interna procedura Hrvatske komore") == ("strukovno", 0.75)
+
+
 # --- authority_bonus ---
 
 def test_authority_bonus_zakon():
@@ -120,6 +127,23 @@ def test_pipeline_confidence_favors_zakon(tmp_path, cfg):
                              llm=_llm(cfg, "Stopa je 25% [1]."))
 
     assert r_zakon["confidence"] > r_sop["confidence"]
+
+
+def test_pipeline_confidence_uses_only_cited_hit(spine, cfg, monkeypatch):
+    # Both a Zakon and an SOP are in context; confidence must track WHICH one
+    # the LLM actually cited, not the strongest source merely present in hits.
+    monkeypatch.setattr(pipeline.retrieval, "search",
+                         lambda *a, **kw: [ZAKON_HIT, SOP_HIT])
+
+    r_sop_cited = pipeline.answer(spine, cfg, "koji je rok za joppd?", "ana",
+                                   llm=_llm(cfg, "Rok je 15 dana [2]."))
+    r_zakon_cited = pipeline.answer(spine, cfg, "kolika je stopa pdv-a?", "ana",
+                                     llm=_llm(cfg, "Stopa je 25% [1]."))
+
+    assert r_zakon_cited["confidence"] > r_sop_cited["confidence"]
+    # exact blend: base confidence (coverage*validity=1.0 here) * 0.7 + bonus*0.3
+    assert round(r_sop_cited["confidence"], 2) == round(0.7 * 1.0 + 0.3 * 0.7, 2)
+    assert round(r_zakon_cited["confidence"], 2) == round(0.7 * 1.0 + 0.3 * 1.0, 2)
 
 
 def test_pipeline_idk_gate_unaffected_by_authority(spine, cfg):

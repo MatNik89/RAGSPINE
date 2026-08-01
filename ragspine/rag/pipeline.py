@@ -89,7 +89,8 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
         final_text, confidence, sources = citations.IDK, 0, []
     else:
         final_text = result.text
-        confidence = citations.blend_authority(report.confidence, hits)
+        cited_hits = [hits[n - 1] for n in report.cited if 1 <= n <= len(hits)]
+        confidence = citations.blend_authority(report.confidence, cited_hits)
         sources = [{"n": n, "title": hits[n - 1].title, "doc_id": hits[n - 1].doc_id}
                    for n in report.cited]
         try:

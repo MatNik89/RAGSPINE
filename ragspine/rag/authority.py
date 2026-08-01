@@ -41,10 +41,10 @@ def detect_authority(title: str, path: str = "", doc_type: str = "") -> tuple[st
         tier = "misljenje_porezna"
     elif "narodne novine" in hay or "nn " in hay:
         tier = "nn_objava"
+    elif "hrvatska zajednica" in hay or "komor" in hay or "strukovn" in hay:
+        tier = "strukovno"
     elif "sop" in hay or "interna" in hay or "procedura" in hay:
         tier = "interna_procedura"
-    elif "hrvatska zajednica" in hay or "komora" in hay or "strukovn" in hay:
-        tier = "strukovno"
     else:
         tier = "default"
     return tier, AUTHORITY[tier]
