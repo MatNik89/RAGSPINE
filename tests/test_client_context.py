@@ -1,5 +1,5 @@
 from ragspine.business import notes, sop
-from ragspine.rag import client_context, pipeline
+from ragspine.rag import cache, client_context, pipeline
 from ragspine.docs import ingest as ing
 from ragspine.core.llm import LLMClient
 
@@ -106,3 +106,39 @@ def test_pipeline_no_napomena_when_no_client_named(spine, cfg):
     r = pipeline.answer(spine, cfg, "kolika je stopa pdv-a?", "ana", llm=_llm(cfg, "Stopa je 25% [1]."))
     assert "Napomena za klijenta" not in r["answer"]
     assert not r.get("client")
+
+
+def test_pipeline_napomena_surfaces_on_idk_when_client_named(spine, cfg):
+    # CRITICAL fix: an uncited (IDK) generic answer must not swallow the
+    # client's own SOP/note — that's exactly when it's most useful.
+    ing.ingest_text(spine, "Plaća se obračunava do 15-og u mjesecu.", "place", doc_type="zakon")
+    cid = _client(spine, "Pekara Mlinar", "111")
+    _approved_sop(spine, "Plaća za Pekaru — specifičnosti", "place", client_id=cid)
+    notes.add(spine, cid, "ana", "Kasni s dostavom dokumentacije")
+
+    r = pipeline.answer(spine, cfg, "kako se radi plaća za Pekaru Mlinar", "ana",
+                         llm=_llm(cfg, "Izmišljam bez citata."))
+    assert "napomenu za ovog klijenta" in r["answer"].lower()
+    assert "Plaća za Pekaru — specifičnosti" in r["answer"]
+    assert r["confidence"] == 0
+    assert r.get("client") is not None
+    assert r["client"]["name"] == "Pekara Mlinar"
+
+
+def test_pipeline_client_named_query_skips_stale_generic_cache(spine, cfg):
+    # MINOR fix: a client-named query must not be served from (or overwrite
+    # with) a generic text-keyed cache entry.
+    ing.ingest_text(spine, "Plaća se obračunava do 15-og u mjesecu.", "place", doc_type="zakon")
+    cid = _client(spine, "Pekara Mlinar", "111")
+    _approved_sop(spine, "Plaća za Pekaru — specifičnosti", "place", client_id=cid)
+
+    query = "kako se radi plaća za Pekaru Mlinar"
+    cache.put(spine, query, "STARI generički odgovor bez napomene.")
+
+    r = pipeline.answer(spine, cfg, query, "ana",
+                         llm=_llm(cfg, "Plaća se obračunava do 15-og [1]."))
+    assert r["answer"] != "STARI generički odgovor bez napomene."
+    assert r["cached"] is False
+    assert "Napomena za klijenta Pekara Mlinar" in r["answer"]
+    assert r.get("client") is not None
+    assert r["client"]["name"] == "Pekara Mlinar"

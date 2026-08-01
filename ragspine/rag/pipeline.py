@@ -68,6 +68,16 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
                     "sources": [], "cached": False, "clarify": True,
                     "variants": clarification["variants"]}
 
+    # W3: resolve early whether the query names a specific client. A
+    # client-named query is client-specific, so it must (a) skip the generic
+    # text-keyed cache — same reasoning as the has_history skip below — and
+    # (b) get a client-scoped napomena appended later regardless of whether
+    # citation verification succeeds. Best-effort: never break the answer.
+    try:
+        resolved_client = client_context.resolve_client(spine, query)
+    except Exception:
+        resolved_client = None
+
     # Fetch history early: a user with prior turns is mid-conversation, so a
     # text-keyed cache hit/write for their query would silently splice in (or
     # leak into) an unrelated conversation's context. Only cache first turns.
@@ -78,13 +88,18 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         except Exception:
             prior_turns = []  # ponytail: memory is best-effort — never break the answer
     has_history = bool(prior_turns)
+    skip_cache = has_history or resolved_client is not None
 
-    if not has_history:
+    if not skip_cache:
         cached_answer = cache.get(spine, query)
         if cached_answer is not None:
             return _package(cached_answer, "chat", 1.0, [], True)
 
-    kb_answer = kb.lookup(spine, query)
+    # W3: a client-named query also skips the kb fast-path, for the same
+    # reason as the cache skip above — a kb hit keyed on plain query text may
+    # have been saved for a different (or no) client and would silently drop
+    # the napomena/"client" key on repeat.
+    kb_answer = kb.lookup(spine, query) if resolved_client is None else None
     if kb_answer is not None:
         return _package(kb_answer, "chat", 0.9, [], False)
 
@@ -92,7 +107,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
     if handler is not None:
         res = handler(spine, cfg, query, llm)
         if res is not None:
-            _record(spine, user, query, lane, res, 1.0, cache_write=not has_history)
+            _record(spine, user, query, lane, res, 1.0, cache_write=not skip_cache)
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
@@ -103,7 +118,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         if web_handler is not None:
             res = web_handler(spine, cfg, query, llm)
             if res is not None:
-                _record(spine, user, query, "web", res, 1.0, cache_write=not has_history)
+                _record(spine, user, query, "web", res, 1.0, cache_write=not skip_cache)
                 return _package(res, "web", 1.0, [], False)
 
     system, messages = composer.compose(query, hits)
@@ -117,9 +132,26 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
     report = citations.verify(result.text, hits)
-    resolved_client = None
+
+    # W3: the client-specific napomena is independent of citation verification
+    # (it comes from clients/sop_pages/notes, not from `hits`) — compute it
+    # unconditionally so it can surface even when the generic answer is IDK,
+    # which is exactly when the client's own SOP/note is most needed.
+    # Best-effort, must never break the answer.
+    napomena_block = ""
+    if resolved_client is not None:
+        try:
+            napomena_block = client_context.client_note_block(
+                spine, resolved_client["id"], resolved_client["name"], query)
+        except Exception:
+            napomena_block = ""
+
     if not report.ok:
-        final_text, confidence, sources = citations.IDK, 0, []
+        if resolved_client is not None and napomena_block:
+            final_text = f"Ne znam općenito, ali imam napomenu za ovog klijenta:\n\n{napomena_block}"
+        else:
+            final_text = citations.IDK
+        confidence, sources = 0, []
     else:
         final_text = result.text
         cited_hits = [hits[n - 1] for n in report.cited if 1 <= n <= len(hits)]
@@ -133,24 +165,15 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
                 final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
         except Exception:
             pass
-        # W3: if the query names a specific client, append that client's own
-        # SOPs/notes as a "Napomena" — best-effort, must never break the answer.
-        try:
-            resolved_client = client_context.resolve_client(spine, query)
-            if resolved_client is not None:
-                block = client_context.client_note_block(
-                    spine, resolved_client["id"], resolved_client["name"], query)
-                if block:
-                    final_text = f"{final_text}\n\n{block}"
-        except Exception:
-            resolved_client = None
+        if napomena_block:
+            final_text = f"{final_text}\n\n{napomena_block}"
 
-    _record(spine, user, query, "chat", final_text, confidence, cache_write=not has_history)
+    _record(spine, user, query, "chat", final_text, confidence, cache_write=not skip_cache)
     try:
         features.maybe_file_gap(spine, user, query, final_text, confidence)
     except Exception:
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
-    if report.ok:
+    if report.ok and resolved_client is None:
         kb.save(spine, query, final_text)
     result = _package(final_text, "chat", confidence, sources, False)
     if resolved_client is not None:
