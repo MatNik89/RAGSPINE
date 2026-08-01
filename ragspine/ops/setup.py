@@ -114,4 +114,16 @@ def run(cfg) -> str:
     if fit is None and shutil.which("llmfit") is None:
         lines.append("  llmfit: pip install llmfit (za preporuku modela po hardveru)")
 
+    try:
+        from ragspine.ops import model_recommender
+        rec = model_recommender.recommend(hw)
+        chat = rec["roles"].get("chat", {})
+        chat_desc = chat.get("model") or f"nedostupno ({chat.get('warn')})"
+        lines += [
+            "",
+            f"Preporuka modela (tier {rec['tier']}): chat={chat_desc} — `ragspine models` za sve uloge",
+        ]
+    except Exception:
+        pass
+
     return "\n".join(lines)

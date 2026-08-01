@@ -119,6 +119,13 @@ def _cmd_setup(args) -> int:
     return 0
 
 
+def _cmd_models(args) -> int:
+    from ragspine.ops import model_recommender
+
+    print(model_recommender.report())
+    return 0
+
+
 def _cmd_eval(args) -> int:
     from ragspine.config import get_config
     from ragspine.ops import evalrun
@@ -249,6 +256,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("setup").set_defaults(func=_cmd_setup)
+    sub.add_parser("models").set_defaults(func=_cmd_models)
     sub.add_parser("daemon").set_defaults(func=_cmd_daemon)
     sub.add_parser("digest").set_defaults(func=_cmd_digest)
     sub.add_parser("eval").set_defaults(func=_cmd_eval)

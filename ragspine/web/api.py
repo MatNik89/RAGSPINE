@@ -29,7 +29,7 @@ from ragspine.docs import doc_generator, ocr, vault
 from ragspine.knowledge import features as features_mod
 from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
-from ragspine.ops import doctor, health, nis2
+from ragspine.ops import doctor, health, model_recommender, nis2
 from ragspine.rag import pipeline
 from ragspine.rag import versioning
 from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
@@ -424,6 +424,15 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/dashboard")
     def dashboard_stats(user: str = Depends(require_user_web)):
         return dashboard.stats(spine)
+
+    @app.get("/models/recommend")
+    def models_recommend(user: str = Depends(require_user_web)):
+        return model_recommender.recommend()
+
+    @app.get("/models/litellm")
+    def models_litellm(user: str = Depends(require_user_web)):
+        return Response(model_recommender.litellm_config(model_recommender.recommend()),
+                         media_type="text/plain")
 
     @app.get("/monthly")
     def monthly_overview(period: str | None = None, user: str = Depends(require_user_web)):
