@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS notifications(id INTEGER PRIMARY KEY, kind TEXT, body
   client_id INTEGER, seen INTEGER DEFAULT 0, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS eracuni(id INTEGER PRIMARY KEY, doc_id INTEGER, supplier_oib TEXT,
   customer_oib TEXT, total REAL, vat REAL, currency TEXT, issued TEXT, raw_path TEXT);
+CREATE TABLE IF NOT EXISTS konto_corrections(id INTEGER PRIMARY KEY, user TEXT, description TEXT,
+  description_norm TEXT, original_konto TEXT, corrected_konto TEXT, at TEXT DEFAULT (datetime('now')));
 """
 
 class Spine:

@@ -10,7 +10,9 @@ from ragspine.business import auditlog
 from ragspine.business import checklist
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
+from ragspine.business import feedback_learn
 from ragspine.business import kalendar
+from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lane handler
 from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
@@ -60,6 +62,16 @@ class ExpiryBody(BaseModel):
 class NoteBody(BaseModel):
     client_id: int
     body: str
+
+
+class KnjizenjeBody(BaseModel):
+    description: str
+
+
+class KnjizenjeCorrectBody(BaseModel):
+    description: str
+    original_konto: str
+    corrected_konto: str
 
 
 class OcrBody(BaseModel):
@@ -270,6 +282,16 @@ def create_app(spine, cfg) -> FastAPI:
         period = period or date.today().strftime("%Y-%m")
         ov = monthly.overview(spine, period)
         return {**ov, "text": monthly.format_overview(ov)}
+
+    @app.post("/knjizenje")
+    def knjizenje_suggest(body: KnjizenjeBody, user: str = Depends(require_user_web)):
+        return knjizenje.suggest(spine, body.description)
+
+    @app.post("/knjizenje/correct")
+    def knjizenje_correct(body: KnjizenjeCorrectBody, user: str = Depends(require_user_web)):
+        cid = feedback_learn.record_correction(spine, user, body.description,
+                                                body.original_konto, body.corrected_konto)
+        return {"id": cid, "learned": True}
 
     @app.post("/ocr")
     def ocr_run(body: OcrBody, user: str = Depends(require_user_web)):
