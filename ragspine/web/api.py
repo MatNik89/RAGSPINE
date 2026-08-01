@@ -17,6 +17,7 @@ from ragspine.business import obveze
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import jwt_encode, verify_password
+from ragspine.docs import ocr
 from ragspine.rag import pipeline
 from ragspine.web import watchlist
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
@@ -50,6 +51,10 @@ class ExpiryBody(BaseModel):
 class NoteBody(BaseModel):
     client_id: int
     body: str
+
+
+class OcrBody(BaseModel):
+    path: str
 
 
 def create_app(spine, cfg) -> FastAPI:
@@ -221,6 +226,13 @@ def create_app(spine, cfg) -> FastAPI:
         period = period or date.today().strftime("%Y-%m")
         ov = monthly.overview(spine, period)
         return {**ov, "text": monthly.format_overview(ov)}
+
+    @app.post("/ocr")
+    def ocr_run(body: OcrBody, user: str = Depends(require_user_web)):
+        try:
+            return ocr.ocr_pdf(spine, cfg, body.path)
+        except ocr.OCRUnavailable as e:
+            raise HTTPException(503, str(e)) from e
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
