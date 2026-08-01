@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS konto_corrections(id INTEGER PRIMARY KEY, user TEXT, 
   description_norm TEXT, original_konto TEXT, corrected_konto TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS message_log(id INTEGER PRIMARY KEY, client_id INTEGER, channel TEXT,
   status TEXT, subject TEXT, body_preview TEXT, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS peer_bookings(id INTEGER PRIMARY KEY, user TEXT, description TEXT,
+  description_norm TEXT, konto TEXT, amount REAL, at TEXT DEFAULT (datetime('now')));
 """
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:

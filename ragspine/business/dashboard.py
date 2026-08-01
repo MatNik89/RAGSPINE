@@ -1,6 +1,6 @@
 # Agregatni brojčani pregled za početnu stranicu.
 
-from ragspine.business import kalendar
+from ragspine.business import kalendar, peer_compare
 
 
 def stats(spine) -> dict:
@@ -19,9 +19,14 @@ def stats(spine) -> dict:
     unseen_notifications = spine.read().execute(
         "SELECT COUNT(*) AS n FROM notifications WHERE seen=0"
     ).fetchone()["n"]
+    try:
+        peer_disagreements = len(peer_compare.find_disagreements(spine))
+    except Exception:
+        peer_disagreements = 0
     return {
         "active_clients": active_clients,
         "deadlines_this_week": deadlines_this_week,
         "top_clients": [(r["name"], r["cnt"]) for r in top_rows],
         "unseen_notifications": unseen_notifications,
+        "peer_disagreements": peer_disagreements,
     }

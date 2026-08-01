@@ -27,7 +27,8 @@ def _seed_july(spine):
 def test_dashboard_stats(spine):
     _seed(spine)
     s = dashboard.stats(spine)
-    assert set(s) == {"active_clients", "deadlines_this_week", "top_clients", "unseen_notifications"}
+    assert set(s) == {"active_clients", "deadlines_this_week", "top_clients",
+                       "unseen_notifications", "peer_disagreements"}
     assert s["active_clients"] == 2
     assert s["unseen_notifications"] == 1
     assert isinstance(s["deadlines_this_week"], int)

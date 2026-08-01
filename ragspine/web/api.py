@@ -17,6 +17,7 @@ from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lan
 from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
+from ragspine.business import peer_compare
 from ragspine.web import messaging
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
@@ -108,6 +109,12 @@ class KnjizenjeCorrectBody(BaseModel):
     description: str
     original_konto: str
     corrected_konto: str
+
+
+class PeerBookingBody(BaseModel):
+    description: str
+    konto: str
+    amount: float = 0
 
 
 class OcrBody(BaseModel):
@@ -405,6 +412,17 @@ def create_app(spine, cfg) -> FastAPI:
         cid = feedback_learn.record_correction(spine, user, body.description,
                                                 body.original_konto, body.corrected_konto)
         return {"id": cid, "learned": True}
+
+    @app.post("/peer/booking")
+    def peer_booking_record(body: PeerBookingBody, user: str = Depends(require_user_web)):
+        bid = peer_compare.record_booking(spine, user, body.description, body.konto,
+                                           amount=body.amount)
+        return {"id": bid}
+
+    @app.get("/peer/disagreements")
+    def peer_disagreements(days: int = 30, user: str = Depends(require_user_web)):
+        return {"disagreements": peer_compare.find_disagreements(spine, days=days),
+                "summary": peer_compare.peer_summary(spine, days=days)}
 
     @app.post("/ocr")
     def ocr_run(body: OcrBody, user: str = Depends(require_user_web)):
