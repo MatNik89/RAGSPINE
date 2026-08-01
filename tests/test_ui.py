@@ -97,3 +97,49 @@ def test_pages_have_no_external_assets(spine, cfg):
         assert r.status_code == 200
         assert "http://" not in r.text
         assert "https://" not in r.text
+
+
+def test_pages_use_design_system_shell(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    _seed_pending_sop(spine)
+    for url in ("/", "/ui/chat", "/ui/upute"):
+        r = c.get(url, headers=_auth(tok))
+        assert r.status_code == 200
+        text = r.text
+        # self-hosted fonts, no CDN
+        assert "@font-face" in text
+        assert "/static/fonts/PlexSans-400.woff2" in text
+        assert "/static/fonts/PlexMono-400.woff2" in text
+        # nav present with the required links
+        assert "Nadzorna ploča" in text
+        assert "Chat" in text
+        assert "Klijenti" in text
+        assert "Upute" in text
+        # theme-init runs before paint, no-flash
+        assert "data-theme" in text
+        assert "localStorage" in text
+        # design tokens
+        assert "--accent" in text
+        assert "--bg" in text
+
+
+def test_theme_toggle_present(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.get("/", headers=_auth(tok))
+    assert r.status_code == 200
+    assert "toggleTheme" in r.text
+    assert 'id="theme-toggle"' in r.text
+    assert "ragspine-theme" in r.text
+
+
+def test_chat_and_upute_functionality_preserved(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r_chat = c.get("/ui/chat", headers=_auth(tok))
+    assert "/chat" in r_chat.text
+    assert "same-origin" in r_chat.text
+    r_upute = c.get("/ui/upute", headers=_auth(tok))
+    assert "/sop" in r_upute.text
+    assert "/sop/" in r_upute.text and "image" in r_upute.text

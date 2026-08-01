@@ -25,6 +25,7 @@ from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
 from ragspine.business import sop_images
 from ragspine.web import messaging
+from ragspine.web import static as static_mod
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
 from ragspine.core import memory as memory_mod
@@ -229,6 +230,7 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
+    app.include_router(static_mod.router)
 
     @app.get("/health")
     def health():
