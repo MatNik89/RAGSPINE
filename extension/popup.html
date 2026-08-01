@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8" />
+  <title>RAGSPINE Bridge</title>
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 260px; padding: 10px; }
+    label { display: block; margin-top: 8px; font-weight: 600; }
+    input { width: 100%; box-sizing: border-box; padding: 4px; margin-top: 2px; }
+    button { margin-top: 10px; width: 100%; padding: 6px; }
+    #status { margin-top: 10px; color: #555; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <h3>RAGSPINE Bridge</h3>
+  <label for="server">Server URL</label>
+  <input id="server" type="text" placeholder="http://localhost:8000" />
+  <label for="token">Token</label>
+  <input id="token" type="password" placeholder="Bearer token" />
+  <button id="save">Spremi</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
