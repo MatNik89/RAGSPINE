@@ -2,6 +2,8 @@
 import re
 from dataclasses import dataclass
 
+from ragspine.rag.authority import blend_authority  # noqa: F401  (re-exported for callers)
+
 IDK = "Ne znam — nemam izvor za ovo u bazi."
 
 _REF_RE = re.compile(r"\[(\d+)\]")

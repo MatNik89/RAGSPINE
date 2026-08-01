@@ -150,6 +150,11 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
         graphrag.index_doc(spine, doc_id, text)
     except ImportError:
         pass
+    try:
+        from ragspine.rag import authority
+        authority.index_references(spine, doc_id, text)
+    except ImportError:
+        pass
     return doc_id
 
 

@@ -4,7 +4,7 @@ import json
 from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import kb
-from ragspine.rag import cache, citations, composer, retrieval, router, selfrag
+from ragspine.rag import authority, cache, citations, composer, retrieval, router, selfrag
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
 # Signature: handler(spine, cfg, query, llm) -> str|None; None falls back to chat lane.
@@ -89,9 +89,16 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
         final_text, confidence, sources = citations.IDK, 0, []
     else:
         final_text = result.text
-        confidence = report.confidence
+        confidence = citations.blend_authority(report.confidence, hits)
         sources = [{"n": n, "title": hits[n - 1].title, "doc_id": hits[n - 1].doc_id}
                    for n in report.cited]
+        try:
+            related = authority.related_documents(spine, hits)
+            if related:
+                titles = ", ".join(r["title"] for r in related)
+                final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
+        except Exception:
+            pass
 
     _record(spine, user, query, "chat", final_text, confidence)
     if report.ok:
