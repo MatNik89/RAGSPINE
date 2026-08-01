@@ -113,6 +113,7 @@ class Spine:
                 "messaging_target": "TEXT DEFAULT ''",
                 "pausal_eur": "REAL DEFAULT 0",
             })
+            _ensure_columns(c, "documents", {"file_sha": "TEXT"})
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
 

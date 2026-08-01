@@ -117,6 +117,16 @@ def _norm_sha(text: str) -> str:
     return hashlib.sha256(re.sub(r"\s+", " ", text.strip()).encode("utf-8")).hexdigest()
 
 
+def _file_sha(path: str, bufsize: int = 1 << 20) -> str:
+    """SHA-256 of raw file bytes (streamed), distinct from _norm_sha's
+    normalized-TEXT hash — this is the vault's move/rename identity key."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(bufsize), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
                  client_id=None, source_url: str = "", path: str = ""):
     sha = _norm_sha(text)
@@ -159,8 +169,13 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
 
 
 def ingest_file(spine, path: str, client_id=None):
+    fsha = _file_sha(path)
     text = extract_text(path)
-    return ingest_text(spine, text, os.path.basename(path), client_id=client_id, path=path)
+    doc_id = ingest_text(spine, text, os.path.basename(path), client_id=client_id, path=path)
+    if doc_id is not None:
+        with spine.write() as c:
+            c.execute("UPDATE documents SET file_sha=? WHERE id=?", (fsha, doc_id))
+    return doc_id
 
 
 def bulk_ingest(spine, folder: str) -> dict:

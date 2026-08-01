@@ -24,7 +24,7 @@ from ragspine.browser.bridge import Bridge
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import hash_password, jwt_encode, verify_password
-from ragspine.docs import doc_generator, ocr
+from ragspine.docs import doc_generator, ocr, vault
 from ragspine.knowledge import features as features_mod
 from ragspine.knowledge import patterns as patterns_mod
 from ragspine.knowledge import translate as translate_mod
@@ -119,6 +119,11 @@ class PeerBookingBody(BaseModel):
 
 class OcrBody(BaseModel):
     path: str
+
+
+class VaultScanBody(BaseModel):
+    root: str
+    ingest_new: bool = True
 
 
 class TranslateBody(BaseModel):
@@ -432,6 +437,18 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(503, str(e)) from e
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    @app.post("/vault/scan")
+    def vault_scan_run(body: VaultScanBody, user: str = Depends(require_user_web)):
+        try:
+            root = vault.resolve_scope(cfg, body.root)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return vault.scan_directory(spine, root, ingest_new=body.ingest_new)
+
+    @app.get("/vault/status")
+    def vault_status_get(user: str = Depends(require_user_web)):
+        return vault.vault_status(spine)
 
     @app.post("/translate")
     def translate_text(body: TranslateBody, user: str = Depends(require_user_web)):
