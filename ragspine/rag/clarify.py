@@ -49,13 +49,34 @@ def mentions_type(query: str) -> str | None:
     return None
 
 
+_PREFIX_MIN = 4  # min shared-prefix length to call two words "the same" across Croatian declension
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
 def mentions_client(spine, query: str) -> str | None:
-    q = _normalize(query or "")
+    """Declension-robust: Croatian case endings change a name's tail
+    ("Pekara" -> "za Pekaru"), so match on a >=4-char shared prefix between
+    a significant (>=4 char) name word and a query word, not exact/substring
+    equality. Short name words (e.g. "d.o.o.") are never enough alone."""
+    q_words = re.findall(r"\w+", _normalize(query or ""))
     rows = spine.read().execute("SELECT name FROM clients").fetchall()
     for row in rows:
         name = row["name"]
-        if name and _normalize(name) in q:
-            return name
+        if not name:
+            continue
+        name_words = [w for w in re.findall(r"\w+", _normalize(name)) if len(w) >= _PREFIX_MIN]
+        for nw in name_words:
+            for qw in q_words:
+                if len(qw) >= _PREFIX_MIN and _common_prefix_len(nw, qw) >= _PREFIX_MIN:
+                    return name
     return None
 
 

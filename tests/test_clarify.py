@@ -35,6 +35,23 @@ def test_mentions_client_diacritic_insensitive(spine):
     assert clarify.mentions_client(spine, "placa za Krcmaric d.o.o.") == "Krčmarić"
 
 
+def test_mentions_client_declined_form(spine):
+    _client(spine, "Pekara Mlinar", "333")
+    # Croatian accusative case ("za Pekaru Mlinar") changes the nominative
+    # tail — a plain substring match would miss this real-world phrasing.
+    assert clarify.mentions_client(spine, "kako se radi plaća za Pekaru Mlinar") == "Pekara Mlinar"
+
+
+def test_mentions_client_declined_form_partial(spine):
+    _client(spine, "Pekara Mlinar", "333")
+    assert clarify.mentions_client(spine, "placa za Pekaru") == "Pekara Mlinar"
+
+
+def test_mentions_client_unrelated_query_does_not_match(spine):
+    _client(spine, "Pekara Mlinar", "333")
+    assert clarify.mentions_client(spine, "kako se radi plaća za obrt") is None
+
+
 def test_needs_clarification_triggers_on_multiple_variants(spine):
     a = _client(spine, "Klijent A", "1")
     b = _client(spine, "Klijent B", "2")
@@ -76,6 +93,15 @@ def test_needs_clarification_none_when_client_named(spine):
     _approved_sop(spine, "Plaća za obrt", "place", client_id=a)
     _approved_sop(spine, "Plaća za poduzeće", "place", client_id=b)
     assert clarify.needs_clarification(spine, "kako se radi plaća za Klijent A") is None
+
+
+def test_needs_clarification_none_when_client_named_declined_form(spine):
+    a = _client(spine, "Pekara Mlinar", "1")
+    b = _client(spine, "Klijent B", "2")
+    _approved_sop(spine, "Plaća za obrt", "place", client_id=a)
+    _approved_sop(spine, "Plaća za poduzeće", "place", client_id=b)
+    # client is named, just in declined form — must NOT ask for clarification
+    assert clarify.needs_clarification(spine, "kako se radi plaća za Pekaru Mlinar") is None
 
 
 def test_pipeline_returns_clarify_lane(spine, cfg):
