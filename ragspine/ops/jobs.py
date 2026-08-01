@@ -4,6 +4,7 @@ import logging
 from datetime import date
 
 from ragspine.business import expiry, kalendar, obveze
+from ragspine.core import memory
 from ragspine.docs import imap_fetch
 from ragspine.ops import digest, health, reminders_dump
 from ragspine.ops.scheduler import Job
@@ -76,6 +77,11 @@ def reminders_dump_job(spine, cfg) -> None:
     logger.info("reminders_dump_job: wrote %s (%d items)", result["path"], result["count"])
 
 
+def memory_decay_job(spine, cfg) -> None:
+    count = memory.decay_all(spine)
+    logger.info("memory_decay_job: %d rows decayed", count)
+
+
 def register_defaults(sched) -> None:
     sched.register(Job(name="watchlist", fn=watchlist_job, interval_s=3600))
     sched.register(Job(name="imap", fn=imap_job, interval_s=300))
@@ -88,3 +94,4 @@ def register_defaults(sched) -> None:
         Job(name="digest", fn=digest.digest_job, interval_s=0, daily=True, at_hour=sched.cfg.digest_hour)
     )
     sched.register(Job(name="reminders_dump", fn=reminders_dump_job, interval_s=3600))
+    sched.register(Job(name="memory_decay", fn=memory_decay_job, interval_s=0, daily=True, at_hour=4))

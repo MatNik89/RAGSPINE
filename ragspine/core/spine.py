@@ -119,6 +119,11 @@ class Spine:
                 "supersedes": "INTEGER",
                 "version": "INTEGER DEFAULT 1",
             })
+            _ensure_columns(c, "memory", {
+                "hot_score": "REAL DEFAULT 1.0",
+                "last_access": "TEXT DEFAULT (datetime('now'))",
+                "access_count": "INTEGER DEFAULT 0",
+            })
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
 

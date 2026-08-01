@@ -22,6 +22,7 @@ from ragspine.business import peer_compare
 from ragspine.web import messaging
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
+from ragspine.core import memory as memory_mod
 from ragspine.core import optional
 from ragspine.core.llm import LLMClient, LLMError, LLMUnavailable
 from ragspine.core.security import hash_password, jwt_encode, verify_password
@@ -68,6 +69,11 @@ class ExpiryBody(BaseModel):
 class NoteBody(BaseModel):
     client_id: int
     body: str
+
+
+class MemoryBody(BaseModel):
+    key: str
+    value: str
 
 
 class ReminderBody(BaseModel):
@@ -349,6 +355,22 @@ def create_app(spine, cfg) -> FastAPI:
     def notes_add(body: NoteBody, user: str = Depends(require_user_web)):
         note_id = notes.add(spine, body.client_id, user, body.body)
         return {"id": note_id}
+
+    @app.get("/memory/hot")
+    def memory_hot(limit: int = 10, user: str = Depends(require_user_web)):
+        return memory_mod.hot_memories(spine, user, limit=limit)
+
+    @app.post("/memory")
+    def memory_write(body: MemoryBody, user: str = Depends(require_user_web)):
+        memory_mod.write_memory(spine, user, body.key, body.value)
+        return {"key": body.key}
+
+    @app.get("/memory/{key}")
+    def memory_get(key: str, user: str = Depends(require_user_web)):
+        value = memory_mod.get_memory(spine, user, key)
+        if value is None:
+            raise HTTPException(404, "nema takvog zapisa")
+        return {"key": key, "value": value}
 
     @app.post("/messaging/send")
     def messaging_send(body: MessagingSendBody, user: str = Depends(require_user_web)):
