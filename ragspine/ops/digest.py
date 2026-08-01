@@ -2,12 +2,35 @@
 # rokove, neposlane obveze, isteke dokumenata i zakonske promjene, dostavljeno
 # apprise-om (ako je konfiguriran) ili spremljeno u notifications inače.
 import logging
+import re
 from datetime import date
 
 from ragspine.business import expiry, kalendar
 from ragspine.core import optional
+from ragspine.web.watchlist import INDUSTRY_KEYWORDS
 
 logger = logging.getLogger(__name__)
+
+# Poznate djelatnosti = ključevi INDUSTRY_KEYWORDS. Kategorija watch-izvora
+# (npr. "ugostiteljstvo-turizam", "trgovina-proizvodnja-it") nosi industry-tokene;
+# univerzalni izvori (porezna-vijesti, nn-*, place-statistika, doprinosi-hzmo)
+# nemaju nijedan industry-token pa se prikazuju svima.
+KNOWN_INDUSTRIES = set(INDUSTRY_KEYWORDS)
+_DIA = str.maketrans("čćžšđ", "cczsd")
+_CAT_RE = re.compile(r"^\[([^\]]+)\]")
+
+
+def _norm(s: str) -> str:
+    return (s or "").strip().lower().translate(_DIA)
+
+
+def _cat_industries(body: str) -> set:
+    """Industry-tokeni iz [category] prefiksa notifikacije; prazan set = univerzalno."""
+    m = _CAT_RE.match(body or "")
+    if not m:
+        return set()
+    tokens = {_norm(t) for t in m.group(1).split("-")}
+    return tokens & KNOWN_INDUSTRIES
 
 
 def _worker_client_ids(spine, worker: str) -> set:
@@ -30,12 +53,32 @@ def _unsent(spine, period: str, worker: str | None) -> list:
     return spine.read().execute(q, params).fetchall()
 
 
-def _law_changes(spine) -> list:
-    return spine.read().execute(
+def _worker_industries(spine, worker: str) -> set:
+    rows = spine.read().execute(
+        "SELECT DISTINCT industry FROM clients WHERE owner=? AND active=1", (worker,)
+    ).fetchall()
+    return {_norm(r["industry"]) for r in rows if r["industry"]}
+
+
+def _law_changes(spine, worker: str | None = None) -> list:
+    rows = spine.read().execute(
         """SELECT body FROM notifications
            WHERE kind IN ('law_change','rss') AND seen = 0
-           ORDER BY at DESC LIMIT 20"""
+           ORDER BY at DESC LIMIT 40"""
     ).fetchall()
+    if not worker:
+        return rows[:20]  # office-wide: sve
+    mine = _worker_industries(spine, worker)
+    out = []
+    for r in rows:
+        inds = _cat_industries(r["body"])
+        # univerzalni izvor (bez industry-tokena) → svima; sektorski → samo ako
+        # radnik ima klijenta u toj djelatnosti
+        if not inds or (inds & mine):
+            out.append(r)
+        if len(out) >= 20:
+            break
+    return out
 
 
 def _eracun_count(spine) -> int:
@@ -55,7 +98,7 @@ def build_digest(spine, cfg, worker: str | None = None, now_fn=None) -> str:
     if worker:
         ids = _worker_client_ids(spine, worker)
         expiring = [r for r in expiring if r["client_id"] in ids]
-    law_changes = _law_changes(spine)
+    law_changes = _law_changes(spine, worker)
     eracun_count = _eracun_count(spine)
 
     lines = [f"Jutarnji pregled — {today.isoformat()}", ""]

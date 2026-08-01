@@ -137,3 +137,34 @@ def test_cli_digest_prints_report(tmp_path, monkeypatch, capsys):
     assert main(["digest"]) == 0
     out = capsys.readouterr().out
     assert "Jutarnji pregled" in out
+
+
+def _seed_workers_and_law_changes(spine):
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name,oib,owner,industry,active) VALUES('Gostiona','1','ana','ugostiteljstvo',1)")
+        c.execute("INSERT INTO clients(name,oib,owner,industry,active) VALUES('Gradnja','2','ivan','građevina',1)")
+        for body in ("[ugostiteljstvo-turizam] Promjena na mint",
+                     "[gradevina] Promjena na mpgi",
+                     "[trgovina-proizvodnja-it] Promjena na mingo",
+                     "[porezna-vijesti] Promjena na porezna",
+                     "[place-statistika] Promjena na dzs"):
+            c.execute("INSERT INTO notifications(kind,body,seen) VALUES('law_change',?,0)", (body,))
+
+
+def test_digest_law_changes_filtered_by_worker_industry(spine, cfg):
+    _seed_workers_and_law_changes(spine)
+    ana = digest.build_digest(spine, cfg, worker="ana")
+    # ana ima ugostiteljstvo klijenta → vidi ugostiteljstvo + univerzalne, NE građevinu/trgovinu
+    assert "mint" in ana and "porezna" in ana and "dzs" in ana
+    assert "mpgi" not in ana and "mingo" not in ana
+    ivan = digest.build_digest(spine, cfg, worker="ivan")
+    # ivan ima građevina (s dijakritikom) → vidi gradevina + univerzalne, NE ugostiteljstvo
+    assert "mpgi" in ivan and "porezna" in ivan and "dzs" in ivan
+    assert "mint" not in ivan and "mingo" not in ivan
+
+
+def test_digest_office_wide_sees_all_law_changes(spine, cfg):
+    _seed_workers_and_law_changes(spine)
+    allw = digest.build_digest(spine, cfg, worker=None)
+    for token in ("mint", "mpgi", "mingo", "porezna", "dzs"):
+        assert token in allw
