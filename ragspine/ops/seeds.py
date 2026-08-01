@@ -68,6 +68,22 @@ NN_LISTINGS = [
     ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=3", "nn-oglasni"),
 ]
 
+# Izvori po djelatnostima — službene stranice ministarstava/agencija/zavoda,
+# svi provjereni HTTP 200 bez redirecta (2026-08-01; safe_fetch blokira 3xx).
+# category = djelatnost(i) na koje se odnosi; check_source prefiksira notifikaciju
+# s [category] pa radnik odmah vidi koga se tiče. Prate se kao 'page' (hash-diff).
+INDUSTRY_SOURCES = [
+    # cross-industry (tiču se svih klijenata)
+    ("https://dzs.gov.hr/vijesti/8", "place-statistika"),        # DZS: minimalac, prosječne plaće
+    ("https://www.mirovinsko.hr/hr/novosti/8", "doprinosi-hzmo"),  # HZMO: mirovinsko, doprinosi
+    # djelatnosti
+    ("https://mint.gov.hr/vijesti/8", "ugostiteljstvo-turizam"),  # Ministarstvo turizma
+    ("https://www.apprrr.hr/otvoreni-natjecaji-prrrh/", "poljoprivreda"),  # APPRRR: potpore/natječaji
+    ("https://mpgi.gov.hr/pristup-informacijama-16/zakoni-i-ostali-propisi/88", "gradevina"),  # MPGI propisi
+    ("https://mingo.gov.hr/vijesti/8", "trgovina-proizvodnja-it"),  # Ministarstvo gospodarstva
+    ("https://mmpi.gov.hr/more-86/vijesti-100/100", "prijevoz"),  # MMPI: promet
+]
+
 
 def kontni_plan(spine) -> int:
     n = 0
@@ -85,6 +101,7 @@ def watch_defaults(spine) -> int:
     n = 0
     sources = [(POREZNA_VIJESTI_URL, "porezna-vijesti", "page")]
     sources += [(url, category, "page") for url, category in NN_LISTINGS]
+    sources += [(url, category, "page") for url, category in INDUSTRY_SOURCES]
     sources += [(url, category, "rss") for url, category in DEFAULT_RSS]
     for url, category, kind in sources:
         existing = spine.read().execute(

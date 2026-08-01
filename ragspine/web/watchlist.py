@@ -163,7 +163,8 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
     for city, rate in extract_rates(text).items():
         spine.set_override("kalkulator", f"prirez.{city}", rate, source_row["url"])
     dates = extract_effective_dates(text)
-    summary = f"Promjena na {source_row['url']}"
+    cat = (source_row["category"] or "").strip()
+    summary = f"[{cat}] Promjena na {source_row['url']}" if cat else f"Promjena na {source_row['url']}"
 
     ingest_text(spine, text, title=source_row["url"], source_url=source_row["url"],
                 client_id=source_row["client_id"])
