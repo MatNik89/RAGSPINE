@@ -69,7 +69,8 @@ def test_build_digest_eracun_only_suppresses_empty_state(spine, cfg):
     assert "Nema hitnih obveza" not in text
 
 
-def test_build_digest_filters_by_worker(spine, cfg):
+def test_build_digest_office_wide_shows_all_clients(spine, cfg):
+    # svi radnici vide sve — neposlane obveze SVIH klijenata, neovisno o vlasniku
     today = date(2026, 8, 1)
     cid_ana = _client(spine, "Ana Klijent", owner="ana")
     cid_iva = _client(spine, "Iva Klijent", owner="iva")
@@ -80,10 +81,10 @@ def test_build_digest_filters_by_worker(spine, cfg):
             "INSERT INTO notifications(kind, body) VALUES('rss','Nova objava propisa')"
         )
 
-    text = digest.build_digest(spine, cfg, worker="ana", now_fn=lambda: today)
+    text = digest.build_digest(spine, cfg, now_fn=lambda: today)
 
     assert "Ana Klijent" in text
-    assert "Iva Klijent" not in text
+    assert "Iva Klijent" in text
     assert "Nova objava propisa" in text
 
 
@@ -92,30 +93,20 @@ def test_deliver_returns_none_without_urls(cfg):
     assert digest.deliver(cfg, "subject", "body") == "none"
 
 
-def test_workers_empty_when_no_users(spine):
-    assert digest.workers(spine) == []
-
-
-def test_workers_lists_usernames(spine):
-    with spine.write() as c:
-        c.execute("INSERT INTO users(username, pw_hash) VALUES('ana','x')")
-        c.execute("INSERT INTO users(username, pw_hash) VALUES('iva','x')")
-    assert digest.workers(spine) == ["ana", "iva"]
-
-
-def test_digest_job_office_wide_when_no_users(spine, cfg):
+def test_digest_job_writes_one_office_wide_digest(spine, cfg):
     digest.digest_job(spine, cfg)
     rows = spine.read().execute("SELECT * FROM notifications WHERE kind='digest'").fetchall()
     assert len(rows) == 1
 
 
-def test_digest_job_one_per_worker(spine, cfg):
+def test_digest_job_one_digest_regardless_of_users(spine, cfg):
+    # office-wide: jedan digest bez obzira na broj radnika
     with spine.write() as c:
         c.execute("INSERT INTO users(username, pw_hash) VALUES('ana','x')")
         c.execute("INSERT INTO users(username, pw_hash) VALUES('iva','x')")
     digest.digest_job(spine, cfg)
     rows = spine.read().execute("SELECT * FROM notifications WHERE kind='digest'").fetchall()
-    assert len(rows) == 2
+    assert len(rows) == 1
 
 
 def test_register_defaults_includes_digest(spine, cfg):
@@ -151,20 +142,9 @@ def _seed_workers_and_law_changes(spine):
             c.execute("INSERT INTO notifications(kind,body,seen) VALUES('law_change',?,0)", (body,))
 
 
-def test_digest_law_changes_filtered_by_worker_industry(spine, cfg):
-    _seed_workers_and_law_changes(spine)
-    ana = digest.build_digest(spine, cfg, worker="ana")
-    # ana ima ugostiteljstvo klijenta → vidi ugostiteljstvo + univerzalne, NE građevinu/trgovinu
-    assert "mint" in ana and "porezna" in ana and "dzs" in ana
-    assert "mpgi" not in ana and "mingo" not in ana
-    ivan = digest.build_digest(spine, cfg, worker="ivan")
-    # ivan ima građevina (s dijakritikom) → vidi gradevina + univerzalne, NE ugostiteljstvo
-    assert "mpgi" in ivan and "porezna" in ivan and "dzs" in ivan
-    assert "mint" not in ivan and "mingo" not in ivan
-
-
 def test_digest_office_wide_sees_all_law_changes(spine, cfg):
+    # svi radnici vide SVE zakonske promjene, iz svih djelatnosti
     _seed_workers_and_law_changes(spine)
-    allw = digest.build_digest(spine, cfg, worker=None)
+    allw = digest.build_digest(spine, cfg)
     for token in ("mint", "mpgi", "mingo", "porezna", "dzs"):
         assert token in allw
