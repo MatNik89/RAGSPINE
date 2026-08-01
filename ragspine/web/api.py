@@ -44,6 +44,7 @@ from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
+from ragspine.web.templates_ui import chat_page, home_page, upute_page
 
 
 class ChatBody(BaseModel):
@@ -296,6 +297,30 @@ def create_app(spine, cfg) -> FastAPI:
     def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user)):
         sid = watchlist.add_source(spine, body.url, body.category, body.client_id, user, body.kind)
         return {"id": sid}
+
+    @app.get("/", response_class=HTMLResponse)
+    def ui_home(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return home_page()
+
+    @app.get("/ui/chat", response_class=HTMLResponse)
+    def ui_chat(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return chat_page()
+
+    @app.get("/ui/upute", response_class=HTMLResponse)
+    def ui_upute(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return upute_page(sop_mod.list_pending(spine))
 
     @app.get("/obveze", response_class=HTMLResponse)
     def obveze_page(request: Request, kind: str = "PDV", period: str | None = None):
