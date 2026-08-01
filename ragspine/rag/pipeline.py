@@ -3,7 +3,7 @@ import json
 
 from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
-from ragspine.knowledge import kb
+from ragspine.knowledge import features, kb
 from ragspine.rag import authority, cache, citations, composer, conversation, retrieval, router, selfrag
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
@@ -117,6 +117,10 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
             pass
 
     _record(spine, user, query, "chat", final_text, confidence, cache_write=not has_history)
+    try:
+        features.maybe_file_gap(spine, user, query, final_text, confidence)
+    except Exception:
+        pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
     if report.ok:
         kb.save(spine, query, final_text)
     return _package(final_text, "chat", confidence, sources, False)
