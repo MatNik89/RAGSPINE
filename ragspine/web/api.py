@@ -19,6 +19,7 @@ from ragspine.business import nldate
 from ragspine.business import notes
 from ragspine.business import obveze
 from ragspine.business import peer_compare
+from ragspine.business import sop as sop_mod
 from ragspine.web import messaging
 from ragspine.browser import agent as agent_mod
 from ragspine.browser.bridge import Bridge
@@ -159,6 +160,17 @@ class FeatureBody(BaseModel):
 class Nis2Body(BaseModel):
     control_id: str
     status: str
+
+
+class SopBody(BaseModel):
+    title: str
+    category: str
+    content: str
+    client_id: int | None = None
+
+
+class SopRejectBody(BaseModel):
+    reason: str = ""
 
 
 class KnowledgeStatusBody(BaseModel):
@@ -599,6 +611,50 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"doc_id": doc_id, "status": "active"}
+
+    @app.post("/sop")
+    def sop_create(body: SopBody, user: str = Depends(require_user_web)):
+        sop_id = sop_mod.create_sop(spine, user, body.title, body.category, body.content,
+                                     client_id=body.client_id)
+        return {"id": sop_id}
+
+    @app.post("/sop/{sop_id}/submit")
+    def sop_submit(sop_id: int, user: str = Depends(require_user_web)):
+        try:
+            sop_mod.submit_draft(spine, sop_id, user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": sop_id, "status": "submitted"}
+
+    # ponytail: any authenticated user can approve for now (single small
+    # office) — upgrade path is a role check (only 'voditelj'/admin approves)
+    # once users.role is actually enforced elsewhere.
+    @app.post("/sop/{sop_id}/approve")
+    def sop_approve(sop_id: int, user: str = Depends(require_user_web)):
+        try:
+            doc_id = sop_mod.approve_draft(spine, sop_id, user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": sop_id, "status": "approved", "doc_id": doc_id}
+
+    @app.post("/sop/{sop_id}/reject")
+    def sop_reject(sop_id: int, body: SopRejectBody, user: str = Depends(require_user_web)):
+        try:
+            sop_mod.reject_draft(spine, sop_id, user, reason=body.reason)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": sop_id, "status": "rejected"}
+
+    @app.get("/sop/pending")
+    def sop_pending(user: str = Depends(require_user_web)):
+        return {"items": sop_mod.list_pending(spine), "summary": sop_mod.editorial_summary(spine)}
+
+    @app.get("/sop/{sop_id}")
+    def sop_get(sop_id: int, user: str = Depends(require_user_web)):
+        row = sop_mod.get_sop(spine, sop_id)
+        if row is None:
+            raise HTTPException(404, "nepoznat SOP")
+        return row
 
     @app.get("/browser/cmd")
     def browser_cmd(request: Request, user: str = Depends(require_user_web)):

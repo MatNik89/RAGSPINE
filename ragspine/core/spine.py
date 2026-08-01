@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS message_log(id INTEGER PRIMARY KEY, client_id INTEGER
   status TEXT, subject TEXT, body_preview TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS peer_bookings(id INTEGER PRIMARY KEY, user TEXT, description TEXT,
   description_norm TEXT, konto TEXT, amount REAL, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS sop_pages(id INTEGER PRIMARY KEY, title TEXT, client_id INTEGER,
+  category TEXT, content TEXT, status TEXT DEFAULT 'draft', author TEXT, reviewer TEXT,
+  base_version INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')));
 """
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
