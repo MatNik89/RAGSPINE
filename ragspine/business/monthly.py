@@ -2,12 +2,12 @@
 # kalendara, obveza, isteka dokumenata, promjena propisa i bilješki.
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
-from ragspine.business import expiry, kalendar, obveze
+from ragspine.business import expiry, obveze
 
 MONTHLY_RE = re.compile(
-    r"[sš]to (sve )?(mi )?(još )?moram|obaveze ovaj mjesec|mjese[cč]ni pregled|[sš]to moram ovaj mjesec",
+    r"[sš]to (sve )?(mi )?(jo[šs] )?moram|obaveze ovaj mjesec|mjese[cč]ni pregled|[sš]to moram ovaj mjesec",
     re.IGNORECASE,
 )
 
@@ -16,8 +16,29 @@ def _period_now() -> str:
     return date.today().strftime("%Y-%m")
 
 
+def _period_bounds(period: str) -> tuple[str, str]:
+    """(start, end) ISO dates for `period` (YYYY-MM): first of the month and
+    first of the NEXT month (exclusive end — handles Dec->Jan and short months)."""
+    year, month = (int(x) for x in period.split("-"))
+    start = date(year, month, 1)
+    end = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    return start.isoformat(), end.isoformat()
+
+
 def overview(spine, period: str) -> dict:
-    deadlines = [dict(r) for r in kalendar.upcoming(spine, days=31) if r["due"].startswith(period)]
+    start, end = _period_bounds(period)
+
+    # ponytail: query deadline_dates directly for the requested period instead
+    # of kalendar.upcoming() — upcoming() is anchored to today's 31-day window,
+    # which is wrong for an arbitrary ?period= that isn't the current month.
+    deadline_rows = spine.read().execute(
+        """SELECT dd.id, dd.kind, dd.due, dd.year, d.description
+           FROM deadline_dates dd JOIN deadlines d ON d.kind = dd.kind
+           WHERE dd.due >= ? AND dd.due < ?
+           ORDER BY dd.due""",
+        (start, end),
+    ).fetchall()
+    deadlines = [dict(r) for r in deadline_rows]
 
     unsent = []
     for kind in obveze.KINDS:
@@ -28,13 +49,11 @@ def overview(spine, period: str) -> dict:
 
     expiring = [dict(r) for r in expiry.expiring(spine, days=45)]
 
-    period_start = f"{period}-01"
-    period_end_dt = date.fromisoformat(period_start) + timedelta(days=31)
     watch_rows = spine.read().execute(
         """SELECT id, kind, body, client_id, seen, at FROM notifications
            WHERE kind IN ('law_change','rss') AND at >= ? AND at < ?
            ORDER BY at DESC""",
-        (period_start, period_end_dt.isoformat()),
+        (start, end),
     ).fetchall()
     watch_changes = [dict(r) for r in watch_rows]
 

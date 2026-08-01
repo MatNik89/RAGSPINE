@@ -52,6 +52,35 @@ def test_monthly_re_matches_hr_variants():
         assert monthly.MONTHLY_RE.search(q), q
 
 
+def test_monthly_re_matches_ascii_and_diacritic_jos():
+    assert monthly.MONTHLY_RE.search("što još moram ovaj mjesec")
+    assert monthly.MONTHLY_RE.search("sto jos moram ovaj mjesec")
+
+
+def test_period_bounds():
+    assert monthly._period_bounds("2026-07") == ("2026-07-01", "2026-08-01")
+    assert monthly._period_bounds("2026-12") == ("2026-12-01", "2027-01-01")
+    assert monthly._period_bounds("2026-02") == ("2026-02-01", "2026-03-01")
+
+
+def test_overview_deadlines_use_requested_period_not_today(spine, monkeypatch):
+    kalendar.seed(spine, 2026)
+    # today/_period_now anchored to a DIFFERENT month than the requested period
+    monkeypatch.setattr(monthly, "_period_now", lambda: "2026-01")
+    ov = monthly.overview(spine, "2026-07")
+    assert ov["deadlines"], "deadlines must be period-scoped, not today-window-scoped"
+    assert all(d["due"].startswith("2026-07") for d in ov["deadlines"])
+
+
+def test_overview_watch_changes_excludes_next_month_bleed(spine):
+    with spine.write() as c:
+        c.execute(
+            "INSERT INTO notifications(kind, body, at) VALUES ('law_change', 'ožujska vijest', '2026-03-02 09:00:00')"
+        )
+    ov = monthly.overview(spine, "2026-02")
+    assert ov["watch_changes"] == []
+
+
 def test_overview_has_all_keys_and_unsent_client(spine, monkeypatch):
     _seed_july(spine)
     monkeypatch.setattr(kalendar, "_today", lambda: date(2026, 7, 5))
