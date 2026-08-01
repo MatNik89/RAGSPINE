@@ -1,6 +1,7 @@
 """Chat orchestrator: wires router -> cache -> kb -> lane handlers -> retrieval/LLM/citations."""
 import json
 
+from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import kb
 from ragspine.rag import cache, citations, composer, retrieval, router, selfrag
@@ -33,6 +34,11 @@ def answer(spine, cfg, query: str, user: str, llm=None) -> dict:
 
     if lane == "reject":
         return _package(_REJECT_MSG, "reject", 0, [], False)
+
+    if monthly.MONTHLY_RE.search(query):
+        period = monthly._period_now()
+        text = monthly.format_overview(monthly.overview(spine, period))
+        return _package(text, "monthly", 1.0, [], False)
 
     if lane == "no_retrieval":
         text = _GREETING

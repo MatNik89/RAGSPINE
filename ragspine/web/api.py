@@ -8,8 +8,10 @@ from pydantic import BaseModel
 
 from ragspine.business import auditlog
 from ragspine.business import checklist
+from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import kalendar
+from ragspine.business import monthly
 from ragspine.business import notes
 from ragspine.business import obveze
 from ragspine.core import optional
@@ -209,6 +211,16 @@ def create_app(spine, cfg) -> FastAPI:
     def notes_add(body: NoteBody, user: str = Depends(require_user_web)):
         note_id = notes.add(spine, body.client_id, user, body.body)
         return {"id": note_id}
+
+    @app.get("/dashboard")
+    def dashboard_stats(user: str = Depends(require_user_web)):
+        return dashboard.stats(spine)
+
+    @app.get("/monthly")
+    def monthly_overview(period: str | None = None, user: str = Depends(require_user_web)):
+        period = period or date.today().strftime("%Y-%m")
+        ov = monthly.overview(spine, period)
+        return {**ov, "text": monthly.format_overview(ov)}
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
