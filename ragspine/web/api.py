@@ -56,8 +56,13 @@ def create_app(spine, cfg) -> FastAPI:
     async def login(request: Request):
         ctype = request.headers.get("content-type", "")
         is_json = "application/json" in ctype
-        body = await request.json() if is_json else dict(await request.form())
-        username, password = body.get("username", ""), body.get("password", "")
+        try:
+            body = await request.json() if is_json else dict(await request.form())
+            username, password = body["username"], body["password"]
+        except Exception:
+            raise HTTPException(400, "neispravan zahtjev")
+        if not username or not password:
+            raise HTTPException(400, "neispravan zahtjev")
         row = spine.read().execute(
             "SELECT pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
@@ -68,6 +73,8 @@ def create_app(spine, cfg) -> FastAPI:
         # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
         # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
         resp = JSONResponse({"token": token}) if is_json else RedirectResponse("/obveze", status_code=303)
+        # ponytail: secure=True omitted — v1 is LAN/plain-HTTP. Upgrade path: set
+        # secure=True (or drive it from cfg, e.g. cfg.https_only) once served over HTTPS.
         resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400)
         return resp
 

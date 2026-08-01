@@ -21,3 +21,12 @@ def test_bad_login(spine, cfg):
     add_user(spine, "ana", "tajna")
     assert _client(spine, cfg).post("/auth/login",
         json={"username": "ana", "password": "x"}).status_code == 401
+
+def test_malformed_login_body_400(spine, cfg):
+    c = _client(spine, cfg)
+    r = c.post("/auth/login", content="not json", headers={"content-type": "application/json"})
+    assert r.status_code == 400
+
+def test_empty_login_body_400(spine, cfg):
+    c = _client(spine, cfg)
+    assert c.post("/auth/login", json={}).status_code == 400
