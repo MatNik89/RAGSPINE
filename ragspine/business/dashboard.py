@@ -20,7 +20,14 @@ def _urgency(due_str: str, today: date) -> str:
 
 
 def _with_state(row: dict, date_field: str, today: date) -> dict:
-    row["state"] = _urgency(row[date_field], today)
+    try:
+        row["days_left"] = (date.fromisoformat(row[date_field]) - today).days
+        row["state"] = _urgency(row[date_field], today)
+    except (TypeError, ValueError):
+        # ponytail: bad/missing date -> don't crash the dashboard, just show
+        # it with no urgency signal. Upgrade path: surface a data-quality flag.
+        row["days_left"] = None
+        row["state"] = "ok"
     return row
 
 

@@ -217,7 +217,8 @@ function dueChip(row) {
   const chip = document.createElement('span');
   chip.className = 'chip ' + (row.state || '');
   const d = row.days_left;
-  chip.textContent = d < 0 ? ('kasni ' + Math.abs(d) + ' d.') : d === 0 ? 'danas' : ('za ' + d + ' d.');
+  chip.textContent = typeof d !== 'number' ? '' :
+    d < 0 ? ('kasni ' + Math.abs(d) + ' d.') : d === 0 ? 'danas' : ('za ' + d + ' d.');
   return chip;
 }
 

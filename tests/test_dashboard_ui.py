@@ -139,14 +139,16 @@ def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
     # unsent obligations: Alfa PDV present
     assert any(u["client"] == "Alfa" and u["kind"] == "PDV" for u in body["unsent_obligations"])
 
-    # deadline urgency states
+    # deadline urgency states + days_left (the page JS chip renders from this —
+    # a missing days_left shows literally as "za undefined d." on screen)
     by_kind = {d["kind"]: d for d in body["deadlines"]}
-    assert by_kind["X"]["state"] == "bad"      # yesterday
-    assert by_kind["Y"]["state"] == "warn"     # in 2 days
-    assert by_kind["Z"]["state"] == "ok"       # in 6 days
+    assert by_kind["X"]["state"] == "bad" and by_kind["X"]["days_left"] == -1   # yesterday
+    assert by_kind["Y"]["state"] == "warn" and by_kind["Y"]["days_left"] == 2   # in 2 days
+    assert by_kind["Z"]["state"] == "ok" and by_kind["Z"]["days_left"] == 6     # in 6 days
 
-    # expiring doc urgency (2 days -> warn)
+    # expiring doc urgency (2 days -> warn) + days_left
     assert body["expiring"][0]["state"] == "warn"
+    assert body["expiring"][0]["days_left"] == 2
 
     # notifications
     assert any("PDV-a" in n["body"] for n in body["notifications"])
