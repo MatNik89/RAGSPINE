@@ -93,7 +93,8 @@ def test_dashboard_json_has_expected_keys(spine, cfg):
     assert r.status_code == 200
     body = r.json()
     assert set(body) == {"stats", "calendar", "deadlines", "unsent_obligations",
-                          "unsent_by_client", "expiring", "notifications", "peer"}
+                          "unsent_by_client", "unsent_total", "unsent_clients_total",
+                          "expiring", "expiring_total", "notifications", "peer"}
     # calendar hero payload shape
     cal = body["calendar"]
     assert set(cal) == {"year", "month", "today", "events"}
@@ -234,6 +235,31 @@ def test_dashboard_unsent_no_employees_only_pdv(spine, cfg):
     beta = [g for g in body["unsent_by_client"] if g["client"] == "Beta"]
     assert len(beta) == 1
     assert {k["kind"] for k in beta[0]["kinds"]} == {"PDV"}
+
+
+def test_dashboard_kpi_totals_uncapped(spine, cfg, monkeypatch):
+    today = date(2026, 7, 10)
+    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(dashboard, "_today", lambda: today)
+    for i in range(12):  # 12 PDV obligors -> rows capped at 8, total must stay 12
+        _seed_client(spine, name=f"K{i}", oib=str(10000000000 + i))
+    tok = _token(c := _client(spine, cfg), spine)
+    body = c.get("/dashboard.json", headers=_auth(tok)).json()
+    assert len(body["unsent_obligations"]) <= 8
+    assert body["unsent_total"] == 12
+    assert body["unsent_clients_total"] == 12
+
+
+def test_dashboard_survives_malformed_expiry_date(spine, cfg, monkeypatch):
+    today = date(2026, 8, 2)
+    monkeypatch.setattr(dashboard, "_today", lambda: today)
+    cid = _seed_client(spine, "Alfa")
+    with spine.write() as c:  # /expiry accepts arbitrary strings -> guard the dashboard
+        c.execute("INSERT INTO expiry_items(client_id,kind,label,expires) VALUES(?,?,?,?)",
+                  (cid, "x", "Loš datum", "2026-08-xx"))
+    tok = _token(c := _client(spine, cfg), spine)
+    r = c.get("/dashboard.json", headers=_auth(tok))
+    assert r.status_code == 200  # ne 500
 
 
 def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):

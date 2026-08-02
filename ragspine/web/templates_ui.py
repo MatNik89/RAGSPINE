@@ -395,9 +395,10 @@ function renderToday(rows) {
   });
 }
 
-function renderUnsentByClient(groups) {
+function renderUnsentByClient(groups, total) {
   const box = $('unsent-list'); box.textContent = '';
-  $('unsent-count').textContent = groups.length + (groups.length === 1 ? ' klijent' : ' klijenta');
+  const n = typeof total === 'number' ? total : groups.length;
+  $('unsent-count').textContent = n + (n === 1 ? ' klijent' : ' klijenta');
   if (!groups.length) { emptyMsg(box, 'Sve obveze poslane \\uD83C\\uDF89'); return; }
   groups.forEach(function (g) {
     const row = document.createElement('div'); row.className = 'urow';
@@ -438,19 +439,20 @@ async function loadDashboard() {
     const dt = new Date(cal.year, cal.month - 1, cal.today);
     $('dash-date').textContent = DANI[dt.getDay()] + ' · ' + cal.today + '. ' +
       MJ_GEN[cal.month - 1] + ' ' + cal.year + '.';
+    var unsentTotal = typeof data.unsent_total === 'number' ? data.unsent_total : data.unsent_obligations.length;
+    var expiringTotal = typeof data.expiring_total === 'number' ? data.expiring_total : data.expiring.length;
     $('dash-sub').textContent = data.stats.deadlines_this_week + ' roka ovaj tjedan · ' +
-      data.unsent_obligations.length + ' neposlanih obveza · ' +
-      data.expiring.length + ' dok. uskoro isteče';
+      unsentTotal + ' neposlanih obveza · ' + expiringTotal + ' dok. uskoro isteče';
 
     setNum('stat-clients', data.stats.active_clients);
-    setNum('stat-unsent', data.unsent_obligations.length);
+    setNum('stat-unsent', unsentTotal);
     setNum('stat-deadlines', data.stats.deadlines_this_week);
     setNum('stat-notifications', data.stats.unseen_notifications);
-    $('stat-unsent').classList.toggle('bad', data.unsent_obligations.length > 0);
+    $('stat-unsent').classList.toggle('bad', unsentTotal > 0);
 
     renderCalendar(cal);
     renderToday(data.deadlines);
-    renderUnsentByClient(data.unsent_by_client || []);
+    renderUnsentByClient(data.unsent_by_client || [], data.unsent_clients_total);
     renderNotifications(data.notifications);
   } catch (err) {
     const banner = $('dashboard-error');

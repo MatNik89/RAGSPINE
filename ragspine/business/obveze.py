@@ -84,6 +84,13 @@ def upsert_type(spine, kind: str, label: str, rule: str, frequency: str,
         raise ValueError(f"nepoznata frekvencija: {frequency!r}")
     if applies_to not in APPLIES_TO:
         raise ValueError(f"nepoznat applies_to: {applies_to!r}")
+    rule = (rule or "").strip()
+    if rule:
+        rf = rule.split(":", 1)[0]
+        if rf not in FREQUENCIES:
+            raise ValueError(f"nepravilno pravilo roka: {rule!r}")
+        if rf != frequency:
+            raise ValueError(f"pravilo ({rf}) ne odgovara frekvenciji ({frequency})")
     label = (label or "").strip() or kind
     _ensure_seeded(spine)
     with spine.write() as c:
@@ -125,25 +132,27 @@ def _obligor_ids(spine, otype: dict, period: str) -> list[int]:
     month = int(period[5:7])
     c = spine.read()
 
-    if applies == "pdv":
-        # per-klijent frekvencija: tromjesečni obveznik samo u kvartalnim mjesecima
-        rows = c.execute(
-            "SELECT id, pdv_freq FROM clients "
-            "WHERE active=1 AND pdv_status LIKE '%u sustavu%' COLLATE NOCASE"
-        ).fetchall()
-        ids = []
-        for r in rows:
-            if (r["pdv_freq"] or "monthly") == "quarterly" and month not in _QUARTER_MONTHS:
-                continue
-            ids.append(r["id"])
-        return ids
-
-    # type-level frekvencija-gate za ne-PDV vrste: kvartalna/godišnja vrsta
-    # postoji samo u mjesecu predaje
+    # Type-frekvencija gate vrijedi za SVE vrste (uklj. custom pdv+yearly):
+    # kvartalna/godišnja vrsta postoji samo u mjesecu predaje.
     if otype["frequency"] == "quarterly" and month not in _QUARTER_MONTHS:
         return []
     if otype["frequency"] == "yearly" and month != _yearly_month(otype["rule"]):
         return []
+
+    if applies == "pdv":
+        # "u sustavu PDV-a" DA, ali NE "nije u sustavu PDV-a" (LIKE '%u sustavu%'
+        # bi inače uhvatio i negativnu vrijednost).
+        rows = c.execute(
+            "SELECT id, pdv_freq FROM clients WHERE active=1 "
+            "AND lower(pdv_status) LIKE '%u sustavu%' AND lower(pdv_status) NOT LIKE '%nije%'"
+        ).fetchall()
+        ids = []
+        for r in rows:
+            # per-klijent frekvencija: tromjesečni obveznik samo u kvartalnim mjesecima
+            if (r["pdv_freq"] or "monthly") == "quarterly" and month not in _QUARTER_MONTHS:
+                continue
+            ids.append(r["id"])
+        return ids
 
     if applies == "employees":
         return [r["id"] for r in c.execute(
@@ -169,12 +178,26 @@ def ensure_period(spine, kind: str, period: str) -> None:
     if otype is None:
         raise ValueError(f"Nepoznat kind obveze: {kind!r}")
     ids = _obligor_ids(spine, otype, period)
+    id_set = set(ids)
     with spine.write() as c:
         for cid in ids:
             c.execute(
                 "INSERT OR IGNORE INTO obligations(client_id, kind, period) VALUES(?,?,?)",
                 (cid, kind, period),
             )
+        # Ukloni zastarjele NEPOSLANE obveze (klijent više nije obveznik — izgubio
+        # zaposlene, promijenio sustav, postao neaktivan, maknut manual...). Poslane
+        # (sent=1) čuvamo kao povijest.
+        stale = c.execute(
+            """SELECT o.id, o.client_id FROM obligations o
+               LEFT JOIN obligation_status s ON s.obligation_id = o.id
+               WHERE o.kind=? AND o.period=? AND COALESCE(s.sent, 0) = 0""",
+            (kind, period),
+        ).fetchall()
+        for r in stale:
+            if r["client_id"] not in id_set:
+                c.execute("DELETE FROM obligation_status WHERE obligation_id=?", (r["id"],))
+                c.execute("DELETE FROM obligations WHERE id=?", (r["id"],))
 
 
 def list_period(spine, kind: str, period: str) -> list[dict]:

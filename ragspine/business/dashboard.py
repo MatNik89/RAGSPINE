@@ -61,18 +61,26 @@ def _month_events(spine, today: date) -> dict:
     calendar hero (GET /dashboard.json -> calendar)."""
     start, end = _month_bounds(today)
     events: list[dict] = []
+
+    def _add(iso: str, kind: str, label: str) -> None:
+        # ponytail: expiry.expires is user-supplied and may be malformed; a bad
+        # value must skip its event, never 500 the whole dashboard.
+        try:
+            day = date.fromisoformat(iso).day
+        except (TypeError, ValueError):
+            return
+        events.append({"day": day, "kind": kind, "label": label, "state": _urgency(iso, today)})
+
     for r in spine.read().execute(
         "SELECT kind, due FROM deadline_dates WHERE due >= ? AND due < ? ORDER BY due",
         (start, end),
     ).fetchall():
-        events.append({"day": int(r["due"][8:10]), "kind": r["kind"],
-                       "label": r["kind"], "state": _urgency(r["due"], today)})
+        _add(r["due"], r["kind"], r["kind"])
     for r in spine.read().execute(
         "SELECT label, expires FROM expiry_items WHERE expires >= ? AND expires < ? ORDER BY expires",
         (start, end),
     ).fetchall():
-        events.append({"day": int(r["expires"][8:10]), "kind": "istek",
-                       "label": r["label"], "state": _urgency(r["expires"], today)})
+        _add(r["expires"], "istek", r["label"])
     return {"year": today.year, "month": today.month, "today": today.day, "events": events}
 
 
@@ -166,7 +174,8 @@ def home_data(spine, cap: int = 8) -> dict:
     unsent = unsent_full[:cap]
 
     calendar = _month_events(spine, today)
-    unsent_by_client = _group_unsent(unsent_full, _kind_state(calendar["events"]))[:cap]
+    groups_full = _group_unsent(unsent_full, _kind_state(calendar["events"]))
+    unsent_by_client = groups_full[:cap]
 
     expiring_rows = [dict(r) for r in expiry.expiring(spine, days=30)]
     expiring = [_with_state(r, "expires", today) for r in expiring_rows][:cap]
@@ -184,6 +193,10 @@ def home_data(spine, cap: int = 8) -> dict:
         "deadlines": deadlines,
         "unsent_obligations": unsent,
         "unsent_by_client": unsent_by_client,
+        # uncapped totals for the KPI numbers (rows above are capped for display)
+        "unsent_total": len(unsent_full),
+        "unsent_clients_total": len(groups_full),
+        "expiring_total": len(expiring_rows),
         "expiring": expiring,
         "notifications": notifications,
         "peer": {"count": st["peer_disagreements"]},

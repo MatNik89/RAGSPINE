@@ -116,6 +116,7 @@ def generate(spine, months_ahead: int = 12, today: date | None = None) -> int:
     Vraća broj novoupisanih datuma."""
     today = today or _today()
     types = obveze.list_types(spine)
+    month_start = date(today.year, today.month, 1).isoformat()
     added = 0
     with spine.write() as c:
         # katalog: svaka vrsta s pravilom mora imati deadlines red (za JOIN opisa)
@@ -124,6 +125,14 @@ def generate(spine, months_ahead: int = 12, today: date | None = None) -> int:
                 c.execute(
                     "INSERT OR IGNORE INTO deadlines(kind, rule, description) VALUES(?,?,?)",
                     (t["kind"], t["rule"], t["label"]),
+                )
+                # Reconcile: obriši BUDUĆE datume ove vrste (od 1. tekućeg mjeseca)
+                # pa ih regeneriraj. Sprječava duple/zastarjele rokove kad
+                # legacy seed upiše nepomaknuti datum ili se pravilo promijeni.
+                # Prošli datumi ostaju kao povijest.
+                c.execute(
+                    "DELETE FROM deadline_dates WHERE kind=? AND due>=?",
+                    (t["kind"], month_start),
                 )
         base = today.year * 12 + (today.month - 1)
         for i in range(months_ahead + 1):

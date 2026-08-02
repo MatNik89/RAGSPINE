@@ -115,6 +115,51 @@ def test_types_seeded_by_default(spine):
     assert pdv["applies_to"] == "pdv" and pdv["active"] == 1
 
 
+def test_pdv_excludes_canonical_negative_status(spine):
+    # "nije u sustavu PDV-a" sadrži "u sustavu" — ne smije dobiti PDV obvezu
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('Da','1','u sustavu PDV-a',1)")
+        c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('Ne','2','nije u sustavu PDV-a',1)")
+    obveze.ensure_period(spine, "PDV", "2026-08")
+    assert [r["client"] for r in obveze.list_period(spine, "PDV", "2026-08")] == ["Da"]
+
+
+def test_ensure_period_reconciles_stale_unsent(spine):
+    with spine.write() as c:
+        cid = c.execute("INSERT INTO clients(name,oib,active,has_employees) VALUES('E','1',1,1)").lastrowid
+    obveze.ensure_period(spine, "JOPPD", "2026-08")
+    assert [r["client"] for r in obveze.list_period(spine, "JOPPD", "2026-08")] == ["E"]
+    # klijent izgubi zaposlene -> neposlana JOPPD obveza se ukloni pri sljedećem ensure
+    with spine.write() as c:
+        c.execute("UPDATE clients SET has_employees=0 WHERE id=?", (cid,))
+    obveze.ensure_period(spine, "JOPPD", "2026-08")
+    assert obveze.list_period(spine, "JOPPD", "2026-08") == []
+
+
+def test_ensure_period_keeps_sent_obligation_as_history(spine):
+    with spine.write() as c:
+        cid = c.execute("INSERT INTO clients(name,oib,active,has_employees) VALUES('E','1',1,1)").lastrowid
+    obveze.ensure_period(spine, "JOPPD", "2026-08")
+    oid = obveze.list_period(spine, "JOPPD", "2026-08")[0]["obligation_id"]
+    obveze.mark_sent(spine, oid, "ana")            # predano
+    with spine.write() as c:
+        c.execute("UPDATE clients SET has_employees=0 WHERE id=?", (cid,))
+    obveze.ensure_period(spine, "JOPPD", "2026-08")  # ne smije obrisati poslano
+    rows = obveze.list_period(spine, "JOPPD", "2026-08")
+    assert len(rows) == 1 and rows[0]["sent"] == 1
+
+
+def test_upsert_rule_must_match_frequency(spine):
+    import pytest
+    with pytest.raises(ValueError):
+        obveze.upsert_type(spine, "X", "X", "yearly:04-30", "monthly", "all_active")
+    with pytest.raises(ValueError):
+        obveze.upsert_type(spine, "X", "X", "monthly:15", "yearly", "all_active")
+    # ispravno + prazno pravilo su OK
+    obveze.upsert_type(spine, "OK1", "OK", "monthly:15", "monthly", "all_active")
+    obveze.upsert_type(spine, "OK2", "OK", "", "yearly", "all_active")
+
+
 def test_joppd_gates_on_employees(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active,has_employees) VALUES('Emp','1','u sustavu pdv',1,1)")
@@ -208,9 +253,12 @@ def test_client_obligations_settings_roundtrip(spine, cfg):
     got = c.get(f"/clients/{cid}/obveze-postavke", headers=H).json()
     assert got["has_employees"] == 1 and got["pdv_freq"] == "quarterly"
     assert got["manual_kinds"] == ["NAJAM"]
-    # regime roundtrips too
+    # partial POST (only regime) must PRESERVE the other three settings
     c.post(f"/clients/{cid}/obveze-postavke", json={"regime": "dohodak"}, headers=H)
-    assert c.get(f"/clients/{cid}/obveze-postavke", headers=H).json()["regime"] == "dohodak"
+    got = c.get(f"/clients/{cid}/obveze-postavke", headers=H).json()
+    assert got["regime"] == "dohodak"
+    assert got["has_employees"] == 1 and got["pdv_freq"] == "quarterly"
+    assert got["manual_kinds"] == ["NAJAM"]
     assert c.post(f"/clients/{cid}/obveze-postavke", json={"regime": "xyz"},
                   headers=H).status_code == 400
     assert any(t["kind"] == "NAJAM" for t in got["available_manual"])
@@ -235,6 +283,20 @@ def test_ui_obveze_tipovi_page(spine, cfg):
     assert "/obveze/tipovi" in r.text
     assert "@font-face" in r.text
     assert "innerHTML" not in r.text
+
+
+def test_obveze_page_all_types_inactive_empty_state(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    H = {"Authorization": f"Bearer {tok}"}
+    for k in ("PDV", "JOPPD"):  # deaktiviraj sve default-aktivne
+        t = obveze.get_type(spine, k)
+        obveze.upsert_type(spine, k, t["label"], t["rule"], t["frequency"],
+                           t["applies_to"], active=False, sort=t["sort"])
+    r = c.get("/obveze", headers=H)
+    assert r.status_code == 200  # ne 400
+    assert "Nijedna vrsta obveze" in r.text
+    assert "/ui/obveze-tipovi" in r.text
 
 
 def test_ui_obveze_tipovi_no_auth_redirects(spine, cfg):

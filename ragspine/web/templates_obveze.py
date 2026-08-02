@@ -235,6 +235,13 @@ loadTypes();
 """
 
 
+def obveze_none_page() -> str:
+    body = """<h1>Obveze</h1>
+<p class="meta">Nijedna vrsta obveze trenutno nije aktivna.</p>
+<p><a class="btn" href="/ui/obveze-tipovi">Uredi vrste obveza</a></p>"""
+    return page_shell("Obveze", body, active="obveze")
+
+
 def obveze_types_page() -> str:
     freq_opts = "".join(f'<option value="{k}">{html.escape(v)}</option>'
                         for k, v in (("monthly", "Mjesečno"), ("quarterly", "Tromjesečno"),

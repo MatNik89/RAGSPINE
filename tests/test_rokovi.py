@@ -49,9 +49,23 @@ def test_generate_idempotent(spine):
         c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('A','1','u sustavu pdv',1)")
     rokovi.generate(spine, months_ahead=3, today=date(2026, 8, 2))
     before = spine.read().execute("SELECT COUNT(*) n FROM deadline_dates").fetchone()["n"]
-    added2 = rokovi.generate(spine, months_ahead=3, today=date(2026, 8, 2))
+    # reconcile-then-regenerate: broj redova mora ostati stabilan (bez gomilanja)
+    rokovi.generate(spine, months_ahead=3, today=date(2026, 8, 2))
     after = spine.read().execute("SELECT COUNT(*) n FROM deadline_dates").fetchone()["n"]
-    assert added2 == 0 and before == after
+    assert before == after and before > 0
+
+
+def test_generate_reconciles_legacy_unshifted_date(spine):
+    # legacy seed upiše NEPOMAKNUTI datum na blagdan; generate ga zamijeni pomaknutim
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('A','1','u sustavu pdv',1)")
+    obveze.upsert_type(spine, "TZ", "Turistička", "monthly:15", "monthly", "manual")
+    with spine.write() as c:
+        c.execute("INSERT INTO deadline_dates(kind,due,year) VALUES('TZ','2026-08-15',2026)")  # subota+blagdan
+    rokovi.generate(spine, months_ahead=0, today=date(2026, 8, 2))
+    dues = [r["due"] for r in spine.read().execute(
+        "SELECT due FROM deadline_dates WHERE kind='TZ' ORDER BY due").fetchall()]
+    assert dues == ["2026-08-17"]  # pomaknuto; nema duplog nepomaknutog 15.8.
 
 
 def test_rokovi_job_registered(spine, cfg):

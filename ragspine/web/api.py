@@ -47,7 +47,7 @@ from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
-from ragspine.web.templates_obveze import obveze_types_page, render_obveze
+from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, upute_page)
 
@@ -154,10 +154,11 @@ class ObligationTypeBody(BaseModel):
 
 
 class ClientObligationsBody(BaseModel):
-    has_employees: int = 0
-    pdv_freq: str = "monthly"
-    regime: str = ""
-    manual_kinds: list[str] = []
+    # None = "ne diraj" (parcijalni POST ne smije obrisati ostala polja)
+    has_employees: int | None = None
+    pdv_freq: str | None = None
+    regime: str | None = None
+    manual_kinds: list[str] | None = None
 
 
 class KnjizenjeBody(BaseModel):
@@ -443,7 +444,9 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         tabs = [(t["kind"], t["label"]) for t in obveze.list_types(spine, active_only=True)]
         active = [k for k, _ in tabs]
-        kind = kind or (active[0] if active else "PDV")
+        if not active:
+            return HTMLResponse(obveze_none_page())
+        kind = kind or active[0]
         if kind not in active:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
@@ -496,18 +499,30 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/clients/{client_id}/obveze-postavke")
     def client_obligations_set(client_id: int, body: ClientObligationsBody,
                                 user: str = Depends(require_user_web)):
-        if body.pdv_freq not in ("monthly", "quarterly"):
+        if body.pdv_freq is not None and body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
-        if body.regime not in obveze.REGIMES:
+        if body.regime is not None and body.regime not in obveze.REGIMES:
             raise HTTPException(400, f"nepoznat porezni sustav: {body.regime!r}")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
-        with spine.write() as c:
-            c.execute("UPDATE clients SET has_employees=?, pdv_freq=?, regime=? WHERE id=?",
-                      (1 if body.has_employees else 0, body.pdv_freq, body.regime, client_id))
-        obveze.set_client_types(spine, client_id, body.manual_kinds, user=user)
-        return {"client_id": client_id, "has_employees": int(bool(body.has_employees)),
-                "pdv_freq": body.pdv_freq, "regime": body.regime, "manual_kinds": body.manual_kinds}
+        # samo proslijeđena polja se mijenjaju; izostavljena ostaju netaknuta
+        sets, vals = [], []
+        if body.has_employees is not None:
+            sets.append("has_employees=?"); vals.append(1 if body.has_employees else 0)
+        if body.pdv_freq is not None:
+            sets.append("pdv_freq=?"); vals.append(body.pdv_freq)
+        if body.regime is not None:
+            sets.append("regime=?"); vals.append(body.regime)
+        if sets:
+            with spine.write() as c:
+                c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", (*vals, client_id))
+        if body.manual_kinds is not None:
+            obveze.set_client_types(spine, client_id, body.manual_kinds, user=user)
+        row = spine.read().execute(
+            "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
+        return {"client_id": client_id, "has_employees": row["has_employees"] or 0,
+                "pdv_freq": row["pdv_freq"] or "monthly", "regime": row["regime"] or "",
+                "manual_kinds": obveze.client_types(spine, client_id)}
 
     @app.post("/obveze/mark")
     async def obveze_mark(request: Request, user: str = Depends(require_user_web)):
