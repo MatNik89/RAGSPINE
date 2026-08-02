@@ -125,6 +125,7 @@ class Spine:
                 "pausal_eur": "REAL DEFAULT 0",
                 "has_employees": "INTEGER DEFAULT 0",
                 "pdv_freq": "TEXT DEFAULT 'monthly'",
+                "regime": "TEXT DEFAULT ''",
             })
             _ensure_columns(c, "documents", {
                 "file_sha": "TEXT",

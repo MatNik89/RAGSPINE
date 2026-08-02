@@ -134,6 +134,28 @@ def test_pdv_quarterly_client_skips_non_quarter_month(spine):
     assert {r["client"] for r in obveze.list_period(spine, "PDV", "2026-04")} == {"Mje", "Kvar"}
 
 
+def test_doh_default_is_yearly_dohodak(spine):
+    doh = obveze.get_type(spine, "DOH")
+    assert doh["frequency"] == "yearly" and doh["applies_to"] == "dohodak"
+    assert doh["active"] == 0  # nije tab dok ga radnik ne uključi
+    posd = obveze.get_type(spine, "PO-SD")
+    assert posd["applies_to"] == "pausal" and posd["frequency"] == "yearly"
+
+
+def test_regime_yearly_obligation_only_in_filing_month(spine):
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name,oib,active,regime) VALUES('Doh','1',1,'dohodak')")
+        c.execute("INSERT INTO clients(name,oib,active,regime) VALUES('Pau','2',1,'pausal')")
+    # DOH -> yearly:02-28 -> samo u veljači
+    obveze.ensure_period(spine, "DOH", "2026-03")
+    assert obveze.list_period(spine, "DOH", "2026-03") == []
+    obveze.ensure_period(spine, "DOH", "2026-02")
+    assert [r["client"] for r in obveze.list_period(spine, "DOH", "2026-02")] == ["Doh"]
+    # dohodaš ne dobiva paušalni PO-SD
+    obveze.ensure_period(spine, "PO-SD", "2026-01")
+    assert [r["client"] for r in obveze.list_period(spine, "PO-SD", "2026-01")] == ["Pau"]
+
+
 def test_manual_type_only_assigned_clients(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,active) VALUES('Ima','1',1)")
@@ -186,6 +208,11 @@ def test_client_obligations_settings_roundtrip(spine, cfg):
     got = c.get(f"/clients/{cid}/obveze-postavke", headers=H).json()
     assert got["has_employees"] == 1 and got["pdv_freq"] == "quarterly"
     assert got["manual_kinds"] == ["NAJAM"]
+    # regime roundtrips too
+    c.post(f"/clients/{cid}/obveze-postavke", json={"regime": "dohodak"}, headers=H)
+    assert c.get(f"/clients/{cid}/obveze-postavke", headers=H).json()["regime"] == "dohodak"
+    assert c.post(f"/clients/{cid}/obveze-postavke", json={"regime": "xyz"},
+                  headers=H).status_code == 400
     assert any(t["kind"] == "NAJAM" for t in got["available_manual"])
 
 

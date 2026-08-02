@@ -1091,7 +1091,14 @@ def klijent_page(client_id: int) -> str:
   </div>
   <div class="card">
     <h2>Obveze — postavke</h2>
-    <label style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="oc-employees"> Ima zaposlene (za JOPPD/DOH)</label>
+    <label for="oc-regime" style="display:block">Porezni sustav</label>
+    <select id="oc-regime">
+      <option value="">— (nepoznato)</option>
+      <option value="dobit">Porez na dobit (d.o.o.)</option>
+      <option value="dohodak">Dohodaš (obrt, knjige) → DOH</option>
+      <option value="pausal">Paušalni obrt → PO-SD</option>
+    </select>
+    <label style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem"><input type="checkbox" id="oc-employees"> Ima zaposlene (za JOPPD)</label>
     <label for="oc-pdv-freq" style="margin-top:.5rem;display:block">PDV frekvencija</label>
     <select id="oc-pdv-freq"><option value="monthly">Mjesečno</option><option value="quarterly">Tromjesečno</option></select>
     <div id="oc-manual" style="margin-top:.5rem"></div>
@@ -1140,6 +1147,7 @@ _OBVEZE_SETTINGS_JS = """
     var d = await res.json();
     $('oc-employees').checked = !!d.has_employees;
     $('oc-pdv-freq').value = d.pdv_freq || 'monthly';
+    $('oc-regime').value = d.regime || '';
     manual = d.available_manual || [];
     var box = $('oc-manual'); box.textContent = '';
     if(!manual.length){ return; }
@@ -1159,7 +1167,7 @@ _OBVEZE_SETTINGS_JS = """
     var res = await fetch(URL, {method:'POST', credentials:'same-origin',
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify({has_employees: $('oc-employees').checked?1:0,
-        pdv_freq: $('oc-pdv-freq').value, manual_kinds: kinds})});
+        pdv_freq: $('oc-pdv-freq').value, regime: $('oc-regime').value, manual_kinds: kinds})});
     var msg = $('oc-msg');
     if(res.ok){ msg.textContent='Spremljeno.'; setTimeout(function(){msg.textContent='';}, 2000); }
     else { msg.textContent='Greška.'; }

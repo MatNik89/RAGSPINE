@@ -166,13 +166,16 @@ const PERIOD = {script_json(period)};
 _APPLIES_LABELS = {
     "pdv": "PDV obveznici",
     "employees": "Ima zaposlene",
+    "dobit": "Porez na dobit (d.o.o.)",
+    "dohodak": "Dohodaš (obrt, knjige)",
+    "pausal": "Paušalni obrt",
     "all_active": "Svi aktivni",
     "manual": "Ručno po klijentu",
 }
 
 _TYPES_JS = """
 function $(id){ return document.getElementById(id); }
-var APPLIES = {pdv:'PDV obveznici', employees:'Ima zaposlene', all_active:'Svi aktivni', manual:'Ručno po klijentu'};
+var APPLIES = {pdv:'PDV obveznici', employees:'Ima zaposlene', dobit:'Porez na dobit (d.o.o.)', dohodak:'Dohodaš (obrt, knjige)', pausal:'Paušalni obrt', all_active:'Svi aktivni', manual:'Ručno po klijentu'};
 var FREQ = {monthly:'Mjesečno', quarterly:'Tromjesečno', yearly:'Godišnje'};
 
 function fillForm(t){

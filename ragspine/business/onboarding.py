@@ -54,13 +54,16 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
             pdv_freq = data.get("pdv_freq") or "monthly"
             if pdv_freq not in ("monthly", "quarterly"):
                 pdv_freq = "monthly"
+            regime = data.get("regime") or ""
+            if regime not in ("", "dobit", "dohodak", "pausal"):
+                regime = ""
             client_id = c.execute(
                 """INSERT INTO clients(name,oib,email,phone,owner,industry,pdv_status,
-                       pausal_eur,has_employees,pdv_freq)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                       pausal_eur,has_employees,pdv_freq,regime)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (name, oib, data.get("email") or "", data.get("phone") or "", owner,
                  data.get("industry") or "", data.get("pdv_status") or "",
-                 data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0, pdv_freq),
+                 data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0, pdv_freq, regime),
             ).lastrowid
             folder_path = _client_root(cfg, client_id, name)
             nas_folder = os.path.relpath(folder_path, root)

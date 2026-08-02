@@ -5,31 +5,46 @@
 # svaku vrstu razriješi TKO je obveznik (applies_to) pa napravi obligations rede.
 
 # Ugrađene default-vrste — seed-aju se lijeno (INSERT OR IGNORE) pa admin-izmjene
-# ostaju. (kind, label, rule, frequency, applies_to, sort)
+# ostaju. (kind, label, rule, frequency, applies_to, sort, active)
+# active=0 znači: postoji u registru, ali nije tab dok ga radnik ne uključi.
 DEFAULT_TYPES = [
-    ("PDV", "PDV", "monthly:20", "monthly", "pdv", 10),
-    ("JOPPD", "JOPPD", "monthly:15", "monthly", "employees", 20),
-    ("DOH", "DOH akontacija", "monthly:1", "monthly", "employees", 30),
+    ("PDV", "PDV", "monthly:20", "monthly", "pdv", 10, 1),
+    ("JOPPD", "JOPPD", "monthly:15", "monthly", "employees", 20, 1),
+    ("DOH", "Prijava poreza na dohodak (DOH)", "yearly:02-28", "yearly", "dohodak", 30, 0),
+    ("PO-SD", "Paušalno izvješće (PO-SD)", "yearly:01-15", "yearly", "pausal", 40, 0),
+    ("PD", "Prijava poreza na dobit (PD)", "yearly:04-30", "yearly", "dobit", 50, 0),
 ]
 
 # Back-compat: neki moduli/testovi importaju obveze.KINDS. Registar je izvor
 # istine; ovo su samo default-kindovi.
 KINDS = tuple(t[0] for t in DEFAULT_TYPES)
 
-APPLIES_TO = ("pdv", "employees", "all_active", "manual")
+# Tko je obveznik. Uz jednostavne (pdv/employees/all_active/manual) — porezni
+# sustav klijenta (regime): DOH=dohodaš, PO-SD=paušalist, PD/GFI=dobitaš.
+_REGIME_APPLIES = ("dobit", "dohodak", "pausal")
+APPLIES_TO = ("pdv", "employees", "all_active", "manual", *_REGIME_APPLIES)
+REGIMES = ("", *_REGIME_APPLIES)
 FREQUENCIES = ("monthly", "quarterly", "yearly")
 # Mjeseci u kojima tromjesečni obveznik predaje (nakon isteka kvartala).
 _QUARTER_MONTHS = (1, 4, 7, 10)
 
 
+def _yearly_month(rule: str) -> int:
+    """Mjesec roka za godišnju vrstu iz pravila 'yearly:MM-DD'. Default siječanj."""
+    try:
+        return int((rule or "").split(":", 1)[1][:2])
+    except (IndexError, ValueError):
+        return 1
+
+
 def _ensure_seeded(spine) -> None:
     with spine.write() as c:
-        for kind, label, rule, freq, applies, sort in DEFAULT_TYPES:
+        for kind, label, rule, freq, applies, sort, active in DEFAULT_TYPES:
             c.execute(
                 """INSERT OR IGNORE INTO obligation_types
                    (kind, label, rule, frequency, applies_to, active, sort)
-                   VALUES(?,?,?,?,?,1,?)""",
-                (kind, label, rule, freq, applies, sort),
+                   VALUES(?,?,?,?,?,?,?)""",
+                (kind, label, rule, freq, applies, active, sort),
             )
 
 
@@ -123,13 +138,19 @@ def _obligor_ids(spine, otype: dict, period: str) -> list[int]:
             ids.append(r["id"])
         return ids
 
-    # type-level frekvencija-gate za ne-PDV vrste
+    # type-level frekvencija-gate za ne-PDV vrste: kvartalna/godišnja vrsta
+    # postoji samo u mjesecu predaje
     if otype["frequency"] == "quarterly" and month not in _QUARTER_MONTHS:
+        return []
+    if otype["frequency"] == "yearly" and month != _yearly_month(otype["rule"]):
         return []
 
     if applies == "employees":
         return [r["id"] for r in c.execute(
             "SELECT id FROM clients WHERE active=1 AND has_employees=1").fetchall()]
+    if applies in _REGIME_APPLIES:
+        return [r["id"] for r in c.execute(
+            "SELECT id FROM clients WHERE active=1 AND regime=?", (applies,)).fetchall()]
     if applies == "all_active":
         return [r["id"] for r in c.execute(
             "SELECT id FROM clients WHERE active=1").fetchall()]

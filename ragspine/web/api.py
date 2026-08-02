@@ -118,6 +118,7 @@ class ClientCreateBody(BaseModel):
     pausal_eur: float = 0
     has_employees: int = 0
     pdv_freq: str = "monthly"
+    regime: str = ""
 
 
 class ClientDocumentBody(BaseModel):
@@ -155,6 +156,7 @@ class ObligationTypeBody(BaseModel):
 class ClientObligationsBody(BaseModel):
     has_employees: int = 0
     pdv_freq: str = "monthly"
+    regime: str = ""
     manual_kinds: list[str] = []
 
 
@@ -477,7 +479,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/clients/{client_id}/obveze-postavke")
     def client_obligations_get(client_id: int, user: str = Depends(require_user_web)):
         row = spine.read().execute(
-            "SELECT has_employees, pdv_freq FROM clients WHERE id=?", (client_id,)).fetchone()
+            "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "nepoznat klijent")
         available = [{"kind": t["kind"], "label": t["label"]}
@@ -486,6 +488,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {
             "has_employees": row["has_employees"] or 0,
             "pdv_freq": row["pdv_freq"] or "monthly",
+            "regime": row["regime"] or "",
             "manual_kinds": obveze.client_types(spine, client_id),
             "available_manual": available,
         }
@@ -495,14 +498,16 @@ def create_app(spine, cfg) -> FastAPI:
                                 user: str = Depends(require_user_web)):
         if body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
+        if body.regime not in obveze.REGIMES:
+            raise HTTPException(400, f"nepoznat porezni sustav: {body.regime!r}")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         with spine.write() as c:
-            c.execute("UPDATE clients SET has_employees=?, pdv_freq=? WHERE id=?",
-                      (1 if body.has_employees else 0, body.pdv_freq, client_id))
+            c.execute("UPDATE clients SET has_employees=?, pdv_freq=?, regime=? WHERE id=?",
+                      (1 if body.has_employees else 0, body.pdv_freq, body.regime, client_id))
         obveze.set_client_types(spine, client_id, body.manual_kinds, user=user)
         return {"client_id": client_id, "has_employees": int(bool(body.has_employees)),
-                "pdv_freq": body.pdv_freq, "manual_kinds": body.manual_kinds}
+                "pdv_freq": body.pdv_freq, "regime": body.regime, "manual_kinds": body.manual_kinds}
 
     @app.post("/obveze/mark")
     async def obveze_mark(request: Request, user: str = Depends(require_user_web)):

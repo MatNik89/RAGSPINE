@@ -220,8 +220,9 @@ def test_dashboard_unsent_grouped_by_client(spine, cfg):
     alfa = [g for g in groups if g["client"] == "Alfa"]
     assert len(alfa) == 1  # one row per client, not per obligation
     kinds = {k["kind"] for k in alfa[0]["kinds"]}
-    # PDV (pdv obligor) + JOPPD/DOH (has employees), all on one row as chips
-    assert kinds == {"PDV", "JOPPD", "DOH"}
+    # PDV (pdv obligor) + JOPPD (has employees) — the active tab types — on one row.
+    # DOH is a yearly/regime type and inactive by default, so it doesn't appear here.
+    assert kinds == {"PDV", "JOPPD"}
     assert alfa[0]["client_id"] == cid
 
 
