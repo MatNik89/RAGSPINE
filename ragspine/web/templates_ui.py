@@ -140,7 +140,25 @@ _NAV = [
     ("upute", "/ui/upute", "Upute"),
     ("obveze", "/obveze", "Obveze"),
     ("rokovi", "/ui/rokovi", "Rokovi"),
+    ("obavijesti", "/ui/obavijesti", "Obavijesti"),
+    ("dokumenti", "/ui/dokumenti", "Dokumenti"),
 ]
+
+# Unseen-notifications badge next to the "Obavijesti" nav link. Best-effort:
+# a failed fetch just leaves the badge hidden, never breaks the page it rides on.
+_NAV_BADGE_JS = """
+(function(){
+  var badge = document.getElementById('nav-unseen');
+  if (!badge) return;
+  fetch('/notifications.json', { credentials: 'same-origin' })
+    .then(function (r) { return r.ok ? r.json() : []; })
+    .then(function (rows) {
+      var n = rows.filter(function (r) { return !r.seen; }).length;
+      if (n > 0) { badge.textContent = String(n); badge.style.display = 'inline-block'; }
+    })
+    .catch(function () {});
+})();
+"""
 
 # Inline, CSP-safe (no external script). Runs as the first thing inside
 # <body> — before nav/main are parsed — so the theme is set before paint
@@ -171,7 +189,9 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
     links = []
     for key, href, label in _NAV:
         cls = ' class="active"' if key == active else ""
-        links.append(f'<a href="{html.escape(href)}"{cls}>{html.escape(label)}</a>')
+        badge = (' <span id="nav-unseen" class="chip bad" style="display:none"></span>'
+                  if key == "obavijesti" else "")
+        links.append(f'<a href="{html.escape(href)}"{cls}>{html.escape(label)}{badge}</a>')
     nav_links = "".join(links)
     return f"""<!DOCTYPE html>
 <html lang="hr">
@@ -195,6 +215,7 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 {body_html}
 </main>
 <script>{_THEME_TOGGLE_JS}</script>
+<script>{_NAV_BADGE_JS}</script>
 </body>
 </html>"""
 
@@ -366,8 +387,9 @@ function addAssistant(data) {
   const cls = data.clarify ? 'assistant clarify' : 'assistant';
   const div = addMsg(cls, data.answer || '');
   if (data.client && data.client.name) {
-    const chip = document.createElement('div');
+    const chip = document.createElement('a');
     chip.className = 'chip';
+    chip.href = '/ui/klijent/' + data.client.id;
     chip.textContent = 'Klijent: ' + data.client.name;
     div.insertBefore(chip, div.firstChild);
   }
@@ -976,3 +998,213 @@ def upute_page(pending_rows: list[dict]) -> str:
 </table>
 <script>{_UPUTE_JS}</script>"""
     return page_shell("Upute", body, active="upute")
+
+
+_OBAVIJESTI_JS = """
+function $(id) { return document.getElementById(id); }
+
+async function markSeen(id) {
+  try {
+    await fetch('/notifications/' + id + '/seen', { method: 'POST', credentials: 'same-origin' });
+  } catch (e) {}
+  loadNotifications();
+}
+
+function renderNotif(container, rows) {
+  container.textContent = '';
+  if (!rows.length) {
+    const p = document.createElement('p');
+    p.className = 'meta';
+    p.textContent = 'Nema obavijesti.';
+    container.appendChild(p);
+    return;
+  }
+  rows.forEach(function (r) {
+    const row = document.createElement('div');
+    row.className = 'oblig-row' + (r.seen ? '' : ' warn');
+    row.style.cursor = r.seen ? 'default' : 'pointer';
+
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = r.kind;
+    row.appendChild(chip);
+
+    const body = document.createElement('span');
+    body.textContent = r.body;
+    if (!r.seen) body.style.fontWeight = '700';
+    row.appendChild(body);
+
+    const at = document.createElement('span');
+    at.className = 'due';
+    at.textContent = r.at || '';
+    row.appendChild(at);
+
+    if (!r.seen) {
+      row.addEventListener('click', function () { markSeen(r.id); });
+    }
+    container.appendChild(row);
+  });
+}
+
+async function loadNotifications() {
+  try {
+    const res = await fetch('/notifications.json', { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    const rows = await res.json();
+    renderNotif($('notif-list'), rows);
+  } catch (err) {
+    $('notif-error').textContent = 'Greška pri učitavanju obavijesti. Osvježite stranicu.';
+    $('notif-error').style.display = 'block';
+  }
+}
+
+loadNotifications();
+"""
+
+
+def obavijesti_page() -> str:
+    body = f"""<h1>Obavijesti</h1>
+<p class="meta">Sve obavijesti — klikni nepročitanu da je označiš pročitanom.</p>
+<div id="notif-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
+<div id="notif-list"><p class="meta">Učitavanje…</p></div>
+<script>{_OBAVIJESTI_JS}</script>"""
+    return page_shell("Obavijesti", body, active="obavijesti")
+
+
+_DOKUMENTI_JS = """
+function $(id) { return document.getElementById(id); }
+
+function toggleExtra() {
+  const t = $('doc-type').value;
+  $('extra-ponuda').style.display = t === 'ponuda' ? 'block' : 'none';
+  $('extra-opomena').style.display = t === 'opomena' ? 'block' : 'none';
+}
+
+function addStavkaRow() {
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '.5rem';
+  row.style.marginBottom = '.4rem';
+  const naziv = document.createElement('input');
+  naziv.type = 'text';
+  naziv.placeholder = 'Naziv';
+  naziv.className = 'stavka-naziv';
+  const iznos = document.createElement('input');
+  iznos.type = 'number';
+  iznos.step = '0.01';
+  iznos.placeholder = 'Iznos (EUR)';
+  iznos.className = 'stavka-iznos';
+  row.appendChild(naziv);
+  row.appendChild(iznos);
+  $('stavke-rows').appendChild(row);
+}
+
+function collectExtra() {
+  const t = $('doc-type').value;
+  if (t === 'ponuda') {
+    const stavke = [];
+    $('stavke-rows').querySelectorAll('div').forEach(function (row) {
+      const naziv = row.querySelector('.stavka-naziv').value.trim();
+      const iznos = parseFloat(row.querySelector('.stavka-iznos').value);
+      if (naziv && !isNaN(iznos)) stavke.push({ naziv: naziv, iznos: iznos });
+    });
+    return { stavke: stavke };
+  }
+  if (t === 'opomena') {
+    return { iznos_duga: parseFloat($('iznos-duga').value) || 0, rok: $('rok').value };
+  }
+  return {};
+}
+
+async function loadTemplates() {
+  const res = await fetch('/doc/templates', { credentials: 'same-origin' });
+  const types = await res.json();
+  const sel = $('doc-type');
+  sel.textContent = '';
+  types.forEach(function (t) {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    sel.appendChild(opt);
+  });
+  toggleExtra();
+}
+
+async function loadClients() {
+  const res = await fetch('/clients', { credentials: 'same-origin' });
+  const rows = await res.json();
+  const sel = $('doc-client');
+  sel.textContent = '';
+  rows.forEach(function (r) {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    opt.textContent = r.name;
+    sel.appendChild(opt);
+  });
+}
+
+$('doc-type').addEventListener('change', toggleExtra);
+$('add-stavka').addEventListener('click', addStavkaRow);
+
+$('doc-form').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  $('doc-warning').style.display = 'none';
+  $('doc-output').textContent = '';
+  const clientId = parseInt($('doc-client').value, 10);
+  if (!clientId) { $('doc-output').textContent = 'Odaberi klijenta.'; return; }
+  const body = { doc_type: $('doc-type').value, client_id: clientId, extra: collectExtra() };
+  try {
+    const res = await fetch('/doc/generate', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      let detail = res.status;
+      try { detail = (await res.json()).detail || detail; } catch (e2) {}
+      $('doc-output').textContent = 'Greška: ' + detail;
+      return;
+    }
+    const data = await res.json();
+    $('doc-output').textContent = data.text;
+    if (data.warning) {
+      $('doc-warning').textContent = 'Upozorenje: brojke nedostaju u dokumentu.';
+      $('doc-warning').style.display = 'block';
+    }
+  } catch (err) {
+    $('doc-output').textContent = 'Greška u komunikaciji sa serverom.';
+  }
+});
+
+loadTemplates();
+loadClients();
+addStavkaRow();
+"""
+
+
+def dokumenti_page() -> str:
+    body = f"""<h1>Generator dokumenata</h1>
+<p class="meta">Ponuda, dopis ili opomena — iz predloška, s provjerom da brojke nisu izmišljene.</p>
+<form id="doc-form" class="stack">
+  <label for="doc-type">Vrsta dokumenta</label>
+  <select id="doc-type"></select>
+  <label for="doc-client">Klijent</label>
+  <select id="doc-client"></select>
+  <div id="extra-ponuda" style="display:none">
+    <label>Stavke (naziv + iznos)</label>
+    <div id="stavke-rows"></div>
+    <button type="button" class="btn btn-ghost" id="add-stavka">Dodaj stavku</button>
+  </div>
+  <div id="extra-opomena" style="display:none">
+    <label for="iznos-duga">Iznos duga (EUR)</label>
+    <input type="number" id="iznos-duga" step="0.01" min="0">
+    <label for="rok">Rok plaćanja</label>
+    <input type="date" id="rok">
+  </div>
+  <button type="submit" class="btn">Generiraj</button>
+</form>
+<div id="doc-warning" class="chip bad" style="display:none;margin-top:1rem"></div>
+<pre id="doc-output" class="card" style="white-space:pre-wrap;margin-top:1rem;font-family:var(--font-mono)"></pre>
+<script>{_DOKUMENTI_JS}</script>"""
+    return page_shell("Dokumenti", body, active="dokumenti")

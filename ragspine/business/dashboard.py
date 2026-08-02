@@ -10,11 +10,12 @@ def _today() -> date:
 
 
 def _urgency(due_str: str, today: date) -> str:
-    """kasni (past due) -> bad; uskoro (<=3 dana) -> warn; else -> ok."""
+    """kasni (past due) -> bad; uskoro (<=7 dana) -> warn; else -> ok.
+    Matches business/karton.py._urgency + .sdd/ui-DESIGN.md (uskoro(<=7d))."""
     delta = (date.fromisoformat(due_str) - today).days
     if delta < 0:
         return "bad"
-    if delta <= 3:
+    if delta <= 7:
         return "warn"
     return "ok"
 

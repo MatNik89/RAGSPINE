@@ -47,7 +47,8 @@ from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_obveze import render_obveze
-from ragspine.web.templates_ui import chat_page, dashboard_page, klijent_page, klijenti_page, upute_page
+from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
+                                        klijenti_page, obavijesti_page, upute_page)
 
 
 class ChatBody(BaseModel):
@@ -360,6 +361,37 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return klijent_page(client_id)
+
+    @app.get("/ui/obavijesti", response_class=HTMLResponse)
+    def ui_obavijesti(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return obavijesti_page()
+
+    @app.get("/ui/dokumenti", response_class=HTMLResponse)
+    def ui_dokumenti(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return dokumenti_page()
+
+    @app.get("/notifications.json")
+    def notifications_json(user: str = Depends(require_user_web)):
+        rows = spine.read().execute(
+            "SELECT id, kind, body, client_id, seen, at FROM notifications ORDER BY at DESC LIMIT 50"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    @app.post("/notifications/{notif_id}/seen")
+    def notifications_mark_seen(notif_id: int, user: str = Depends(require_user_web)):
+        with spine.write() as c:
+            if c.execute("SELECT 1 FROM notifications WHERE id=?", (notif_id,)).fetchone() is None:
+                raise HTTPException(404, "nepoznata obavijest")
+            c.execute("UPDATE notifications SET seen=1 WHERE id=?", (notif_id,))
+        return {"id": notif_id, "seen": True}
 
     @app.get("/obveze", response_class=HTMLResponse)
     def obveze_page(request: Request, kind: str = "PDV", period: str | None = None):

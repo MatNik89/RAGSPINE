@@ -144,7 +144,7 @@ def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
     by_kind = {d["kind"]: d for d in body["deadlines"]}
     assert by_kind["X"]["state"] == "bad" and by_kind["X"]["days_left"] == -1   # yesterday
     assert by_kind["Y"]["state"] == "warn" and by_kind["Y"]["days_left"] == 2   # in 2 days
-    assert by_kind["Z"]["state"] == "ok" and by_kind["Z"]["days_left"] == 6     # in 6 days
+    assert by_kind["Z"]["state"] == "warn" and by_kind["Z"]["days_left"] == 6  # in 6 days, now <=7 -> warn
 
     # expiring doc urgency (2 days -> warn) + days_left
     assert body["expiring"][0]["state"] == "warn"
@@ -162,6 +162,8 @@ def test_urgency_thresholds():
     assert dashboard._urgency((today - timedelta(days=1)).isoformat(), today) == "bad"
     assert dashboard._urgency((today + timedelta(days=2)).isoformat(), today) == "warn"
     assert dashboard._urgency((today + timedelta(days=3)).isoformat(), today) == "warn"
+    assert dashboard._urgency((today + timedelta(days=7)).isoformat(), today) == "warn"
+    assert dashboard._urgency((today + timedelta(days=8)).isoformat(), today) == "ok"
     assert dashboard._urgency((today + timedelta(days=10)).isoformat(), today) == "ok"
     assert dashboard._urgency(today.isoformat(), today) == "warn"
 
