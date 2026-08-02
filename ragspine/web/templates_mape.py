@@ -85,9 +85,10 @@ loadRegistered();
 
 
 def mape_page() -> str:
-    body = f"""<h1>Mape</h1>
-<p class="meta">Poveži mrežne mape (NAS / Windows share). Uđi u mapu pa joj dodijeli ulogu
-(zakoni, klijenti…). RAGSPINE ih čita samo za čitanje.</p>
+    body = f"""<h1>Mrežne mape</h1>
+<p class="meta"><a href="/ui/postavke">← Postavke</a> · Poveži NAS / Windows share, uđi u mapu pa joj dodijeli ulogu. RAGSPINE ih čita samo za čitanje.</p>
+<p class="meta" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:.6rem .8rem">
+📌 Za <b>propise</b> dodaj <b>jednu glavnu mapu</b> (npr. <code>Propisi</code>). Unutar nje neka su podmape po vrsti — <code>Zakoni</code>, <code>Pravilnici</code>, <code>Uredbe</code>, <code>Mišljenja</code>, <code>NN</code> — RAGSPINE prepozna vrstu i autoritet po nazivu podmape.</p>
 <div id="mape-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
 <div class="grid">
   <div class="card">
@@ -97,7 +98,7 @@ def mape_page() -> str:
     <div id="assign" style="display:none;border-top:1px solid var(--border);padding-top:.75rem">
       <label for="f-role">Uloga ove mape</label>
       <select id="f-role">
-        <option value="zakoni">zakoni (propisi)</option>
+        <option value="propisi">propisi (zakoni / pravilnici / uredbe)</option>
         <option value="klijenti">klijenti</option>
         <option value="ostalo">ostalo</option>
       </select>
@@ -115,4 +116,4 @@ def mape_page() -> str:
   </div>
 </div>
 <script>{_MAPE_JS}</script>"""
-    return page_shell("Mape", body, active="mape")
+    return page_shell("Mrežne mape", body, active="postavke")

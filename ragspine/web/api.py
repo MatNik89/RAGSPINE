@@ -51,7 +51,7 @@ from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
-                                        klijenti_page, obavijesti_page, upute_page)
+                                        klijenti_page, obavijesti_page, postavke_page, upute_page)
 
 
 class ChatBody(BaseModel):
@@ -426,6 +426,14 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return obveze_types_page()
+
+    @app.get("/ui/postavke", response_class=HTMLResponse)
+    def ui_postavke(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return postavke_page()
 
     @app.get("/ui/mape", response_class=HTMLResponse)
     def ui_mape(request: Request):

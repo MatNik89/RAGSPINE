@@ -162,7 +162,8 @@ def test_ui_mape_authed(spine, tmp_path):
     c = _client(spine, cfg); tok = _token(c, spine)
     r = c.get("/ui/mape", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 200
-    assert "Mape" in r.text and "/folders/browse" in r.text
+    assert "Mrežne mape" in r.text and "/folders/browse" in r.text
+    assert "propisi" in r.text  # jedna glavna mapa, podmape po vrsti
     assert "@font-face" in r.text and "innerHTML" not in r.text
 
 
@@ -171,3 +172,28 @@ def test_ui_mape_no_auth_redirects(spine, tmp_path):
     c = _client(spine, cfg)
     r = c.get("/ui/mape", follow_redirects=False)
     assert r.status_code == 303
+
+
+def test_ui_postavke_lists_config_screens(spine, tmp_path):
+    cfg = _cfg_with_roots(tmp_path, [str(tmp_path)])
+    c = _client(spine, cfg); tok = _token(c, spine)
+    r = c.get("/ui/postavke", headers={"Authorization": f"Bearer {tok}"})
+    assert r.status_code == 200
+    assert "Postavke" in r.text
+    assert "/ui/mape" in r.text and "/ui/obveze-tipovi" in r.text
+
+
+def test_ui_postavke_no_auth_redirects(spine, tmp_path):
+    cfg = _cfg_with_roots(tmp_path, [str(tmp_path)])
+    c = _client(spine, cfg)
+    r = c.get("/ui/postavke", follow_redirects=False)
+    assert r.status_code == 303
+
+
+def test_dashboard_nav_has_postavke_not_mape(spine, tmp_path):
+    # konfiguracija je u Postavkama, ne u glavnom ribonu
+    cfg = _cfg_with_roots(tmp_path, [str(tmp_path)])
+    c = _client(spine, cfg); tok = _token(c, spine)
+    r = c.get("/", headers={"Authorization": f"Bearer {tok}"})
+    assert '/ui/postavke"' in r.text
+    assert '>Mape<' not in r.text  # nema Mape linka u ribonu

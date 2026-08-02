@@ -282,7 +282,7 @@ odmah poveže: pojave se kao tab na Obvezama, u kalendaru i na dashboardu.
   označiš pojedinom klijentu na njegovom kartonu.</p>
 </div>
 <script>{_TYPES_JS}</script>"""
-    return page_shell("Vrste obveza", body, active="obveze")
+    return page_shell("Vrste obveza", body, active="postavke")
 
 
 _CAMPAIGN_JS = """
