@@ -38,14 +38,15 @@ def test_dashboard_page_authed_has_tiles_and_cards(spine, cfg):
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
     text = r.text
-    # stat tiles
+    # KPI tiles
     assert "Aktivni klijenti" in text
     assert "Rokovi ovaj tjedan" in text
     assert "Neposlane obveze" in text
-    assert "Nepročitane obavijesti" in text
-    # card titles
-    assert "Rokovi" in text
-    assert "Istek" in text
+    assert "Nove obavijesti" in text
+    # calendar-first hero + rail + board
+    assert "Ured danas" in text
+    assert "Što danas moram" in text
+    assert 'id="cal-grid"' in text
     assert "obavijesti" in text.lower()
     # fetches the JSON endpoint client-side
     assert "/dashboard.json" in text
@@ -91,8 +92,12 @@ def test_dashboard_json_has_expected_keys(spine, cfg):
     r = c.get("/dashboard.json", headers=_auth(tok))
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"stats", "deadlines", "unsent_obligations", "expiring",
-                          "notifications", "peer"}
+    assert set(body) == {"stats", "calendar", "deadlines", "unsent_obligations",
+                          "unsent_by_client", "expiring", "notifications", "peer"}
+    # calendar hero payload shape
+    cal = body["calendar"]
+    assert set(cal) == {"year", "month", "today", "events"}
+    assert isinstance(cal["events"], list)
 
 
 def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
@@ -181,6 +186,45 @@ def test_dashboard_json_xss_safe_client_name(spine, cfg):
     # JSON-safe: raw string present (not HTML-escaped) since this is application/json
     assert any(u["client"] == "<script>alert(1)</script>" for u in r.json()["unsent_obligations"])
     assert "application/json" in r.headers["content-type"]
+
+
+def test_dashboard_calendar_events_pinned_to_day(spine, cfg, monkeypatch):
+    today = date(2026, 8, 2)
+    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(expiry_mod, "_today", lambda: today)
+    monkeypatch.setattr(dashboard, "_today", lambda: today)
+    with spine.write() as c:
+        c.execute("INSERT INTO deadlines(kind, rule, description) VALUES('PDV','monthly:20','PDV obrazac')")
+        c.execute("INSERT INTO deadline_dates(kind, due, year) VALUES('PDV','2026-08-20',2026)")
+        # a deadline in a DIFFERENT month must not leak in
+        c.execute("INSERT INTO deadline_dates(kind, due, year) VALUES('PDV','2026-09-20',2026)")
+
+    tok = _token(c := _client(spine, cfg), spine)
+    cal = c.get("/dashboard.json", headers=_auth(tok)).json()["calendar"]
+    assert cal["year"] == 2026 and cal["month"] == 8 and cal["today"] == 2
+    days = [e["day"] for e in cal["events"]]
+    assert 20 in days and 20 == [e for e in cal["events"] if e["kind"] == "PDV"][0]["day"]
+    assert all(e["day"] != 20 or e["kind"] != "PDV" or e["state"] == "ok" for e in cal["events"])
+    # September deadline excluded
+    assert len(cal["events"]) == 1
+
+
+def test_dashboard_unsent_grouped_by_client(spine, cfg):
+    cid = _seed_client(spine, "Alfa")
+    from ragspine.business import obveze
+    period = date.today().strftime("%Y-%m")
+    obveze.ensure_period(spine, "PDV", period)
+    obveze.ensure_period(spine, "JOPPD", period)
+
+    tok = _token(c := _client(spine, cfg), spine)
+    body = c.get("/dashboard.json", headers=_auth(tok)).json()
+    groups = body["unsent_by_client"]
+    alfa = [g for g in groups if g["client"] == "Alfa"]
+    assert len(alfa) == 1  # one row per client, not per obligation
+    kinds = {k["kind"] for k in alfa[0]["kinds"]}
+    # dashboard surfaces every unsent kind for the client as chips on one row
+    assert kinds == {"PDV", "JOPPD", "DOH"}
+    assert alfa[0]["client_id"] == cid
 
 
 def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
