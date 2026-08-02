@@ -244,6 +244,7 @@ _NAV = [
     ("upute", "/ui/upute", "Upute"),
     ("obveze", "/obveze", "Obveze"),
     ("rokovi", "/ui/rokovi", "Rokovi"),
+    ("mape", "/ui/mape", "Mape"),
     ("obavijesti", "/ui/obavijesti", "Obavijesti"),
     ("dokumenti", "/ui/dokumenti", "Dokumenti"),
 ]

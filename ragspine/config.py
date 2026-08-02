@@ -25,6 +25,7 @@ class Config:
     https_only: bool
     egress_allow: list[str]
     apprise_urls: list[str]
+    mount_roots: list[str]
     digest_hour: int
 
     @classmethod
@@ -58,6 +59,10 @@ class Config:
             https_only=e("RAGSPINE_HTTPS_ONLY", "0") == "1",
             egress_allow=[h for h in e("RAGSPINE_EGRESS_ALLOW", "").split(",") if h],
             apprise_urls=[u for u in e("RAGSPINE_APPRISE_URLS", "").split(",") if u],
+            # Dozvoljeni korijeni mrežnih mapa (SMB mount točke); samo mape ispod
+            # ovih smiju se registrirati/čitati. realpath da simlink ne zaobiđe scoping.
+            mount_roots=[os.path.realpath(os.path.expanduser(p))
+                         for p in e("RAGSPINE_MOUNT_ROOTS", "").split(",") if p.strip()],
             digest_hour=int(e("RAGSPINE_DIGEST_HOUR", "7")))
 
 _cfg: Config | None = None

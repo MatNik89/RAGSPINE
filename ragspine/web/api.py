@@ -15,6 +15,7 @@ from ragspine.business import cjenik
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
+from ragspine.business import folders as folders_mod
 from ragspine.business import kalendar
 from ragspine.business import karton as karton_mod
 from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lane handler
@@ -47,6 +48,7 @@ from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
+from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, upute_page)
@@ -151,6 +153,18 @@ class ObligationTypeBody(BaseModel):
     active: int = 1
     sort: int = 100
     description: str = ""
+
+
+class FolderBody(BaseModel):
+    path: str
+    role: str = "ostalo"
+    label: str = ""
+
+
+class FolderUpdateBody(BaseModel):
+    role: str | None = None
+    label: str | None = None
+    enabled: int | None = None
 
 
 class ClientObligationsBody(BaseModel):
@@ -412,6 +426,49 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return obveze_types_page()
+
+    @app.get("/ui/mape", response_class=HTMLResponse)
+    def ui_mape(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return mape_page()
+
+    @app.get("/folders/browse")
+    def folders_browse(path: str | None = None, user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.browse(cfg, path)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/folders")
+    def folders_list(user: str = Depends(require_user_web)):
+        return folders_mod.list_folders(spine)
+
+    @app.post("/folders")
+    def folders_register(body: FolderBody, user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.register(spine, cfg, body.path, body.role, body.label, user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/folders/{folder_id}")
+    def folders_update(folder_id: int, body: FolderUpdateBody,
+                       user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.update(spine, folder_id, role=body.role, label=body.label,
+                                      enabled=body.enabled, user=user)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.delete("/folders/{folder_id}")
+    def folders_delete(folder_id: int, user: str = Depends(require_user_web)):
+        try:
+            folders_mod.remove(spine, folder_id, user)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"id": folder_id, "removed": True}
 
     @app.get("/ui/dokumenti", response_class=HTMLResponse)
     def ui_dokumenti(request: Request):
