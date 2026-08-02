@@ -732,6 +732,10 @@ function renderRows(rows) {
     tdPdv.appendChild(chip);
     tr.appendChild(tdPdv);
 
+    const tdReg = document.createElement('td');
+    tdReg.textContent = REGIME_LABEL[r.regime || ''] || '–';
+    tr.appendChild(tdReg);
+
     const tdInd = document.createElement('td');
     tdInd.textContent = r.industry || '–';
     tr.appendChild(tdInd);
@@ -739,6 +743,8 @@ function renderRows(rows) {
     tbody.appendChild(tr);
   });
 }
+
+var REGIME_LABEL = { '': '–', dobit: 'Dobit', dohodak: 'Dohodak', pausal: 'Paušal' };
 
 async function loadClients() {
   try {
@@ -751,7 +757,7 @@ async function loadClients() {
     tbody.textContent = '';
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.textContent = 'Greška pri učitavanju klijenata. Osvježite stranicu.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -783,6 +789,7 @@ $('add-form').addEventListener('submit', async function (e) {
     phone: $('f-phone').value.trim(),
     industry: $('f-industry').value.trim(),
     pdv_status: $('f-pdv').value,
+    regime: $('f-regime').value,
     pausal_eur: parseFloat($('f-pausal').value) || 0,
   };
   try {
@@ -835,14 +842,21 @@ def klijenti_page() -> str:
     <option value="u sustavu PDV-a">U sustavu PDV-a</option>
     <option value="nije u sustavu PDV-a">Nije u sustavu PDV-a</option>
   </select>
+  <label for="f-regime">Obračun (porezni sustav)</label>
+  <select id="f-regime">
+    <option value="">-</option>
+    <option value="dobit">Porez na dobit (d.o.o. / j.d.o.o. / obrt na dobiti)</option>
+    <option value="dohodak">Dohodak (obrt, knjige)</option>
+    <option value="pausal">Paušalni obrt</option>
+  </select>
   <label for="f-pausal">Paušal (EUR/mj)</label>
   <input type="number" id="f-pausal" step="0.01" min="0">
   <button type="submit" class="btn">Spremi klijenta</button>
 </form>
 <div id="add-error" class="chip bad" style="display:none"></div>
 <table class="ledger">
-<thead><tr><th>Naziv</th><th>OIB</th><th>PDV status</th><th>Djelatnost</th></tr></thead>
-<tbody id="clients-tbody"><tr><td colspan="4" class="meta">Učitavanje…</td></tr></tbody>
+<thead><tr><th>Naziv</th><th>OIB</th><th>PDV status</th><th>Obračun</th><th>Djelatnost</th></tr></thead>
+<tbody id="clients-tbody"><tr><td colspan="5" class="meta">Učitavanje…</td></tr></tbody>
 </table>
 <script>{_KLIJENTI_JS}</script>"""
     return page_shell("Klijenti", body, active="klijenti")

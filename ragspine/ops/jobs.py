@@ -3,7 +3,7 @@ signature fn(spine, cfg) -> None per ops/scheduler.py's Job contract."""
 import logging
 from datetime import date
 
-from ragspine.business import expiry, kalendar, obveze
+from ragspine.business import expiry, kalendar, obveze, rokovi
 from ragspine.core import memory
 from ragspine.docs import imap_fetch
 from ragspine.ops import digest, health, reminders_dump
@@ -59,8 +59,13 @@ def expiry_job(spine, cfg) -> None:
 
 def obveze_job(spine, cfg) -> None:
     period = _period_now()
-    for kind in obveze.KINDS:
+    for kind in obveze.active_kinds(spine):
         obveze.ensure_period(spine, kind, period)
+
+
+def rokovi_job(spine, cfg) -> None:
+    added = rokovi.generate(spine)
+    logger.info("rokovi_job: %d new deadline dates materialised", added)
 
 
 def stale_job(spine, cfg) -> None:
@@ -88,6 +93,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="deadlines", fn=deadlines_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
+    sched.register(Job(name="rokovi", fn=rokovi_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))
     sched.register(

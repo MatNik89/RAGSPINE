@@ -626,7 +626,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/clients")
     def clients_list(user: str = Depends(require_user_web)):
         rows = spine.read().execute(
-            "SELECT id, name, oib, pdv_status, industry, active FROM clients ORDER BY name"
+            "SELECT id, name, oib, pdv_status, industry, regime, active FROM clients ORDER BY name"
         ).fetchall()
         return [dict(r) for r in rows]
 
