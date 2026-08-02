@@ -1,6 +1,7 @@
 import base64
 import binascii
 import dataclasses
+import re
 from datetime import date
 from urllib.parse import quote
 
@@ -221,6 +222,18 @@ class BrowserAgentBody(BaseModel):
     url: str = ""
 
 
+# period is echoed back into an inline <script> on /obveze (as PERIOD) and
+# into a redirect URL on /obveze/mark — a free-form string here is a reflected
+# XSS / header-injection surface, so every entry point validates the shape
+# strictly (YYYY-MM) before it goes anywhere near a response.
+_PERIOD_RE = re.compile(r"\d{4}-\d{2}")
+
+
+def _require_valid_period(period: str) -> None:
+    if not _PERIOD_RE.fullmatch(period):
+        raise HTTPException(400, "neispravan period")
+
+
 # ponytail: fixed dummy hash for login timing — run a real verify_password
 # cost even when the username doesn't exist, so response latency doesn't
 # leak which usernames are registered.
@@ -402,6 +415,7 @@ def create_app(spine, cfg) -> FastAPI:
         if kind not in obveze.KINDS:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
+        _require_valid_period(period)
         obveze.ensure_period(spine, kind, period)
         rows = obveze.list_period(spine, kind, period)
         return render_obveze(kind, period, rows)
@@ -412,6 +426,7 @@ def create_app(spine, cfg) -> FastAPI:
         if kind not in obveze.KINDS:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
+        _require_valid_period(period)
         return obveze.list_period(spine, kind, period)
 
     @app.post("/obveze/mark")
@@ -430,6 +445,7 @@ def create_app(spine, cfg) -> FastAPI:
         period = body.get("period", date.today().strftime("%Y-%m"))
         if kind not in obveze.KINDS:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
+        _require_valid_period(period)
         sent = str(body.get("sent", "1")) not in ("0", "false", "False")
         try:
             obveze.mark_sent(spine, obligation_id, user, sent)

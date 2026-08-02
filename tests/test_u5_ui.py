@@ -77,6 +77,72 @@ def test_obveze_page_no_auth_redirects(spine, cfg):
     assert r.status_code == 303
 
 
+# ---------- security fix: reflected script-context XSS via `period` ----------
+
+_XSS_PERIOD = "</script><script>alert(1)</script>"
+
+
+def test_obveze_page_rejects_script_breakout_period(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.get("/obveze", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
+    assert r.status_code == 400
+
+
+def test_obveze_json_rejects_script_breakout_period(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.get("/obveze.json", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
+    assert r.status_code == 400
+
+
+def test_obveze_mark_rejects_script_breakout_period(spine, cfg):
+    _seed_client(spine, "Alfa")
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    from ragspine.business import obveze
+    obveze.ensure_period(spine, "PDV", "2026-07")
+    rows = obveze.list_period(spine, "PDV", "2026-07")
+    r = c.post("/obveze/mark", json={"obligation_id": rows[0]["obligation_id"], "kind": "PDV",
+                                      "period": _XSS_PERIOD}, headers=_auth(tok))
+    assert r.status_code == 400
+
+
+def test_obveze_page_accepts_valid_period(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    r = c.get("/obveze", params={"kind": "PDV", "period": "2026-07"}, headers=_auth(tok))
+    assert r.status_code == 200
+
+
+def test_script_json_escapes_script_breakout():
+    from ragspine.web.templates_ui import script_json
+    embedded = script_json(_XSS_PERIOD)
+    assert "</script>" not in embedded
+    assert "\\u003c" in embedded
+    # round-trips back to the original value once parsed as JS/JSON
+    import json
+    assert json.loads(embedded.replace("\\u003c", "<")) == _XSS_PERIOD
+
+
+def test_script_json_escapes_js_line_separators():
+    from ragspine.web.templates_ui import script_json
+    embedded = script_json("line1 line2 line3")
+    assert " " not in embedded
+    assert " " not in embedded
+    assert "\\u2028" in embedded and "\\u2029" in embedded
+
+
+def test_render_obveze_defense_in_depth_even_with_malicious_period():
+    # belt-and-suspenders: even if a future caller forgets endpoint-level
+    # validation, render_obveze() itself must never let `period` break out
+    # of the inline <script> tag.
+    from ragspine.web.templates_obveze import render_obveze
+    html_out = render_obveze("PDV", _XSS_PERIOD, [])
+    assert "</script><script>alert(1)</script>" not in html_out
+    assert "\\u003c" in html_out
+
+
 # ---------- 5B: notifications inbox ----------
 
 def test_notifications_json_auth(spine, cfg):

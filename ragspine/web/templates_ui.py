@@ -4,6 +4,23 @@ IBM Plex Sans/Mono self-hosted, dark-default theme-aware paleta, komponente
 (.nav/.card/.tile/.ledger/.oblig-row/.btn/.chip) koje kasniji ekrani (U3-U5)
 nasljeđuju preko iste CSS_TOKENS."""
 import html
+import json
+
+
+def script_json(value) -> str:
+    """json.dumps() for embedding a value into an inline <script> tag.
+    json.dumps does NOT escape '</script>' or the JS-illegal line separators
+    U+2028/U+2029 — an attacker-controlled string containing
+    '</script><script>...' would otherwise close the tag early and execute
+    as raw HTML/script content (a reflected-XSS breakout independent of any
+    server-side value validation). All three are valid inside a JS string
+    once \\u-escaped, so this is purely a defense-in-depth belt on top of
+    input validation, never a substitute for it."""
+    return (json.dumps(value)
+            .replace("<", "\\u003c")
+            .replace(" ", "\\u2028")
+            .replace(" ", "\\u2029"))
+
 
 _FONT_FACES = "".join(
     f"""@font-face{{font-family:'IBM Plex Sans';src:url('/static/fonts/PlexSans-{w}.woff2') format('woff2');
@@ -1169,7 +1186,10 @@ $('doc-form').addEventListener('submit', async function (e) {
     const data = await res.json();
     $('doc-output').textContent = data.text;
     if (data.warning) {
-      $('doc-warning').textContent = 'Upozorenje: brojke nedostaju u dokumentu.';
+      const missing = (data.gate && Array.isArray(data.gate.missing)) ? data.gate.missing : [];
+      $('doc-warning').textContent = missing.length
+        ? ('Upozorenje: brojke nedostaju u dokumentu. Nedostaju: ' + missing.join(', '))
+        : 'Upozorenje: brojke nedostaju u dokumentu.';
       $('doc-warning').style.display = 'block';
     }
   } catch (err) {

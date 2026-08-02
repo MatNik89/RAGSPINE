@@ -1,10 +1,9 @@
 """HTML za /obveze — čisti f-string builder, bez template engine ovisnosti.
 Reuse-a design-system shell iz templates_ui (page_shell + .oblig-row/.chip/.btn)."""
 import html
-import json
 
 from ragspine.business.obveze import KINDS
-from ragspine.web.templates_ui import page_shell
+from ragspine.web.templates_ui import page_shell, script_json
 
 _CAMPAIGN_JS = """
 function $(id) { return document.getElementById(id); }
@@ -127,8 +126,8 @@ def render_obveze(kind: str, period: str, rows: list[dict]) -> str:
 {rows_html}
 </div>
 <script>
-const KIND = {json.dumps(kind)};
-const PERIOD = {json.dumps(period)};
+const KIND = {script_json(kind)};
+const PERIOD = {script_json(period)};
 </script>
 <script>{_CAMPAIGN_JS}</script>"""
 
