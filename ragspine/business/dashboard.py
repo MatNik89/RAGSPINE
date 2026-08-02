@@ -48,10 +48,78 @@ def _deadlines_window(spine, today: date, back_days: int = 7, fwd_days: int = 7)
     return [dict(r) for r in rows]
 
 
+def _month_bounds(today: date) -> tuple[str, str]:
+    """[first-of-month, first-of-next-month) as ISO strings (end exclusive)."""
+    start = date(today.year, today.month, 1)
+    nxt = date(today.year + 1, 1, 1) if today.month == 12 else date(today.year, today.month + 1, 1)
+    return start.isoformat(), nxt.isoformat()
+
+
+def _month_events(spine, today: date) -> dict:
+    """Every dated obligation-deadline + document-expiry that falls in the
+    current month, pinned to its day-of-month with an urgency state. Feeds the
+    calendar hero (GET /dashboard.json -> calendar)."""
+    start, end = _month_bounds(today)
+    events: list[dict] = []
+
+    def _add(iso: str, kind: str, label: str) -> None:
+        # ponytail: expiry.expires is user-supplied and may be malformed; a bad
+        # value must skip its event, never 500 the whole dashboard.
+        try:
+            day = date.fromisoformat(iso).day
+        except (TypeError, ValueError):
+            return
+        events.append({"day": day, "kind": kind, "label": label, "state": _urgency(iso, today)})
+
+    for r in spine.read().execute(
+        "SELECT kind, due FROM deadline_dates WHERE due >= ? AND due < ? ORDER BY due",
+        (start, end),
+    ).fetchall():
+        _add(r["due"], r["kind"], r["kind"])
+    for r in spine.read().execute(
+        "SELECT label, expires FROM expiry_items WHERE expires >= ? AND expires < ? ORDER BY expires",
+        (start, end),
+    ).fetchall():
+        _add(r["expires"], "istek", r["label"])
+    return {"year": today.year, "month": today.month, "today": today.day, "events": events}
+
+
+_STATE_ORDER = {"bad": 0, "warn": 1, "ok": 2}
+
+
+def _kind_state(events: list[dict]) -> dict:
+    """kind -> worst urgency state seen in the month (bad < warn < ok). Used to
+    colour the unsent-obligation chips by their deadline's real status."""
+    out: dict[str, str] = {}
+    for ev in events:
+        k = ev["kind"]
+        if k not in out or _STATE_ORDER[ev["state"]] < _STATE_ORDER[out[k]]:
+            out[k] = ev["state"]
+    return out
+
+
+def _group_unsent(unsent: list[dict], kind_state: dict) -> list[dict]:
+    """One row per client with its unsent obligation kinds as chips, instead of
+    one row per obligation (kills the repetitive per-kind rows on the board)."""
+    out: dict[int, dict] = {}
+    for u in unsent:
+        g = out.setdefault(u["client_id"],
+                           {"client_id": u["client_id"], "client": u["client"], "kinds": []})
+        # Everything here is outstanding, so a chip must never read as "done"
+        # (green/ok): overdue -> bad, otherwise warn. Green is reserved for the
+        # calendar, where it means a deadline that is genuinely still far off.
+        state = "bad" if kind_state.get(u["kind"]) == "bad" else "warn"
+        g["kinds"].append({"kind": u["kind"], "state": state})
+    return list(out.values())
+
+
 def _unsent_obligations(spine, period: str) -> list[dict]:
-    for kind in obveze.KINDS:
+    kinds = obveze.active_kinds(spine)
+    if not kinds:
+        return []
+    for kind in kinds:
         obveze.ensure_period(spine, kind, period)
-    placeholders = ",".join("?" * len(obveze.KINDS))
+    placeholders = ",".join("?" * len(kinds))
     rows = spine.read().execute(
         f"""SELECT o.client_id AS client_id, c.name AS client, o.kind AS kind
             FROM obligations o
@@ -59,7 +127,7 @@ def _unsent_obligations(spine, period: str) -> list[dict]:
             LEFT JOIN obligation_status s ON s.obligation_id = o.id
             WHERE o.period = ? AND o.kind IN ({placeholders}) AND COALESCE(s.sent, 0) = 0
             ORDER BY c.name COLLATE NOCASE""",
-        (period, *obveze.KINDS),
+        (period, *kinds),
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -102,7 +170,12 @@ def home_data(spine, cap: int = 8) -> dict:
     deadlines = [_with_state(r, "due", today) for r in deadline_rows][:cap]
 
     period = today.strftime("%Y-%m")
-    unsent = _unsent_obligations(spine, period)[:cap]
+    unsent_full = _unsent_obligations(spine, period)
+    unsent = unsent_full[:cap]
+
+    calendar = _month_events(spine, today)
+    groups_full = _group_unsent(unsent_full, _kind_state(calendar["events"]))
+    unsent_by_client = groups_full[:cap]
 
     expiring_rows = [dict(r) for r in expiry.expiring(spine, days=30)]
     expiring = [_with_state(r, "expires", today) for r in expiring_rows][:cap]
@@ -116,8 +189,14 @@ def home_data(spine, cap: int = 8) -> dict:
 
     return {
         "stats": st,
+        "calendar": calendar,
         "deadlines": deadlines,
         "unsent_obligations": unsent,
+        "unsent_by_client": unsent_by_client,
+        # uncapped totals for the KPI numbers (rows above are capped for display)
+        "unsent_total": len(unsent_full),
+        "unsent_clients_total": len(groups_full),
+        "expiring_total": len(expiring_rows),
         "expiring": expiring,
         "notifications": notifications,
         "peer": {"count": st["peer_disagreements"]},

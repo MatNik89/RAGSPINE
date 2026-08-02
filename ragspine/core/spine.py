@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS obligations(id INTEGER PRIMARY KEY, client_id INTEGER
   kind TEXT, period TEXT, UNIQUE(client_id, kind, period));
 CREATE TABLE IF NOT EXISTS obligation_status(obligation_id INTEGER PRIMARY KEY,
   sent INTEGER DEFAULT 0, sent_by TEXT, sent_at TEXT);
+CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
+  rule TEXT, frequency TEXT DEFAULT 'monthly', applies_to TEXT DEFAULT 'all_active',
+  active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
+  PRIMARY KEY(client_id, kind));
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, client_id INTEGER, author TEXT,
   body TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action TEXT,
@@ -118,6 +123,9 @@ class Spine:
                 "messaging_channel": "TEXT DEFAULT ''",
                 "messaging_target": "TEXT DEFAULT ''",
                 "pausal_eur": "REAL DEFAULT 0",
+                "has_employees": "INTEGER DEFAULT 0",
+                "pdv_freq": "TEXT DEFAULT 'monthly'",
+                "regime": "TEXT DEFAULT ''",
             })
             _ensure_columns(c, "documents", {
                 "file_sha": "TEXT",

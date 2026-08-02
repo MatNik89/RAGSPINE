@@ -33,13 +33,21 @@ _FONT_FACES = "".join(
 )
 
 CSS_TOKENS = _FONT_FACES + """
+/* Warm-paper "knjigovodstveni rokovnik" system (light default, warm-dark
+   override). Colour is status-only: oxblood accent = attention, green = done,
+   amber = this week, oxblood = overdue. See mockup C / .sdd/ui-DESIGN.md. */
 :root{
-  --bg:#020617; --surface:#0E1223; --surface-2:#0F172A; --border:#334155; --text:#F8FAFC; --muted:#94A3B8;
-  --accent:#6366F1; --accent-fg:#FFFFFF; --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444;
+  --bg:#EFEBE0; --surface:#F7F5EF; --surface-2:#FBFAF5; --border:#DBD5C7; --border-2:#C7BFAD;
+  --text:#16130E; --muted:#7A7266;
+  --accent:#9B2C2C; --accent-ink:#7A1F1F; --accent-fg:#FFFFFF;
+  --ok:#2F7D4F; --okbg:#E4EEE3; --warn:#B45309; --warnbg:#F3E9D6; --bad:#9B2C2C; --badbg:#F3E3DE;
   --font-sans:'IBM Plex Sans',system-ui,sans-serif; --font-mono:'IBM Plex Mono',ui-monospace,monospace;
 }
-[data-theme="light"]{
-  --bg:#F8FAFC; --surface:#FFFFFF; --surface-2:#F1F5F9; --border:#E2E8F0; --text:#0F172A; --muted:#64748B;
+[data-theme="dark"]{
+  --bg:#17140F; --surface:#211D16; --surface-2:#2A251C; --border:#3D3629; --border-2:#4A4232;
+  --text:#F5F1E8; --muted:#A69E8C;
+  --accent:#C25B4E; --accent-ink:#D9776B; --accent-fg:#1A0E0C;
+  --ok:#5FBF88; --okbg:#20302A; --warn:#E0A44E; --warnbg:#332818; --bad:#D9776B; --badbg:#33201D;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
@@ -113,11 +121,12 @@ table.ledger tbody tr:nth-child(even){background:var(--surface-2)}
 .btn-danger{background:var(--bad);color:#fff}
 
 /* chips */
-.chip{display:inline-block;font-size:.75rem;padding:.15rem .55rem;border-radius:999px;
-  background:var(--surface-2);color:var(--muted)}
-.chip.ok{background:rgba(34,197,94,.15);color:var(--ok)}
-.chip.warn{background:rgba(245,158,11,.15);color:var(--warn)}
-.chip.bad{background:rgba(239,68,68,.15);color:var(--bad)}
+.chip{display:inline-block;font-size:.75rem;padding:.15rem .55rem;border-radius:6px;
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  background:var(--surface-2);color:var(--muted);border:1px solid var(--border)}
+.chip.ok{background:var(--okbg);color:var(--ok);border-color:transparent}
+.chip.warn{background:var(--warnbg);color:var(--warn);border-color:transparent}
+.chip.bad{background:var(--badbg);color:var(--bad);border-color:transparent}
 
 /* forms */
 input,textarea,select{background:var(--surface-2);border:1px solid var(--border);color:var(--text);
@@ -141,9 +150,87 @@ form.stack{display:flex;flex-direction:column;gap:.5rem;max-width:520px}
 .chat-input input{flex:1}
 .meta{font-size:.8rem;color:var(--muted)}
 
+/* ---- dashboard: calendar hero + rail + board ---- */
+.dash-head{margin:.5rem 0 1.25rem}
+.eyebrow{font-size:.72rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
+.dash-head h1{font-size:2rem;letter-spacing:-.02em;margin:.15rem 0 .1rem}
+.dash-head .sub{color:var(--muted);font-size:.92rem}
+.dash-wrap{display:grid;grid-template-columns:1fr 320px;gap:1.25rem;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:1rem 1.15rem;
+  box-shadow:0 1px 2px rgba(22,19,14,.05)}
+.panel-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.85rem}
+.panel-title{font-size:.74rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.panel-count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--muted);font-size:.85rem}
+.panel-count.bad{color:var(--bad)}
+
+/* month calendar */
+.cal-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.9rem}
+.cal-month{font-size:1.25rem;font-weight:700;letter-spacing:-.01em}
+.cal-legend{display:flex;gap:.9rem;font-size:.72rem;color:var(--muted)}
+.cal-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.3rem;vertical-align:1px}
+.dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+.dow span{font-size:.66rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:2px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.cal-d{min-height:66px;border:1px solid var(--border);border-radius:8px;padding:5px 6px;background:var(--surface-2);position:relative}
+.cal-d.empty{background:transparent;border:none}
+.cal-dn{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:.78rem;color:var(--muted);font-weight:500}
+.cal-d.today{border:2px solid var(--accent);background:var(--okbg)}
+.cal-d.today .cal-dn{color:var(--accent-ink);font-weight:700}
+.cal-d.today:after{content:'DANAS';position:absolute;top:6px;right:7px;font-family:var(--font-mono);
+  font-size:.56rem;letter-spacing:.08em;color:var(--accent);font-weight:700}
+.cal-ev{display:block;margin-top:4px;font-size:.68rem;font-weight:600;padding:1px 5px;border-radius:4px;
+  font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cal-ev.bad{background:var(--badbg);color:var(--bad)}
+.cal-ev.warn{background:var(--warnbg);color:var(--warn)}
+.cal-ev.ok{background:var(--okbg);color:var(--ok)}
+
+/* right rail */
+.rail{display:flex;flex-direction:column;gap:1rem}
+.trow{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.6rem 0;border-top:1px solid var(--border)}
+.trow:first-of-type{border-top:none}
+.trow .tt{font-weight:600;font-size:.9rem}
+.trow .ts{font-size:.78rem;color:var(--muted);margin-top:1px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem}
+.kpi .kn{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:1.6rem;font-weight:600;line-height:1;letter-spacing:-.02em}
+.kpi .kn.bad{color:var(--bad)}
+.kpi .kl{font-size:.68rem;color:var(--muted);letter-spacing:.04em;text-transform:uppercase;margin-top:.35rem}
+
+/* board (grouped-by-client + notifications) */
+.dash-board{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;margin-top:1.25rem}
+.urow{display:flex;align-items:center;justify-content:space-between;gap:.5rem;padding:.65rem 0;border-top:1px solid var(--border)}
+.urow:first-of-type{border-top:none}
+.urow .uname{font-weight:600;font-size:.9rem;color:var(--text);text-decoration:none}
+.urow .uname:hover{color:var(--accent)}
+.urow .ukinds{display:flex;gap:.35rem;flex-wrap:wrap;justify-content:flex-end}
+.nrow{display:flex;gap:.6rem;align-items:center;padding:.6rem 0;border-top:1px solid var(--border)}
+.nrow:first-of-type{border-top:none}
+.nrow .ntext{font-size:.9rem}
+
+/* ---- obveze: type tabs + month nav + checkbox board ---- */
+.obveze-tabs{display:flex;gap:.5rem;margin:1rem 0 .25rem;flex-wrap:wrap}
+.obveze-tab{padding:.5rem 1.2rem;border:1px solid var(--border);border-radius:8px;background:var(--surface);
+  color:var(--muted);text-decoration:none;font-weight:600;font-size:.95rem;transition:color .12s,background-color .12s}
+.obveze-tab:hover{color:var(--text)}
+.obveze-tab.active{background:var(--accent);color:var(--accent-fg);border-color:transparent}
+.month-nav{display:flex;align-items:center;gap:.4rem;margin:.75rem 0 1.5rem}
+.month-nav a.step{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;
+  border:1px solid var(--border);border-radius:8px;color:var(--text);text-decoration:none;background:var(--surface)}
+.month-nav a.step:hover{border-color:var(--accent);color:var(--accent)}
+.month-nav .month-label{font-weight:600;min-width:9.5rem;text-align:center;font-size:1rem}
+.oblig-section{margin-bottom:1.75rem}
+.oblig-section h2{display:flex;align-items:center;gap:.5rem;font-size:1rem;margin:0 0 .75rem}
+.oblig-section .sec-count{font-family:var(--font-mono);font-variant-numeric:tabular-nums;color:var(--muted);font-weight:500}
+.oblig-check{display:flex;align-items:center;gap:.6rem;cursor:pointer;margin:0}
+.oblig-check input{width:1.15rem;height:1.15rem;accent-color:var(--accent);cursor:pointer;flex:none}
+.oblig-row .oname{color:var(--text);font-weight:500}
+.oblig-row .ostatus{margin-left:auto}
+.obveze-tab.tab-add{border-style:dashed;font-weight:500;color:var(--muted)}
+.obveze-tab.tab-add:hover{color:var(--accent);border-color:var(--accent)}
 @media (max-width:640px){
   .grid{grid-template-columns:1fr}
   .container{padding:1rem .75rem 2rem}
+  .cal-d{min-height:54px}
 }
 @media (prefers-reduced-motion: reduce){
   *{animation:none!important;transition:none!important}
@@ -184,7 +271,7 @@ _THEME_INIT_JS = """
 (function(){
   var saved = null;
   try { saved = localStorage.getItem('ragspine-theme'); } catch (e) {}
-  var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  var theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   document.body.setAttribute('data-theme', theme);
 })();
 """
@@ -196,8 +283,12 @@ function toggleTheme() {
   body.setAttribute('data-theme', next);
   try { localStorage.setItem('ragspine-theme', next); } catch (e) {}
   var btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = next === 'light' ? '\\u2600' : '\\u263E';
+  if (btn) btn.textContent = next === 'light' ? '\\u263E' : '\\u2600';
 }
+(function(){
+  var b = document.getElementById('theme-toggle');
+  if (b) b.textContent = document.body.getAttribute('data-theme') === 'light' ? '\\u263E' : '\\u2600';
+})();
 """
 
 
@@ -225,7 +316,7 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 {nav_links}
 <span class="spacer"></span>
 <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Promijeni temu"
-  onclick="toggleTheme()">&#9788;</button>
+  onclick="toggleTheme()">&#9790;</button>
 <a href="/logout" class="logout">Odjava</a>
 </nav>
 <main class="container">
@@ -239,17 +330,19 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 
 _DASHBOARD_JS = """
 function $(id) { return document.getElementById(id); }
-
-function setNum(id, value) {
-  $(id).textContent = String(value);
-}
-
+function setNum(id, value) { $(id).textContent = String(value); }
 function emptyMsg(container, text) {
-  const p = document.createElement('p');
-  p.className = 'meta';
-  p.textContent = text;
+  const p = document.createElement('p'); p.className = 'meta'; p.textContent = text;
   container.appendChild(p);
 }
+
+var MJ_NOM = ['Siječanj','Veljača','Ožujak','Travanj','Svibanj','Lipanj','Srpanj',
+  'Kolovoz','Rujan','Listopad','Studeni','Prosinac'];
+var MJ_GEN = ['siječnja','veljače','ožujka','travnja','svibnja','lipnja','srpnja',
+  'kolovoza','rujna','listopada','studenoga','prosinca'];
+var DANI = ['Nedjelja','Ponedjeljak','Utorak','Srijeda','Četvrtak','Petak','Subota'];
+
+function dd_mm(iso) { return iso ? (iso.slice(8,10) + '.' + iso.slice(5,7) + '.') : ''; }
 
 function dueChip(row) {
   const chip = document.createElement('span');
@@ -260,56 +353,79 @@ function dueChip(row) {
   return chip;
 }
 
-function renderDated(container, rows, emptyText, descOf, dateField) {
-  container.textContent = '';
-  if (!rows.length) { emptyMsg(container, emptyText); return; }
-  rows.forEach(function (r) {
-    const row = document.createElement('div');
-    row.className = 'oblig-row ' + (r.state || '');
-    const desc = document.createElement('span');
-    desc.textContent = descOf(r);
-    row.appendChild(desc);
-    row.appendChild(dueChip(r));
-    const due = document.createElement('span');
-    due.className = 'due';
-    due.textContent = r[dateField];
-    row.appendChild(due);
-    container.appendChild(row);
+function renderCalendar(cal) {
+  $('cal-month').textContent = MJ_NOM[cal.month - 1] + ' ' + cal.year + '.';
+  const grid = $('cal-grid'); grid.textContent = '';
+  const byDay = {};
+  (cal.events || []).forEach(function (e) { (byDay[e.day] = byDay[e.day] || []).push(e); });
+  // Monday-first offset; JS getDay() has Sunday=0
+  const firstDow = (new Date(cal.year, cal.month - 1, 1).getDay() + 6) % 7;
+  const days = new Date(cal.year, cal.month, 0).getDate();
+  for (let i = 0; i < firstDow; i++) {
+    const e = document.createElement('div'); e.className = 'cal-d empty'; grid.appendChild(e);
+  }
+  for (let d = 1; d <= days; d++) {
+    const cell = document.createElement('div');
+    cell.className = 'cal-d' + (d === cal.today ? ' today' : '');
+    const dn = document.createElement('span'); dn.className = 'cal-dn'; dn.textContent = String(d);
+    cell.appendChild(dn);
+    (byDay[d] || []).forEach(function (e) {
+      const ev = document.createElement('span');
+      ev.className = 'cal-ev ' + (e.state || '');
+      ev.textContent = e.label; ev.title = e.label;
+      cell.appendChild(ev);
+    });
+    grid.appendChild(cell);
+  }
+}
+
+function renderToday(rows) {
+  const box = $('today-list'); box.textContent = '';
+  const urgent = rows.filter(function (r) { return r.state === 'bad' || r.state === 'warn'; }).slice(0, 4);
+  $('today-count').textContent = String(urgent.length);
+  if (!urgent.length) { emptyMsg(box, 'Nema hitnih rokova danas.'); return; }
+  urgent.forEach(function (r) {
+    const row = document.createElement('div'); row.className = 'trow ' + (r.state || '');
+    const left = document.createElement('div');
+    const tt = document.createElement('div'); tt.className = 'tt'; tt.textContent = r.kind;
+    const ts = document.createElement('div'); ts.className = 'ts'; ts.textContent = 'rok ' + dd_mm(r.due);
+    left.appendChild(tt); left.appendChild(ts);
+    row.appendChild(left); row.appendChild(dueChip(r));
+    box.appendChild(row);
   });
 }
 
-function renderUnsent(container, rows) {
-  container.textContent = '';
-  if (!rows.length) { emptyMsg(container, 'Sve obveze poslane \\uD83C\\uDF89'); return; }
-  rows.forEach(function (r) {
-    const row = document.createElement('div');
-    row.className = 'oblig-row bad';
-    const a = document.createElement('a');
-    a.href = '/ui/klijent/' + r.client_id;
-    a.textContent = r.client;
+function renderUnsentByClient(groups, total) {
+  const box = $('unsent-list'); box.textContent = '';
+  const n = typeof total === 'number' ? total : groups.length;
+  $('unsent-count').textContent = n + (n === 1 ? ' klijent' : ' klijenta');
+  if (!groups.length) { emptyMsg(box, 'Sve obveze poslane \\uD83C\\uDF89'); return; }
+  groups.forEach(function (g) {
+    const row = document.createElement('div'); row.className = 'urow';
+    const a = document.createElement('a'); a.className = 'uname';
+    a.href = '/ui/klijent/' + g.client_id; a.textContent = g.client;
     row.appendChild(a);
-    const chip = document.createElement('span');
-    chip.className = 'chip bad';
-    chip.textContent = r.kind;
-    row.appendChild(chip);
-    container.appendChild(row);
+    const kinds = document.createElement('span'); kinds.className = 'ukinds';
+    (g.kinds || []).forEach(function (k) {
+      const chip = document.createElement('span');
+      chip.className = 'chip ' + (k.state || 'warn'); chip.textContent = k.kind;
+      kinds.appendChild(chip);
+    });
+    row.appendChild(kinds);
+    box.appendChild(row);
   });
 }
 
-function renderNotifications(container, rows) {
-  container.textContent = '';
-  if (!rows.length) { emptyMsg(container, 'Nema novih obavijesti.'); return; }
+function renderNotifications(rows) {
+  const box = $('notifications-list'); box.textContent = '';
+  $('notif-count').textContent = String(rows.length);
+  if (!rows.length) { emptyMsg(box, 'Nema novih obavijesti.'); return; }
   rows.forEach(function (r) {
-    const row = document.createElement('div');
-    row.className = 'oblig-row';
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = r.kind;
-    row.appendChild(chip);
-    const body = document.createElement('span');
-    body.textContent = r.body;
-    row.appendChild(body);
-    container.appendChild(row);
+    const row = document.createElement('div'); row.className = 'nrow';
+    const chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = r.kind;
+    const body = document.createElement('span'); body.className = 'ntext'; body.textContent = r.body;
+    row.appendChild(chip); row.appendChild(body);
+    box.appendChild(row);
   });
 }
 
@@ -318,27 +434,26 @@ async function loadDashboard() {
     const res = await fetch('/dashboard.json', { credentials: 'same-origin' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
+    const cal = data.calendar || { year: 2026, month: 1, today: 1, events: [] };
+
+    const dt = new Date(cal.year, cal.month - 1, cal.today);
+    $('dash-date').textContent = DANI[dt.getDay()] + ' · ' + cal.today + '. ' +
+      MJ_GEN[cal.month - 1] + ' ' + cal.year + '.';
+    var unsentTotal = typeof data.unsent_total === 'number' ? data.unsent_total : data.unsent_obligations.length;
+    var expiringTotal = typeof data.expiring_total === 'number' ? data.expiring_total : data.expiring.length;
+    $('dash-sub').textContent = data.stats.deadlines_this_week + ' roka ovaj tjedan · ' +
+      unsentTotal + ' neposlanih obveza · ' + expiringTotal + ' dok. uskoro isteče';
 
     setNum('stat-clients', data.stats.active_clients);
+    setNum('stat-unsent', unsentTotal);
     setNum('stat-deadlines', data.stats.deadlines_this_week);
-    setNum('stat-unsent', data.unsent_obligations.length);
     setNum('stat-notifications', data.stats.unseen_notifications);
-    $('stat-unsent').classList.toggle('bad', data.unsent_obligations.length > 0);
+    $('stat-unsent').classList.toggle('bad', unsentTotal > 0);
 
-    renderDated($('deadlines-list'), data.deadlines, 'Nema rokova u sljedećih 7 dana.',
-      function (r) { return r.description + ' (' + r.kind + ')'; }, 'due');
-    renderUnsent($('unsent-list'), data.unsent_obligations);
-    renderDated($('expiring-list'), data.expiring, 'Nema isteka dokumenata u sljedećih 30 dana.',
-      function (r) { return r.label + ' — ' + r.client_name; }, 'expires');
-    renderNotifications($('notifications-list'), data.notifications);
-
-    const peer = $('peer-summary');
-    peer.textContent = '';
-    if (data.peer.count > 0) {
-      peer.textContent = data.peer.count + ' neslaganja u knjiženju u zadnjih 30 dana.';
-    } else {
-      emptyMsg(peer, 'Nema neslaganja u knjiženju.');
-    }
+    renderCalendar(cal);
+    renderToday(data.deadlines);
+    renderUnsentByClient(data.unsent_by_client || [], data.unsent_clients_total);
+    renderNotifications(data.notifications);
   } catch (err) {
     const banner = $('dashboard-error');
     banner.textContent = 'Greška pri učitavanju nadzorne ploče. Osvježite stranicu.';
@@ -351,35 +466,46 @@ loadDashboard();
 
 
 def dashboard_page() -> str:
-    body = f"""<h1>Nadzorna ploča</h1>
-<p class="meta">Što danas moram — pregled rokova, obveza i obavijesti.</p>
-<div class="grid">
-  <div class="tile"><span class="tile-num" id="stat-clients">–</span><span class="tile-label">Aktivni klijenti</span></div>
-  <div class="tile"><span class="tile-num" id="stat-deadlines">–</span><span class="tile-label">Rokovi ovaj tjedan</span></div>
-  <div class="tile"><span class="tile-num" id="stat-unsent">–</span><span class="tile-label">Neposlane obveze</span></div>
-  <div class="tile"><span class="tile-num" id="stat-notifications">–</span><span class="tile-label">Nepročitane obavijesti</span></div>
+    body = f"""<div class="dash-head">
+  <div class="eyebrow" id="dash-date">—</div>
+  <h1>Ured danas</h1>
+  <div class="sub" id="dash-sub">Učitavanje…</div>
 </div>
-<div id="dashboard-error" class="chip bad" style="display:none;margin-top:1rem"></div>
-<div class="grid">
-  <div class="card">
-    <h2>Rokovi (7 dana)</h2>
-    <div id="deadlines-list"><p class="meta">Učitavanje…</p></div>
+<div id="dashboard-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
+<div class="dash-wrap">
+  <div class="panel">
+    <div class="cal-head">
+      <div class="cal-month" id="cal-month">—</div>
+      <div class="cal-legend">
+        <span><i style="background:var(--bad)"></i>kasni</span>
+        <span><i style="background:var(--warn)"></i>ovaj tjedan</span>
+        <span><i style="background:var(--ok)"></i>predstoji</span>
+      </div>
+    </div>
+    <div class="dow"><span>Pon</span><span>Uto</span><span>Sri</span><span>Čet</span><span>Pet</span><span>Sub</span><span>Ned</span></div>
+    <div class="cal-grid" id="cal-grid"><p class="meta">Učitavanje…</p></div>
   </div>
-  <div class="card">
-    <h2>Neposlane obveze</h2>
+  <div class="rail">
+    <div class="panel">
+      <div class="panel-head"><span class="panel-title">Što danas moram</span><span class="panel-count bad" id="today-count"></span></div>
+      <div id="today-list"><p class="meta">Učitavanje…</p></div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="kn" id="stat-clients">–</div><div class="kl">Aktivni klijenti</div></div>
+      <div class="kpi"><div class="kn" id="stat-unsent">–</div><div class="kl">Neposlane obveze</div></div>
+      <div class="kpi"><div class="kn" id="stat-deadlines">–</div><div class="kl">Rokovi ovaj tjedan</div></div>
+      <div class="kpi"><div class="kn" id="stat-notifications">–</div><div class="kl">Nove obavijesti</div></div>
+    </div>
+  </div>
+</div>
+<div class="dash-board">
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">Neposlane obveze · po klijentu</span><span class="panel-count" id="unsent-count"></span></div>
     <div id="unsent-list"><p class="meta">Učitavanje…</p></div>
   </div>
-  <div class="card">
-    <h2>Istek dokumenata (30 dana)</h2>
-    <div id="expiring-list"><p class="meta">Učitavanje…</p></div>
-  </div>
-  <div class="card">
-    <h2>Nove obavijesti</h2>
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">Nove obavijesti</span><span class="panel-count" id="notif-count"></span></div>
     <div id="notifications-list"><p class="meta">Učitavanje…</p></div>
-  </div>
-  <div class="card">
-    <h2>Neslaganja u knjiženju</h2>
-    <div id="peer-summary"><p class="meta">Učitavanje…</p></div>
   </div>
 </div>
 <script>{_DASHBOARD_JS}</script>"""
@@ -608,6 +734,10 @@ function renderRows(rows) {
     tdPdv.appendChild(chip);
     tr.appendChild(tdPdv);
 
+    const tdReg = document.createElement('td');
+    tdReg.textContent = REGIME_LABEL[r.regime || ''] || '–';
+    tr.appendChild(tdReg);
+
     const tdInd = document.createElement('td');
     tdInd.textContent = r.industry || '–';
     tr.appendChild(tdInd);
@@ -615,6 +745,8 @@ function renderRows(rows) {
     tbody.appendChild(tr);
   });
 }
+
+var REGIME_LABEL = { '': '–', dobit: 'Dobit', dohodak: 'Dohodak', pausal: 'Paušal' };
 
 async function loadClients() {
   try {
@@ -627,7 +759,7 @@ async function loadClients() {
     tbody.textContent = '';
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.textContent = 'Greška pri učitavanju klijenata. Osvježite stranicu.';
     tr.appendChild(td);
     tbody.appendChild(tr);
@@ -659,6 +791,7 @@ $('add-form').addEventListener('submit', async function (e) {
     phone: $('f-phone').value.trim(),
     industry: $('f-industry').value.trim(),
     pdv_status: $('f-pdv').value,
+    regime: $('f-regime').value,
     pausal_eur: parseFloat($('f-pausal').value) || 0,
   };
   try {
@@ -711,14 +844,21 @@ def klijenti_page() -> str:
     <option value="u sustavu PDV-a">U sustavu PDV-a</option>
     <option value="nije u sustavu PDV-a">Nije u sustavu PDV-a</option>
   </select>
+  <label for="f-regime">Obračun (porezni sustav)</label>
+  <select id="f-regime">
+    <option value="">-</option>
+    <option value="dobit">Porez na dobit (d.o.o. / j.d.o.o. / obrt na dobiti)</option>
+    <option value="dohodak">Dohodak (obrt, knjige)</option>
+    <option value="pausal">Paušalni obrt</option>
+  </select>
   <label for="f-pausal">Paušal (EUR/mj)</label>
   <input type="number" id="f-pausal" step="0.01" min="0">
   <button type="submit" class="btn">Spremi klijenta</button>
 </form>
 <div id="add-error" class="chip bad" style="display:none"></div>
 <table class="ledger">
-<thead><tr><th>Naziv</th><th>OIB</th><th>PDV status</th><th>Djelatnost</th></tr></thead>
-<tbody id="clients-tbody"><tr><td colspan="4" class="meta">Učitavanje…</td></tr></tbody>
+<thead><tr><th>Naziv</th><th>OIB</th><th>PDV status</th><th>Obračun</th><th>Djelatnost</th></tr></thead>
+<tbody id="clients-tbody"><tr><td colspan="5" class="meta">Učitavanje…</td></tr></tbody>
 </table>
 <script>{_KLIJENTI_JS}</script>"""
     return page_shell("Klijenti", body, active="klijenti")
@@ -966,6 +1106,22 @@ def klijent_page(client_id: int) -> str:
     <div id="k-obligations"><p class="meta">Učitavanje…</p></div>
   </div>
   <div class="card">
+    <h2>Obveze — postavke</h2>
+    <label for="oc-regime" style="display:block">Porezni sustav</label>
+    <select id="oc-regime">
+      <option value="">— (nepoznato)</option>
+      <option value="dobit">Porez na dobit (d.o.o.)</option>
+      <option value="dohodak">Dohodaš (obrt, knjige) → DOH</option>
+      <option value="pausal">Paušalni obrt → PO-SD</option>
+    </select>
+    <label style="display:flex;gap:.5rem;align-items:center;margin-top:.5rem"><input type="checkbox" id="oc-employees"> Ima zaposlene (za JOPPD)</label>
+    <label for="oc-pdv-freq" style="margin-top:.5rem;display:block">PDV frekvencija</label>
+    <select id="oc-pdv-freq"><option value="monthly">Mjesečno</option><option value="quarterly">Tromjesečno</option></select>
+    <div id="oc-manual" style="margin-top:.5rem"></div>
+    <button type="button" class="btn" id="oc-save" style="margin-top:.75rem">Spremi postavke</button>
+    <span id="oc-msg" class="meta" style="margin-left:.5rem"></span>
+  </div>
+  <div class="card">
     <h2>Istek dokumenata</h2>
     <div id="k-expiry"><p class="meta">Učitavanje…</p></div>
   </div>
@@ -991,8 +1147,50 @@ def klijent_page(client_id: int) -> str:
 const CLIENT_ID = {int(client_id)};
 const KARTON_URL = '/clients/{int(client_id)}/karton.json';
 </script>
-<script>{_KARTON_JS}</script>"""
+<script>{_KARTON_JS}</script>
+<script>{_OBVEZE_SETTINGS_JS}</script>"""
     return page_shell("Klijent", body, active="klijenti")
+
+
+_OBVEZE_SETTINGS_JS = """
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var URL = '/clients/' + CLIENT_ID + '/obveze-postavke';
+  var manual = [];
+  async function load(){
+    var res = await fetch(URL, {credentials:'same-origin'});
+    if(!res.ok) return;
+    var d = await res.json();
+    $('oc-employees').checked = !!d.has_employees;
+    $('oc-pdv-freq').value = d.pdv_freq || 'monthly';
+    $('oc-regime').value = d.regime || '';
+    manual = d.available_manual || [];
+    var box = $('oc-manual'); box.textContent = '';
+    if(!manual.length){ return; }
+    var lab = document.createElement('div'); lab.className='meta'; lab.textContent='Ručne obveze:'; box.appendChild(lab);
+    var have = d.manual_kinds || [];
+    manual.forEach(function(t){
+      var l = document.createElement('label'); l.style.display='flex'; l.style.gap='.5rem'; l.style.alignItems='center';
+      var cb = document.createElement('input'); cb.type='checkbox'; cb.value=t.kind; cb.className='oc-manual-cb';
+      cb.checked = have.indexOf(t.kind) !== -1;
+      var span = document.createElement('span'); span.textContent = t.label + ' (' + t.kind + ')';
+      l.appendChild(cb); l.appendChild(span); box.appendChild(l);
+    });
+  }
+  $('oc-save').addEventListener('click', async function(){
+    var kinds = [].slice.call(document.querySelectorAll('.oc-manual-cb'))
+      .filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    var res = await fetch(URL, {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({has_employees: $('oc-employees').checked?1:0,
+        pdv_freq: $('oc-pdv-freq').value, regime: $('oc-regime').value, manual_kinds: kinds})});
+    var msg = $('oc-msg');
+    if(res.ok){ msg.textContent='Spremljeno.'; setTimeout(function(){msg.textContent='';}, 2000); }
+    else { msg.textContent='Greška.'; }
+  });
+  load();
+})();
+"""
 
 
 def upute_page(pending_rows: list[dict]) -> str:
