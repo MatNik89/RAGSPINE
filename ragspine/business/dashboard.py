@@ -106,9 +106,12 @@ def _group_unsent(unsent: list[dict], kind_state: dict) -> list[dict]:
 
 
 def _unsent_obligations(spine, period: str) -> list[dict]:
-    for kind in obveze.KINDS:
+    kinds = obveze.active_kinds(spine)
+    if not kinds:
+        return []
+    for kind in kinds:
         obveze.ensure_period(spine, kind, period)
-    placeholders = ",".join("?" * len(obveze.KINDS))
+    placeholders = ",".join("?" * len(kinds))
     rows = spine.read().execute(
         f"""SELECT o.client_id AS client_id, c.name AS client, o.kind AS kind
             FROM obligations o
@@ -116,7 +119,7 @@ def _unsent_obligations(spine, period: str) -> list[dict]:
             LEFT JOIN obligation_status s ON s.obligation_id = o.id
             WHERE o.period = ? AND o.kind IN ({placeholders}) AND COALESCE(s.sent, 0) = 0
             ORDER BY c.name COLLATE NOCASE""",
-        (period, *obveze.KINDS),
+        (period, *kinds),
     ).fetchall()
     return [dict(r) for r in rows]
 

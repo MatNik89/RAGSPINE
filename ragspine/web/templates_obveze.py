@@ -6,13 +6,7 @@ klijenata podijeljena na "Za predati" i "Predano". Kvačica na klijentu ga
 označi poslanim i spusti u sekciju ispod (i obratno)."""
 import html
 
-from ragspine.business.obveze import KINDS
 from ragspine.web.templates_ui import page_shell, script_json
-
-# Tipovi ponuđeni kao tabovi na ekranu (proširivo — dodaj kad zatreba).
-# Data-model (obveze.KINDS) drži i DOH za digest/dashboard; ovdje se ne prikazuje
-# dok korisnik ne zatraži.
-OBVEZE_TABS = ("PDV", "JOPPD")
 
 _MJ_NOM = ("Siječanj", "Veljača", "Ožujak", "Travanj", "Svibanj", "Lipanj", "Srpanj",
            "Kolovoz", "Rujan", "Listopad", "Studeni", "Prosinac")
@@ -111,15 +105,17 @@ def _section(title: str, list_id: str, count_id: str, empty_id: str,
 </div>"""
 
 
-def render_obveze(kind: str, period: str, rows: list[dict]) -> str:
+def render_obveze(kind: str, period: str, rows: list[dict],
+                  tabs: list[tuple[str, str]] | None = None) -> str:
     kind_e, period_e = html.escape(kind), html.escape(period)
     prev_m, next_m = _shift_month(period, -1), _shift_month(period, 1)
 
-    tabs = "".join(
-        f'<a class="obveze-tab{" active" if t == kind else ""}" '
-        f'href="/obveze?kind={html.escape(t)}&period={period_e}">{html.escape(t)}</a>'
-        for t in OBVEZE_TABS
-    )
+    tabs = tabs or [(kind, kind)]
+    tabs_html = "".join(
+        f'<a class="obveze-tab{" active" if t_kind == kind else ""}" '
+        f'href="/obveze?kind={html.escape(t_kind)}&period={period_e}">{html.escape(t_label)}</a>'
+        for t_kind, t_label in tabs
+    ) + '<a class="obveze-tab tab-add" href="/ui/obveze-tipovi" title="Dodaj/uredi vrste obveza">+ vrsta</a>'
 
     unsent = [r for r in rows if not r["sent"]]
     sent = [r for r in rows if r["sent"]]
@@ -132,7 +128,7 @@ def render_obveze(kind: str, period: str, rows: list[dict]) -> str:
     default_body = f"Poštovani, molimo dostavite dokumentaciju za {kind} ({period}) što prije."
 
     body = f"""<h1>Obveze</h1>
-<div class="obveze-tabs" role="tablist" aria-label="Vrsta obveze">{tabs}</div>
+<div class="obveze-tabs" role="tablist" aria-label="Vrsta obveze">{tabs_html}</div>
 <div class="month-nav">
   <a class="step" href="/obveze?kind={kind_e}&period={html.escape(prev_m)}" aria-label="Prethodni mjesec">&#8249;</a>
   <span class="month-label">{html.escape(_month_label(period))}</span>
@@ -165,6 +161,118 @@ const PERIOD = {script_json(period)};
 <script>{_CAMPAIGN_JS}</script>"""
 
     return page_shell(f"Obveze — {kind} {period}", body, active="obveze")
+
+
+_APPLIES_LABELS = {
+    "pdv": "PDV obveznici",
+    "employees": "Ima zaposlene",
+    "all_active": "Svi aktivni",
+    "manual": "Ručno po klijentu",
+}
+
+_TYPES_JS = """
+function $(id){ return document.getElementById(id); }
+var APPLIES = {pdv:'PDV obveznici', employees:'Ima zaposlene', all_active:'Svi aktivni', manual:'Ručno po klijentu'};
+var FREQ = {monthly:'Mjesečno', quarterly:'Tromjesečno', yearly:'Godišnje'};
+
+function fillForm(t){
+  $('t-kind').value = t.kind; $('t-kind').readOnly = true;
+  $('t-label').value = t.label || ''; $('t-rule').value = t.rule || '';
+  $('t-frequency').value = t.frequency || 'monthly';
+  $('t-applies').value = t.applies_to || 'all_active';
+  $('t-active').checked = !!t.active; $('t-sort').value = t.sort;
+  $('form-title').textContent = 'Uredi: ' + t.kind;
+}
+function resetForm(){
+  $('t-kind').value=''; $('t-kind').readOnly=false; $('t-label').value='';
+  $('t-rule').value=''; $('t-frequency').value='monthly'; $('t-applies').value='all_active';
+  $('t-active').checked=true; $('t-sort').value=100; $('form-title').textContent='Nova vrsta';
+}
+
+function renderTypes(rows){
+  var body = $('types-body'); body.textContent='';
+  rows.forEach(function(t){
+    var tr = document.createElement('tr'); tr.style.cursor='pointer';
+    tr.addEventListener('click', function(){ fillForm(t); });
+    function td(text, mono){ var d=document.createElement('td'); if(mono)d.className='num'; d.textContent=text; return d; }
+    tr.appendChild(td(t.kind));
+    tr.appendChild(td(t.label||''));
+    tr.appendChild(td(t.rule||'—'));
+    tr.appendChild(td(FREQ[t.frequency]||t.frequency));
+    tr.appendChild(td(APPLIES[t.applies_to]||t.applies_to));
+    var st=document.createElement('td'); var chip=document.createElement('span');
+    chip.className='chip '+(t.active?'ok':''); chip.textContent=t.active?'aktivna':'skrivena';
+    st.appendChild(chip); tr.appendChild(st);
+    body.appendChild(tr);
+  });
+}
+
+async function loadTypes(){
+  var res = await fetch('/obveze/tipovi', {credentials:'same-origin'});
+  if(res.ok) renderTypes(await res.json());
+}
+
+async function saveType(){
+  var payload = {
+    kind: $('t-kind').value.trim(), label: $('t-label').value.trim(),
+    rule: $('t-rule').value.trim(), frequency: $('t-frequency').value,
+    applies_to: $('t-applies').value, active: $('t-active').checked?1:0,
+    sort: Number($('t-sort').value)||100,
+  };
+  if(!payload.kind){ alert('Šifra (kind) je obavezna.'); return; }
+  var res = await fetch('/obveze/tipovi', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  if(!res.ok){ var e = await res.json().catch(function(){return {};}); alert('Greška: '+(e.detail||res.status)); return; }
+  resetForm(); loadTypes();
+}
+
+$('t-save').addEventListener('click', saveType);
+$('t-reset').addEventListener('click', resetForm);
+loadTypes();
+"""
+
+
+def obveze_types_page() -> str:
+    freq_opts = "".join(f'<option value="{k}">{html.escape(v)}</option>'
+                        for k, v in (("monthly", "Mjesečno"), ("quarterly", "Tromjesečno"),
+                                     ("yearly", "Godišnje")))
+    applies_opts = "".join(f'<option value="{k}">{html.escape(v)}</option>'
+                           for k, v in _APPLIES_LABELS.items())
+    body = f"""<h1>Vrste obveza</h1>
+<p class="meta">Ovdje dodaješ i uređuješ vrste obveza (PDV, JOPPD, najam…). RAGSPINE ih
+odmah poveže: pojave se kao tab na Obvezama, u kalendaru i na dashboardu.
+<a href="/obveze">← natrag na Obveze</a></p>
+
+<table class="ledger" style="margin:1rem 0">
+  <thead><tr><th>Šifra</th><th>Naziv</th><th class="num">Rok (pravilo)</th><th>Frekvencija</th><th>Tko je obveznik</th><th>Status</th></tr></thead>
+  <tbody id="types-body"><tr><td colspan="6">Učitavanje…</td></tr></tbody>
+</table>
+
+<div class="card" style="max-width:640px">
+  <h2 id="form-title">Nova vrsta</h2>
+  <form class="stack" onsubmit="return false">
+    <label for="t-kind">Šifra (npr. NAJAM) — kratka, VELIKA slova</label>
+    <input type="text" id="t-kind" maxlength="20" placeholder="NAJAM">
+    <label for="t-label">Naziv</label>
+    <input type="text" id="t-label" placeholder="Najamnina">
+    <label for="t-rule">Rok — pravilo (npr. <code>monthly:15</code>, <code>quarterly:20</code>, <code>yearly:04-30</code>)</label>
+    <input type="text" id="t-rule" placeholder="monthly:15">
+    <label for="t-frequency">Frekvencija</label>
+    <select id="t-frequency">{freq_opts}</select>
+    <label for="t-applies">Tko je obveznik</label>
+    <select id="t-applies">{applies_opts}</select>
+    <label><input type="checkbox" id="t-active" checked> aktivna (prikaži kao tab)</label>
+    <input type="hidden" id="t-sort" value="100">
+    <div style="display:flex;gap:.5rem">
+      <button type="button" class="btn" id="t-save">Spremi</button>
+      <button type="button" class="btn btn-ghost" id="t-reset">Nova / očisti</button>
+    </div>
+  </form>
+  <p class="meta" style="margin-top:.75rem">„Ručno po klijentu" (npr. najam) → obvezu potom
+  označiš pojedinom klijentu na njegovom kartonu.</p>
+</div>
+<script>{_TYPES_JS}</script>"""
+    return page_shell("Vrste obveza", body, active="obveze")
 
 
 _CAMPAIGN_JS = """

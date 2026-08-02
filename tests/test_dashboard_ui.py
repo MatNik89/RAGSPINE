@@ -211,10 +211,8 @@ def test_dashboard_calendar_events_pinned_to_day(spine, cfg, monkeypatch):
 
 def test_dashboard_unsent_grouped_by_client(spine, cfg):
     cid = _seed_client(spine, "Alfa")
-    from ragspine.business import obveze
-    period = date.today().strftime("%Y-%m")
-    obveze.ensure_period(spine, "PDV", period)
-    obveze.ensure_period(spine, "JOPPD", period)
+    with spine.write() as c:  # employer -> JOPPD/DOH also apply
+        c.execute("UPDATE clients SET has_employees=1 WHERE id=?", (cid,))
 
     tok = _token(c := _client(spine, cfg), spine)
     body = c.get("/dashboard.json", headers=_auth(tok)).json()
@@ -222,9 +220,19 @@ def test_dashboard_unsent_grouped_by_client(spine, cfg):
     alfa = [g for g in groups if g["client"] == "Alfa"]
     assert len(alfa) == 1  # one row per client, not per obligation
     kinds = {k["kind"] for k in alfa[0]["kinds"]}
-    # dashboard surfaces every unsent kind for the client as chips on one row
+    # PDV (pdv obligor) + JOPPD/DOH (has employees), all on one row as chips
     assert kinds == {"PDV", "JOPPD", "DOH"}
     assert alfa[0]["client_id"] == cid
+
+
+def test_dashboard_unsent_no_employees_only_pdv(spine, cfg):
+    # a pdv-registered client with NO employees owes only PDV (JOPPD/DOH gate on employees)
+    _seed_client(spine, "Beta", oib="33333333333")
+    tok = _token(c := _client(spine, cfg), spine)
+    body = c.get("/dashboard.json", headers=_auth(tok)).json()
+    beta = [g for g in body["unsent_by_client"] if g["client"] == "Beta"]
+    assert len(beta) == 1
+    assert {k["kind"] for k in beta[0]["kinds"]} == {"PDV"}
 
 
 def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):

@@ -225,6 +225,8 @@ form.stack{display:flex;flex-direction:column;gap:.5rem;max-width:520px}
 .oblig-check input{width:1.15rem;height:1.15rem;accent-color:var(--accent);cursor:pointer;flex:none}
 .oblig-row .oname{color:var(--text);font-weight:500}
 .oblig-row .ostatus{margin-left:auto}
+.obveze-tab.tab-add{border-style:dashed;font-weight:500;color:var(--muted)}
+.obveze-tab.tab-add:hover{color:var(--accent);border-color:var(--accent)}
 @media (max-width:640px){
   .grid{grid-template-columns:1fr}
   .container{padding:1rem .75rem 2rem}
@@ -1088,6 +1090,15 @@ def klijent_page(client_id: int) -> str:
     <div id="k-obligations"><p class="meta">Učitavanje…</p></div>
   </div>
   <div class="card">
+    <h2>Obveze — postavke</h2>
+    <label style="display:flex;gap:.5rem;align-items:center"><input type="checkbox" id="oc-employees"> Ima zaposlene (za JOPPD/DOH)</label>
+    <label for="oc-pdv-freq" style="margin-top:.5rem;display:block">PDV frekvencija</label>
+    <select id="oc-pdv-freq"><option value="monthly">Mjesečno</option><option value="quarterly">Tromjesečno</option></select>
+    <div id="oc-manual" style="margin-top:.5rem"></div>
+    <button type="button" class="btn" id="oc-save" style="margin-top:.75rem">Spremi postavke</button>
+    <span id="oc-msg" class="meta" style="margin-left:.5rem"></span>
+  </div>
+  <div class="card">
     <h2>Istek dokumenata</h2>
     <div id="k-expiry"><p class="meta">Učitavanje…</p></div>
   </div>
@@ -1113,8 +1124,49 @@ def klijent_page(client_id: int) -> str:
 const CLIENT_ID = {int(client_id)};
 const KARTON_URL = '/clients/{int(client_id)}/karton.json';
 </script>
-<script>{_KARTON_JS}</script>"""
+<script>{_KARTON_JS}</script>
+<script>{_OBVEZE_SETTINGS_JS}</script>"""
     return page_shell("Klijent", body, active="klijenti")
+
+
+_OBVEZE_SETTINGS_JS = """
+(function(){
+  function $(id){ return document.getElementById(id); }
+  var URL = '/clients/' + CLIENT_ID + '/obveze-postavke';
+  var manual = [];
+  async function load(){
+    var res = await fetch(URL, {credentials:'same-origin'});
+    if(!res.ok) return;
+    var d = await res.json();
+    $('oc-employees').checked = !!d.has_employees;
+    $('oc-pdv-freq').value = d.pdv_freq || 'monthly';
+    manual = d.available_manual || [];
+    var box = $('oc-manual'); box.textContent = '';
+    if(!manual.length){ return; }
+    var lab = document.createElement('div'); lab.className='meta'; lab.textContent='Ručne obveze:'; box.appendChild(lab);
+    var have = d.manual_kinds || [];
+    manual.forEach(function(t){
+      var l = document.createElement('label'); l.style.display='flex'; l.style.gap='.5rem'; l.style.alignItems='center';
+      var cb = document.createElement('input'); cb.type='checkbox'; cb.value=t.kind; cb.className='oc-manual-cb';
+      cb.checked = have.indexOf(t.kind) !== -1;
+      var span = document.createElement('span'); span.textContent = t.label + ' (' + t.kind + ')';
+      l.appendChild(cb); l.appendChild(span); box.appendChild(l);
+    });
+  }
+  $('oc-save').addEventListener('click', async function(){
+    var kinds = [].slice.call(document.querySelectorAll('.oc-manual-cb'))
+      .filter(function(c){ return c.checked; }).map(function(c){ return c.value; });
+    var res = await fetch(URL, {method:'POST', credentials:'same-origin',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({has_employees: $('oc-employees').checked?1:0,
+        pdv_freq: $('oc-pdv-freq').value, manual_kinds: kinds})});
+    var msg = $('oc-msg');
+    if(res.ok){ msg.textContent='Spremljeno.'; setTimeout(function(){msg.textContent='';}, 2000); }
+    else { msg.textContent='Greška.'; }
+  });
+  load();
+})();
+"""
 
 
 def upute_page(pending_rows: list[dict]) -> str:
