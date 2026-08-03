@@ -9,6 +9,8 @@ def test_download_model_reports_unavailable_without_deps(monkeypatch):
 
 
 def test_download_model_success_path(monkeypatch, cfg):
+    import pytest
+    pytest.importorskip("fastembed")  # CI bazni deps nemaju fastembed
     monkeypatch.setattr(embed, "available", lambda: True)
 
     class _FakeTE:
@@ -29,6 +31,8 @@ def test_download_model_success_path(monkeypatch, cfg):
 
 
 def test_download_model_reports_error(monkeypatch, cfg):
+    import pytest
+    pytest.importorskip("fastembed")
     monkeypatch.setattr(embed, "available", lambda: True)
 
     class _Boom:
