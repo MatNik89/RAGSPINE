@@ -595,6 +595,7 @@ q.addEventListener('keydown', function (e) {
 
 def postavke_page() -> str:
     cards = [
+        ("Model (LLM)", "/ui/model", "Odaberi preko čega RAGSPINE radi (Claude / ChatGPT / lokalni). Mozak vs gorivo."),
         ("Mrežne mape", "/ui/mape", "Poveži NAS / Windows mape i dodijeli im uloge (propisi, klijenti…)."),
         ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
     ]
