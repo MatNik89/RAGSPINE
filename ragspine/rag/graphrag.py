@@ -8,7 +8,7 @@ import re
 
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.core.security import oib_valid
-from ragspine.rag import composer
+from ragspine.rag import budget, composer
 from ragspine.rag.retrieval import Hit
 
 _OIB_RE = re.compile(r"\b\d{11}\b")
@@ -139,6 +139,10 @@ def handle(spine, cfg, query: str, llm) -> str:
         Hit(r["chunk_id"], r["doc_id"], r["title"], r["text"], 1.0, r["doc_type"])
         for r in rows
     ]
+    # graf zna vratiti SVE chunkove povezanih dokumenata — bez kompakcije
+    # prompt eksplodira (144k znakova u probi); ovdje nema citation-verifikacije
+    # pa je kompakcija čisti dobitak
+    hits = budget.compact(hits)
     system, messages = composer.compose(query, hits)
     try:
         result = llm.complete(messages, system=system)

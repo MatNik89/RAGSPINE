@@ -29,10 +29,12 @@ class RateLimiter:
             return True
 
     def _evict(self, now: float) -> None:
-        """Codex nalaz: hladni ključevi se sami nikad ne isprazne (prune ide samo
-        kroz allow() za TAJ ključ) — napadač s jedinstvenim usernameovima raste
-        memoriju bez granice. Zato sweep SVIH ključeva po najvećem viđenom
-        prozoru + brisanje ispražnjenih; poziva se tek iznad _MAX_KEYS."""
+        """Codex nalazi (2 runde): (1) hladni ključevi se sami nikad ne isprazne —
+        sweep SVIH ključeva po najvećem viđenom prozoru; (2) sweep sam nije CAP —
+        sa samim svježim (napadačkim) ključevima ne briše ništa, pa se preko capa
+        dodatno izbacuju najstarije-aktivni ključevi do 90% capa. Legitimni
+        aktivni korisnici su nedavno aktivni pa preživljavaju; 10% histereze
+        amortizira O(n log n) na rijetke pozive."""
         dead = []
         for k, dq in self._events.items():
             while dq and now - dq[0] > self._max_window:
@@ -41,3 +43,7 @@ class RateLimiter:
                 dead.append(k)
         for k in dead:
             del self._events[k]
+        if len(self._events) > self._MAX_KEYS:
+            by_last_activity = sorted(self._events, key=lambda k: self._events[k][-1])
+            for k in by_last_activity[: len(self._events) - int(self._MAX_KEYS * 0.9)]:
+                del self._events[k]

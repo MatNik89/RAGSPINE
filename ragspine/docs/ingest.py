@@ -127,11 +127,13 @@ _HAS_LETTER_RE = re.compile(r"[^\W\d_]")
 
 def _boiler_key(line: str) -> str | None:
     """Ključ za repeat-collapse SAMO za linije koje liče na header/footer:
-    15-80 znakova I sadrže slova. Kratke oznake ('Članak') i čisto numeričke
-    tablične linije ('0,00 0,00') se NE diraju — Codex nalaz: kolaps im mijenja
-    značenje dokumenta. Bolje propustiti šum nego izgubiti sadržaj."""
+    15-80 znakova, sadrže slova i NEMAJU znamenke. Kratke oznake ('Članak'),
+    numeričke tablične linije ('0,00 0,00') i fakturne stavke s iznosima
+    ('Usluga savjetovanja 100,00') se NE diraju — Codex nalazi 2 runde:
+    kolaps im mijenja značenje. Header s brojem (adresa, OIB) time preživi
+    u indeksu — svjesna cijena, bolje šum nego izgubljen sadržaj."""
     key = " ".join(line.split()).lower()
-    if 15 <= len(key) < 80 and _HAS_LETTER_RE.search(key):
+    if 15 <= len(key) < 80 and _HAS_LETTER_RE.search(key) and not any(c.isdigit() for c in key):
         return key
     return None
 

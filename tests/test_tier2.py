@@ -32,12 +32,15 @@ def test_clean_noise_spares_numbers_labels_and_table_rows():
     tablične linije su SADRŽAJ — ne smiju se brisati ni kolabirati."""
     text = "\n".join(["Prihodi po godinama", "2024", "1000", "12/2024",
                       "Članak", "prvi", "Članak", "drugi", "Članak", "treći",
-                      "0,00 0,00", "0,00 0,00", "0,00 0,00"])
+                      "0,00 0,00", "0,00 0,00", "0,00 0,00",
+                      "Usluga savjetovanja 100,00", "Usluga savjetovanja 100,00",
+                      "Usluga savjetovanja 100,00"])
     cleaned = ingest.clean_noise(text)
     for keep in ("2024", "1000", "12/2024"):
         assert keep in cleaned
     assert cleaned.count("Članak") == 3
     assert cleaned.count("0,00 0,00") == 3
+    assert cleaned.count("Usluga savjetovanja 100,00") == 3  # stavka s iznosom nije header
 
 
 # --- dedup-ljestvica ---
@@ -109,11 +112,25 @@ def test_ratelimiter_evicts_stale_keys(monkeypatch):
     monkeypatch.setattr(rl_mod.time, "monotonic", lambda: clock[0])
     rl = RateLimiter()
     rl._MAX_KEYS = 100
-    for i in range(101):
-        rl.allow(f"login:ip:user{i}", 10)
+    for i in range(100):
+        rl.allow(f"login:ip:user{i}", 10)  # točno na capu, bez evicta
     clock[0] = 120.0  # svi prozori istekli
-    rl.allow("fresh", 10)  # trigger eviction (preko praga)
-    assert len(rl._events) <= 2  # samo fresh (+eventualno zadnji dirani)
+    rl.allow("fresh", 10)  # 101 > cap → evict → stale sweep sve počisti
+    assert set(rl._events) == {"fresh"}
+
+
+def test_ratelimiter_hard_cap_with_fresh_keys(monkeypatch):
+    """Codex runda 2 HIGH: kad su SVI ključevi svježi, sweep ne briše ništa —
+    cap mora ostati tvrd (izbacuju se najstarije-aktivni)."""
+    from ragspine.web import ratelimit as rl_mod
+    clock = [0.0]
+    monkeypatch.setattr(rl_mod.time, "monotonic", lambda: clock[0])
+    rl = RateLimiter()
+    rl._MAX_KEYS = 20
+    for i in range(100):
+        clock[0] += 0.01  # svi unutar prozora (svježi)
+        rl.allow(f"login:ip:napadac{i}", 10)
+    assert len(rl._events) <= rl._MAX_KEYS + 1
 
 
 def test_ratelimiter_window():
@@ -144,14 +161,21 @@ def test_chat_rate_limited(spine, cfg):
 
 # --- audit admin-gate + org-scope ---
 
-def test_audit_org_scoped(spine, cfg):
-    """Codex nalaz #5: admin org-a A ne smije vidjeti audit zapise org-a B."""
-    from ragspine.business import auditlog
+def test_audit_org_scoped_through_endpoint(spine, cfg):
+    """Codex nalazi (2 runde): admin org-a A ne smije vidjeti audit org-a B,
+    i to mora vrijediti KROZ endpoint (revert samo API ožičenja mora pasti)."""
+    from ragspine.business import tenancy
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "ana", "pw")
+    owner = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
+    # druga organizacija s vlastitim korisnikom i audit zapisom
+    add_user(spine, "tudja", "pw2")
+    uid_b = spine.read().execute("SELECT id FROM users WHERE username='tudja'").fetchone()["id"]
+    tenancy.create_org(spine, "Org B", uid_b)
+    spine.audit("tudja", "skill_create", "skill:9")
     spine.audit("ana", "wiki_lock", "wiki:1:x")
-    spine.audit("tudja-org-user", "skill_create", "skill:9")
-    rows = auditlog.search(spine, usernames=["ana"])
-    assert [r["user"] for r in rows] == ["ana"]
-    assert auditlog.search(spine, usernames=[]) == []
+    users_seen = {r["user"] for r in c.get("/audit", headers={"Authorization": f"Bearer {owner}"}).json()}
+    assert "ana" in users_seen and "tudja" not in users_seen
 
 
 def test_audit_admin_only(spine, cfg):

@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.core.net import safe_fetch
-from ragspine.rag import composer
+from ragspine.rag import budget, composer
 from ragspine.rag.retrieval import Hit
 
 _DDG_URL = "https://html.duckduckgo.com/html/?q={}"
@@ -78,8 +78,9 @@ def handle(spine, cfg, query: str, llm, fetch=None) -> str:
     if llm is None:
         return listing
 
-    hits = [Hit(chunk_id=0, doc_id=0, title=r["title"], text=r["snippet"], score=1.0, doc_type="web")
-            for r in results]
+    hits = budget.compact(
+        [Hit(chunk_id=0, doc_id=0, title=r["title"], text=r["snippet"], score=1.0, doc_type="web")
+         for r in results])
     extra = "Izvori su s weba [WEB] (DuckDuckGo), s adresama:\n" + "\n".join(
         f"- {r['title']}: {r['url']}" for r in results)
     system, messages = composer.compose(query, hits, extra=extra)
