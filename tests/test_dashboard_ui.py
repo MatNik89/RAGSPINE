@@ -92,7 +92,7 @@ def test_dashboard_json_has_expected_keys(spine, cfg):
     r = c.get("/dashboard.json", headers=_auth(tok))
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"stats", "calendar", "deadlines", "unsent_obligations",
+    assert set(body) == {"orientation", "stats", "calendar", "deadlines", "unsent_obligations",
                           "unsent_by_client", "unsent_total", "unsent_clients_total",
                           "expiring", "expiring_total", "notifications", "peer"}
     # calendar hero payload shape
