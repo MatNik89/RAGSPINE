@@ -813,6 +813,30 @@ def create_app(spine, cfg) -> FastAPI:
         from ragspine.business import folder_scan as fs
         return fs.latest(spine, folder_id) or {}
 
+    @app.post("/folders/{folder_id}/ocr")
+    def folder_ocr(folder_id: int, user: str = Depends(require_user_web)):
+        from ragspine.docs import ocr as ocr_mod
+        row = spine.read().execute("SELECT path, label FROM folders WHERE id=?",
+                                   (folder_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznata mapa")
+        base = folders_mod._scoped(cfg, row["path"])
+        res = ocr_mod.bulk_ocr(spine, cfg, base)
+        name = row["label"] or row["path"]
+        body = f"OCR gotov za „{name}\": {res['processed']} obrađeno, {res['skipped']} preskočeno."
+        with spine.write() as conn:
+            conn.execute("INSERT INTO notifications(kind, body) VALUES('folder_ocred', ?)", (body,))
+        return {**res, "notified": True}
+
+    @app.get("/folders/{folder_id}/ocr/audit")
+    def folder_ocr_audit(folder_id: int, user: str = Depends(require_user_web)):
+        from ragspine.docs import ocr as ocr_mod
+        row = spine.read().execute("SELECT path FROM folders WHERE id=?", (folder_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznata mapa")
+        base = folders_mod._scoped(cfg, row["path"])
+        return ocr_mod.audit_folder(cfg, base)
+
     @app.post("/notes/folder")
     def folder_note(body: FolderNoteBody, user: str = Depends(require_user_web)):
         key = f"note:folder:{body.folder_id}" if body.folder_id is not None else "note:global"
