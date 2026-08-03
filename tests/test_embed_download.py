@@ -12,8 +12,9 @@ def test_download_model_success_path(monkeypatch, cfg):
     monkeypatch.setattr(embed, "available", lambda: True)
 
     class _FakeTE:
-        def __init__(self, model, local_files_only=False):
+        def __init__(self, model, cache_dir=None, local_files_only=False):
             assert local_files_only is False  # download MORA biti dozvoljen
+            assert cache_dir  # RAGSPINE-vlastiti trajni cache
             self.model = model
 
         def embed(self, texts):

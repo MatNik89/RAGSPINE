@@ -2,10 +2,20 @@
 package or the model itself is unavailable — callers never need to branch."""
 import logging
 import os
+from pathlib import Path
 
 from ragspine.config import get_config
 
 log = logging.getLogger(__name__)
+
+
+def _cache_dir(cfg) -> str:
+    """RAGSPINE-vlastiti TRAJNI cache modela pod data_dir. Bez ovoga fastembed
+    piše u /tmp/fastembed_cache koji reboot/tmpreaper čisti — pa se skinuti
+    model 'izgubi' i vektorska tiho padne na FTS. Izolirano od drugih alata."""
+    d = Path(cfg.data_dir) / "fastembed"
+    d.mkdir(parents=True, exist_ok=True)
+    return str(d)
 
 _model = None
 _model_failed = False
@@ -33,7 +43,8 @@ def _get_model():
     try:
         from fastembed import TextEmbedding
         local_only = os.environ.get("RAGSPINE_TEST_EMBED") != "1"
-        _model = TextEmbedding(cfg.embed_model, local_files_only=local_only)
+        _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
+                               local_files_only=local_only)
     except Exception:
         log.warning("embed model load failed (%s) — vector search disabled", cfg.embed_model, exc_info=True)
         _model_failed = True
@@ -51,7 +62,8 @@ def download_model() -> dict:
     global _model, _model_failed
     try:
         from fastembed import TextEmbedding
-        _model = TextEmbedding(cfg.embed_model, local_files_only=False)  # dozvoli download
+        _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
+                               local_files_only=False)  # dozvoli download
         _model_failed = False
         dim = len(next(iter(_model.embed(["query: test"]))))
     except Exception as e:
@@ -66,15 +78,50 @@ def _load_vec(conn):
     conn.enable_load_extension(False)
 
 
+def _is_e5(model_name: str) -> bool:
+    """e5 obitelj traži 'query: '/'passage: ' prefikse; drugi modeli (MiniLM,
+    mpnet…) ih tretiraju kao doslovni tekst i to im kvari kvalitetu."""
+    return "e5" in (model_name or "").lower()
+
+
+def _passage(text: str, cfg) -> str:
+    return f"passage: {text}" if _is_e5(cfg.embed_model) else text
+
+
+def _query_text(text: str, cfg) -> str:
+    return f"query: {text}" if _is_e5(cfg.embed_model) else text
+
+
+def model_dim(cfg) -> int | None:
+    """Stvarna dimenzija aktivnog modela (jedan probe-embedding). None ako model
+    nije dostupan. Bez ovoga vec tablica bi bila fiksna na 1024 i pucala čim se
+    promijeni embed model."""
+    m = _get_model()
+    if m is None:
+        return None
+    return len(next(iter(m.embed([_query_text("x", cfg)]))))
+
+
 def ensure_vec_table(spine):
     if not available():
         return
+    cfg = get_config()
+    dim = model_dim(cfg)
+    if dim is None:
+        return
+    # Ako je model (i time dimenzija) promijenjen, stara vec_chunks tablica ne
+    # odgovara — presloži je (vektori su re-indeksabilni iz chunks).
+    stored = spine.get_override("embed", "vec_dim")
     with spine.write() as c:
         _load_vec(c)
+        if stored is not None and int(stored) != dim:
+            c.execute("DROP TABLE IF EXISTS vec_chunks")
         c.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING "
-            "vec0(chunk_id INTEGER PRIMARY KEY, embedding float[1024])"
+            f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING "
+            f"vec0(chunk_id INTEGER PRIMARY KEY, embedding float[{dim}])"
         )
+    if stored is None or int(stored) != dim:
+        spine.set_override("embed", "vec_dim", str(dim))
 
 
 def index_chunks(spine, chunk_ids: list[int]):
@@ -90,8 +137,8 @@ def index_chunks(spine, chunk_ids: list[int]):
     if not rows:
         return
     import sqlite_vec
-    # e5 models expect a "passage: "/"query: " prefix for best retrieval quality.
-    vecs = list(model.embed([f"passage: {r['text']}" for r in rows]))
+    cfg = get_config()
+    vecs = list(model.embed([_passage(r["text"], cfg) for r in rows]))
     ensure_vec_table(spine)
     with spine.write() as c:
         _load_vec(c)
@@ -113,7 +160,7 @@ def query_vec(spine, query: str, k: int) -> list[tuple[int, float]]:
     import sqlite_vec
     conn = spine.read()
     _load_vec(conn)
-    qvec = next(iter(model.embed([f"query: {query}"])))
+    qvec = next(iter(model.embed([_query_text(query, get_config())])))
     rows = conn.execute(
         "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? "
         "ORDER BY distance LIMIT ?",
