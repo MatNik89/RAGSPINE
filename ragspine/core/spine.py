@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
   active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
   PRIMARY KEY(client_id, kind));
+CREATE TABLE IF NOT EXISTS wiki_pages(id INTEGER PRIMARY KEY, org_id INTEGER,
+  type TEXT, title TEXT, slug TEXT, body TEXT, locked INTEGER DEFAULT 0,
+  version INTEGER DEFAULT 1, owner_user_id INTEGER, visibility TEXT DEFAULT 'org',
+  team_id INTEGER, updated_at TEXT DEFAULT (datetime('now')), UNIQUE(org_id, slug));
+CREATE TABLE IF NOT EXISTS wiki_links(org_id INTEGER, src_page_id INTEGER, dst_slug TEXT,
+  PRIMARY KEY(src_page_id, dst_slug));
+CREATE TABLE IF NOT EXISTS wiki_sources(id INTEGER PRIMARY KEY, org_id INTEGER,
+  source_key TEXT, sha256 TEXT, UNIQUE(org_id, source_key));
+CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(title, body, page_id UNINDEXED,
+  tokenize='unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS orgs(id INTEGER PRIMARY KEY, name TEXT,
   created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memberships(id INTEGER PRIMARY KEY, org_id INTEGER,
