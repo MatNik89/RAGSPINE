@@ -28,6 +28,8 @@ from ragspine.business import onboarding
 from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
 from ragspine.business import sop_images
+from ragspine.business import tenancy
+from ragspine.business.acl import ROLE_RANK, Actor
 from ragspine.web import messaging
 from ragspine.web import static as static_mod
 from ragspine.browser import agent as agent_mod
@@ -47,7 +49,7 @@ from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph
 from ragspine.web import learn  # noqa: F401 — register learn lane handler
 from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
-from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
+from ragspine.web.deps import COOKIE_NAME, require_actor_web, require_user, require_user_web
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_model import model_page
@@ -320,14 +322,18 @@ def create_app(spine, cfg) -> FastAPI:
         if not username or not password:
             raise HTTPException(400, "neispravan zahtjev")
         row = spine.read().execute(
-            "SELECT pw_hash, role FROM users WHERE username=?", (username,)
+            "SELECT id, pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
         if row is None:
             verify_password(password, _DUMMY_PW_HASH)  # constant-time-ish: keep latency ~equal
             raise HTTPException(401, "invalid credentials")
         if not verify_password(password, row["pw_hash"]):
             raise HTTPException(401, "invalid credentials")
-        token = jwt_encode({"sub": username, "role": row["role"]}, cfg.jwt_secret)
+        # uid+org_id su pokazivači za Actor lookup; org-uloga se NE stavlja u
+        # token (čita se svježa iz memberships na svakom zahtjevu).
+        org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
+        token = jwt_encode({"sub": username, "role": row["role"],
+                            "uid": row["id"], "org_id": org_id}, cfg.jwt_secret)
         # ponytail: CSRF for POST /obveze/mark deferred — SameSite=Lax already blocks
         # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
         # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
@@ -339,6 +345,18 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/v1/models")
     def models(user: str = Depends(require_user)):
         return {"object": "list", "data": [{"id": cfg.llm_model or "ragspine", "object": "model"}]}
+
+    def _require_admin(actor: Actor) -> Actor:
+        if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
+            raise HTTPException(403, "potrebna admin uloga")
+        return actor
+
+    @app.get("/org")
+    def org_info(actor: Actor = Depends(require_actor_web)):
+        org = spine.read().execute("SELECT id, name FROM orgs WHERE id=?",
+                                   (actor.org_id,)).fetchone()
+        return {"org": dict(org) if org else None, "role": actor.role,
+                "members": tenancy.list_members(spine, actor.org_id)}
 
     def _answer(query: str, user: str, fresh: bool = False) -> dict:
         try:

@@ -60,6 +60,32 @@ def _team_ids(spine, org_id: int, user_id: int) -> set:
     return {r["team_id"] for r in rows}
 
 
+def default_org_id(spine) -> int:
+    """ID zadane organizacije; ako nijedna ne postoji, kreira 'Ured' (bootstrap
+    jedno-uredske instalacije bez ikakvog setup koraka)."""
+    r = spine.read().execute("SELECT MIN(id) AS id FROM orgs").fetchone()
+    if r["id"] is not None:
+        return r["id"]
+    with spine.write() as c:
+        return c.execute("INSERT INTO orgs(name) VALUES('Ured')").lastrowid
+
+
+def resolve_login_org(spine, user_id: int, sys_role: str = "") -> tuple[int, str]:
+    """(org_id, role) za login: prvo postojeće članstvo; inače upiši članstvo u
+    default org — prazan org → owner, sistemski admin → admin, inače member."""
+    m = spine.read().execute(
+        "SELECT org_id, role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+        (user_id,)).fetchone()
+    if m:
+        return m["org_id"], m["role"]
+    org_id = default_org_id(spine)
+    empty = spine.read().execute(
+        "SELECT 1 FROM memberships WHERE org_id=? LIMIT 1", (org_id,)).fetchone() is None
+    role = "owner" if empty else ("admin" if sys_role == "admin" else "member")
+    add_member(spine, org_id, user_id, role, user="system")
+    return org_id, role
+
+
 def actor_for(spine, org_id: int, user_id: int) -> Actor | None:
     """Actor s ulogom + timovima za trenutnog korisnika u org-u; None ako nije član."""
     role = role_of(spine, org_id, user_id)

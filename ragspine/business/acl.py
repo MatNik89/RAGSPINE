@@ -17,6 +17,7 @@ class Actor:
     org_id: int
     role: str = "member"
     team_ids: set = field(default_factory=set)
+    username: str = ""  # za audit zapise; ne sudjeluje u odlukama
 
 
 @dataclass
