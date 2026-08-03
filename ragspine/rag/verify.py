@@ -54,9 +54,14 @@ def run(spine, query: str, hits, llm, prior_turns=None,
             break
         if conf <= prev_conf:  # nema napretka — ne troši daljnje prolaze
             break
+        if p >= max_passes or not hits:  # zadnji prolaz / prazan retrieval — bez širenja
+            break
         prev_conf = conf
         more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4)
-        hits = _merge(hits, more)
+        merged = _merge(hits, more)
+        if len(merged) == len(hits):  # ništa novo — nema smisla ponavljati isti nacrt
+            break
+        hits = merged
     best["threshold"] = threshold
     return best
 

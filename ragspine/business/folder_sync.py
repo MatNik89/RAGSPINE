@@ -34,50 +34,75 @@ def _subfolder_tier(folder_path: str, file_path: str) -> str | None:
     return _TIER_BY_DIR.get(_fold(parts[0]))
 
 
-def _supersede_prior(spine, path: str, new_id: int) -> int:
-    """Stariji aktivni dokumenti iste putanje → superseded; novi → sljedeća verzija."""
+def _reconcile_path(spine, path: str) -> int:
+    """Idempotentno: za jednu putanju ostavi SAMO najnoviji aktivni dokument
+    (najveći id), starije aktivne → superseded, novom postavi verziju/pred, uz
+    predecessor = najviši od starijih. Radi i kad je prethodni sync pao između
+    inserta i supersede-a (crash-safe) — sljedeći poziv počisti."""
     with spine.write() as c:
-        prior = c.execute(
-            "SELECT id, version FROM documents WHERE path=? AND status='active' AND id!=?",
-            (path, new_id),
+        rows = c.execute(
+            "SELECT id, version FROM documents WHERE path=? AND status='active' ORDER BY id",
+            (path,),
         ).fetchall()
-        if not prior:
+        if len(rows) <= 1:
             return 0
-        maxv = max((r["version"] or 1) for r in prior)
-        for r in prior:
+        keep, older = rows[-1], rows[:-1]  # najveći id = najnoviji
+        maxv = max((r["version"] or 1) for r in rows)
+        for r in older:
             c.execute("UPDATE documents SET status='superseded' WHERE id=?", (r["id"],))
         c.execute("UPDATE documents SET supersedes=?, version=? WHERE id=?",
-                  (prior[0]["id"], maxv + 1, new_id))
-    return len(prior)
+                  (older[-1]["id"], maxv + 1, keep["id"]))
+    return len(older)
 
 
-def sync_folder(spine, folder: dict) -> dict:
+def _active_file_sha(spine, path: str) -> str | None:
+    r = spine.read().execute(
+        "SELECT file_sha FROM documents WHERE path=? AND status='active' ORDER BY id DESC LIMIT 1",
+        (path,),
+    ).fetchone()
+    return r["file_sha"] if r else None
+
+
+def sync_folder(spine, cfg, folder: dict) -> dict:
     counts = {"ingested": 0, "skipped": 0, "superseded": 0, "errors": []}
-    path = folder["path"]
     role = folder.get("role") or "ostalo"
-    if not os.path.isdir(path):
-        counts["errors"].append(f"nedostupna mapa: {path}")  # mount pao → preskoči, ne padaj
+    # Revalidiraj korijen SVAKI put (mount mogao pasti, root maknut iz mount_roots,
+    # ili mapa zamijenjena simlinkom nakon registracije).
+    try:
+        path = folders_mod._scoped(cfg, folder["path"])
+    except ValueError as e:
+        counts["errors"].append(f"mapa izvan dozvoljenih korijena: {e}")
+        return counts
+    if not os.path.isdir(path) or os.path.islink(folder["path"]):
+        counts["errors"].append(f"nedostupna mapa: {folder['path']}")
         return counts
     if role == "klijenti":
-        # klijentske mape drži onboarding; ovdje ih ne ingestamo automatski
-        return counts
-    for root, _, files in os.walk(path):
+        return counts  # klijentske mape drži onboarding
+    roots = cfg.mount_roots or []
+    for root, dirs, files in os.walk(path, followlinks=False):
+        # ne silazi u simlinkane podmape (mogu voditi van korijena)
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
         for fname in files:
             fp = os.path.join(root, fname)
+            # preskoči simlink-datoteke i sve što realpath odvodi van korijena (TOCTOU/escape)
+            if os.path.islink(fp) or not folders_mod._under_a_root(os.path.realpath(fp), roots):
+                counts["skipped"] += 1
+                continue
             dtype = _subfolder_tier(path, fp) if role == "propisi" else None
             try:
-                doc_id = ingest_mod.ingest_file(spine, fp, doc_type=dtype)
+                fsha = ingest_mod._file_sha(fp)
+                if _active_file_sha(spine, fp) == fsha:
+                    counts["skipped"] += 1  # nepromijenjeno (po SADRŽAJU DATOTEKE)
+                else:
+                    doc_id = ingest_mod.ingest_file(spine, fp, doc_type=dtype)
+                    counts["skipped" if doc_id is None else "ingested"] += 1
             except UnsupportedFormat:
                 counts["skipped"] += 1
                 continue
             except Exception as e:  # jedna loša datoteka ne ruši sinkronizaciju
                 counts["errors"].append(f"{fp}: {e}")
                 continue
-            if doc_id is None:
-                counts["skipped"] += 1  # nepromijenjeno (sha dedup)
-                continue
-            counts["ingested"] += 1
-            counts["superseded"] += _supersede_prior(spine, fp, doc_id)
+            counts["superseded"] += _reconcile_path(spine, fp)  # uvijek, idempotentno
     return counts
 
 
@@ -87,7 +112,7 @@ def sync_all(spine, cfg) -> dict:
         if not folder.get("enabled"):
             continue
         total["folders"] += 1
-        r = sync_folder(spine, folder)
+        r = sync_folder(spine, cfg, folder)
         for k in ("ingested", "skipped", "superseded"):
             total[k] += r[k]
         total["errors"].extend(r["errors"])

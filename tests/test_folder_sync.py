@@ -97,6 +97,34 @@ def test_sync_missing_folder_skipped_not_crash(spine, tmp_path):
     assert r["ingested"] == 0 and any("nedostupna" in e for e in r["errors"])
 
 
+def test_sync_skips_symlink_escape(spine, tmp_path):
+    # datoteka-simlink unutar registrirane mape koja vodi VAN korijena se ne smije ingestati
+    root = tmp_path / "nas"; propisi = root / "Propisi"; propisi.mkdir(parents=True)
+    secret = tmp_path / "tajno"; secret.mkdir()
+    (secret / "lozinke.txt").write_text("TAJNI PODACI izvan NAS-a")
+    os.symlink(str(secret / "lozinke.txt"), str(propisi / "procitaj-me.txt"))
+    (propisi / "javno.txt").write_text("Javni propis dostupan svima.")
+    cfg = _cfg(tmp_path, [str(root)])
+    folders.register(spine, cfg, str(propisi), "propisi", "P", "ana")
+    r = folder_sync.sync_all(spine, cfg)
+    titles = [d["title"] for d in spine.read().execute("SELECT title FROM documents").fetchall()]
+    assert "javno.txt" in titles
+    assert "procitaj-me.txt" not in titles  # simlink izvan korijena preskočen
+    assert not any("TAJNI" in (d["title"] or "") for d in
+                   spine.read().execute("SELECT title FROM documents").fetchall())
+
+
+def test_sync_root_removed_from_mount_roots_is_skipped(spine, tmp_path):
+    root = tmp_path / "nas"; (root / "Propisi").mkdir(parents=True)
+    (root / "Propisi" / "x.txt").write_text("nešto")
+    cfg = _cfg(tmp_path, [str(root)])
+    folders.register(spine, cfg, str(root / "Propisi"), "propisi", "P", "ana")
+    cfg2 = _cfg(tmp_path, [str(tmp_path / "drugi")])  # root više nije dozvoljen
+    (tmp_path / "drugi").mkdir()
+    r = folder_sync.sync_all(spine, cfg2)
+    assert r["ingested"] == 0 and any("izvan dozvoljenih" in e for e in r["errors"])
+
+
 def test_sync_updates_last_synced(spine, tmp_path):
     cfg = _cfg(tmp_path, [str(tmp_path)])
     (tmp_path / "M").mkdir()

@@ -73,7 +73,9 @@ Prebaci providera bilo kad — pravila, memorija i pretraga ostaju iste.</p>
     </div>
   </form>
   <p class="meta" style="margin-top:.75rem">🔒 API ključ se sprema lokalno u bazu i nikad se
-  ne prikazuje natrag. Za lokalni model (Ollama) podaci ne izlaze iz mreže.</p>
+  ne prikazuje natrag. Za lokalni model (Ollama) podaci ne izlaze iz mreže.
+  Promjena <b>embedding modela</b> vrijedi za nove dokumente; postojeće treba ponovno
+  indeksirati (re-sync mapa).</p>
 </div>
 <script>{_MODEL_JS}</script>"""
     return page_shell("Model", body, active="postavke")

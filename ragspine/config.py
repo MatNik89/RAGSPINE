@@ -12,6 +12,7 @@ class Config:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_provider: str
     anthropic_base_url: str
     ollama_url: str
     ocr_url: str
@@ -48,6 +49,7 @@ class Config:
             host=e("RAGSPINE_HOST", "127.0.0.1"), port=int(e("RAGSPINE_PORT", "8400")),
             llm_base_url=e("RAGSPINE_LLM_BASE_URL", ""), llm_api_key=e("RAGSPINE_LLM_API_KEY", ""),
             llm_model=e("RAGSPINE_LLM_MODEL", ""),
+            llm_provider=e("RAGSPINE_LLM_PROVIDER", ""),
             anthropic_base_url=e("RAGSPINE_ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
             ollama_url=e("RAGSPINE_OLLAMA_URL", "http://127.0.0.1:11434"),
             # ponytail: e5-large (fastembed-supported, 1024-dim, multilingual) — downloaded on first real use via setup warmup (Task 36), not here.

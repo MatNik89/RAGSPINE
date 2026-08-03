@@ -41,6 +41,23 @@ def test_invalid_provider_rejected(spine):
         model_settings.save(spine, "nonsense")
 
 
+def test_remote_base_url_must_be_https_public(spine):
+    import pytest
+    with pytest.raises(ValueError):  # interni host — SSRF
+        model_settings.save(spine, "openai", base_url="http://192.168.1.5:8080")
+    with pytest.raises(ValueError):  # nije https
+        model_settings.save(spine, "anthropic", base_url="http://api.anthropic.com")
+
+
+def test_endpoint_change_invalidates_stored_key(spine):
+    # spremi ključ na jedan endpoint, pa promijeni endpoint bez novog ključa →
+    # stari ključ se NE smije zadržati (ne šalji ga na novi host)
+    model_settings.save(spine, "openai", base_url="https://api.openai.com", api_key="sk-secret")
+    assert model_settings._raw(spine)["api_key"] == "sk-secret"
+    model_settings.save(spine, "ollama", base_url="http://127.0.0.1:11434")  # promjena providera
+    assert model_settings._raw(spine)["api_key"] == ""
+
+
 def test_apply_anthropic_overrides_cfg(spine, cfg):
     model_settings.save(spine, "anthropic", model="claude-x", api_key="key")
     applied = model_settings.apply(spine, cfg)

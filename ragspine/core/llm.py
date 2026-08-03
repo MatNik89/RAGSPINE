@@ -73,6 +73,15 @@ class LLMClient:
     def _resolve(self):
         """Returns (provider, base_url, key, is_oauth)."""
         cfg = self.cfg
+        # Eksplicitni odabir (Postavke → Model) ima prednost pred URL-heuristikom:
+        # custom proxy bez "anthropic" u imenu inače bi krivo išao OpenAI formatom.
+        prov = getattr(cfg, "llm_provider", "")
+        if prov == "ollama":
+            return "ollama", cfg.ollama_url, None, False
+        if prov in ("anthropic", "openai") and cfg.llm_api_key:
+            base = cfg.llm_base_url or (
+                cfg.anthropic_base_url if prov == "anthropic" else "https://api.openai.com")
+            return prov, base, cfg.llm_api_key, False
         if cfg.llm_base_url and cfg.llm_api_key:
             return detect_provider(cfg.llm_base_url), cfg.llm_base_url, cfg.llm_api_key, False
         if _ollama_alive(cfg):
