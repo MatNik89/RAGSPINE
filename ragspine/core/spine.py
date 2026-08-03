@@ -74,6 +74,9 @@ CREATE TABLE IF NOT EXISTS team_members(team_id INTEGER, user_id INTEGER,
   PRIMARY KEY(team_id, user_id));
 CREATE TABLE IF NOT EXISTS client_visibility(user_id INTEGER, client_id INTEGER,
   PRIMARY KEY(user_id, client_id));
+CREATE TABLE IF NOT EXISTS folder_scan(folder_id INTEGER PRIMARY KEY,
+  at TEXT DEFAULT (datetime('now')), n_subdirs INTEGER, n_docs INTEGER, n_pdf INTEGER,
+  n_pdf_no_text INTEGER, summary_json TEXT);
 CREATE TABLE IF NOT EXISTS asset_acl(id INTEGER PRIMARY KEY, asset_type TEXT,
   asset_id INTEGER, subject_type TEXT, subject_id TEXT, permission TEXT,
   UNIQUE(asset_type, asset_id, subject_type, subject_id, permission));
