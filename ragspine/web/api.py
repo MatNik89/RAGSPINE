@@ -454,6 +454,11 @@ def create_app(spine, cfg) -> FastAPI:
     def folders_list(user: str = Depends(require_user_web)):
         return folders_mod.list_folders(spine)
 
+    @app.post("/folders/sync")
+    def folders_sync_now(user: str = Depends(require_user_web)):
+        from ragspine.business import folder_sync
+        return folder_sync.sync_all(spine, cfg)
+
     @app.post("/folders")
     def folders_register(body: FolderBody, user: str = Depends(require_user_web)):
         try:

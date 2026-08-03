@@ -49,7 +49,7 @@ async function loadRegistered(){
   var rows = await res.json();
   var body = $('reg-body'); body.textContent='';
   if(!rows.length){ var tr=document.createElement('tr'); var td=document.createElement('td');
-    td.colSpan=4; td.className='meta'; td.textContent='Nijedna mapa još nije dodana.';
+    td.colSpan=5; td.className='meta'; td.textContent='Nijedna mapa još nije dodana.';
     tr.appendChild(td); body.appendChild(tr); return; }
   rows.forEach(function(r){
     var tr=document.createElement('tr');
@@ -57,6 +57,8 @@ async function loadRegistered(){
     tdP.style.fontSize='.8rem'; tdP.textContent=r.path; tr.appendChild(tdP);
     var tdR=document.createElement('td'); var chip=document.createElement('span');
     chip.className='chip'; chip.textContent=r.role; tdR.appendChild(chip); tr.appendChild(tdR);
+    var tdS=document.createElement('td'); tdS.className='meta'; tdS.style.fontSize='.75rem';
+    tdS.textContent=r.last_synced ? r.last_synced.slice(0,16) : '—'; tr.appendChild(tdS);
     var tdE=document.createElement('td');
     tdE.appendChild(mkBtn(r.enabled ? 'DA' : 'NE', 'btn btn-ghost', function(){
       fetch('/folders/'+r.id, {method:'POST', credentials:'same-origin',
@@ -77,6 +79,19 @@ $('f-add').addEventListener('click', async function(){
     body: JSON.stringify({path: curPath, role: $('f-role').value, label: $('f-label').value})});
   if(!res.ok){ var e=await res.json().catch(function(){return{};}); showErr('Greška: '+(e.detail||res.status)); return; }
   clearErr(); loadRegistered();
+});
+
+$('sync-now').addEventListener('click', async function(){
+  var msg=$('sync-msg'); msg.textContent='Sinkroniziram…'; this.disabled=true;
+  try{
+    var res=await fetch('/folders/sync', {method:'POST', credentials:'same-origin'});
+    if(!res.ok){ msg.textContent='Greška: '+res.status; return; }
+    var d=await res.json();
+    msg.textContent='Gotovo: '+d.ingested+' novih, '+d.superseded+' zamijenjenih, '+d.skipped+' preskočeno'
+      + (d.errors&&d.errors.length ? (' · '+d.errors.length+' grešaka') : '');
+    loadRegistered();
+  }catch(e){ msg.textContent='Greška u komunikaciji.'; }
+  finally{ this.disabled=false; }
 });
 
 loadBrowse(null);
@@ -109,9 +124,13 @@ def mape_page() -> str:
   </div>
   <div class="card">
     <h2>Registrirane mape</h2>
+    <div style="margin-bottom:.6rem;display:flex;gap:.5rem;align-items:center">
+      <button type="button" class="btn" id="sync-now">Sinkroniziraj sad</button>
+      <span id="sync-msg" class="meta"></span>
+    </div>
     <table class="ledger">
-      <thead><tr><th>Putanja</th><th>Uloga</th><th>Uklj.</th><th></th></tr></thead>
-      <tbody id="reg-body"><tr><td colspan="4" class="meta">Učitavanje…</td></tr></tbody>
+      <thead><tr><th>Putanja</th><th>Uloga</th><th>Sinkr.</th><th>Uklj.</th><th></th></tr></thead>
+      <tbody id="reg-body"><tr><td colspan="5" class="meta">Učitavanje…</td></tr></tbody>
     </table>
   </div>
 </div>

@@ -28,6 +28,10 @@ def _fold(s: str) -> str:
 
 
 def detect_authority(title: str, path: str = "", doc_type: str = "") -> tuple[str, float]:
+    # Deterministički put: kad je doc_type već poznati tier (npr. sync propisa
+    # postavi ga iz naziva podmape), koristi ga izravno — bez fuzzy pogađanja.
+    if doc_type and doc_type in AUTHORITY and doc_type != "default":
+        return doc_type, AUTHORITY[doc_type]
     hay = _fold(f"{title} {path} {doc_type} ")
     if "zakon o" in hay or "zakon " in hay:
         tier = "zakon"

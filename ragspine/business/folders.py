@@ -71,7 +71,7 @@ def register(spine, cfg, path: str, role: str, label: str = "", user: str = "?")
 
 def list_folders(spine) -> list[dict]:
     return [dict(r) for r in spine.read().execute(
-        "SELECT id, path, role, label, enabled, added_by, added_at FROM folders "
+        "SELECT id, path, role, label, enabled, added_by, added_at, last_synced FROM folders "
         "ORDER BY role, label COLLATE NOCASE").fetchall()]
 
 
