@@ -49,6 +49,7 @@ from ragspine.rag import pipeline
 from ragspine.rag import versioning
 from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
 from ragspine.web import learn  # noqa: F401 — register learn lane handler
+from ragspine.web.ratelimit import RateLimiter
 from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import (COOKIE_NAME, require_actor, require_actor_web, require_user,
@@ -334,6 +335,8 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.cfg = cfg
     app.state.bridge = Bridge()
     tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
+    limiter = RateLimiter()
+    _LOGIN_PER_MIN, _CHAT_PER_MIN = 10, 30  # ponytail: config knob tek kad zatreba
     app.include_router(static_mod.router)
 
     @app.get("/health")
@@ -361,6 +364,9 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, "neispravan zahtjev")
         if not username or not password:
             raise HTTPException(400, "neispravan zahtjev")
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"login:{ip}:{username}", _LOGIN_PER_MIN):
+            raise HTTPException(429, "previše pokušaja prijave — pričekajte minutu")
         row = spine.read().execute(
             "SELECT id, pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
@@ -517,12 +523,18 @@ def create_app(spine, cfg) -> FastAPI:
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
 
+    def _chat_gate(actor: Actor) -> None:
+        if not limiter.allow(f"chat:{actor.username}", _CHAT_PER_MIN):
+            raise HTTPException(429, "previše upita — pričekajte minutu")
+
     @app.post("/chat")
     def chat(body: ChatBody, actor: Actor = Depends(require_actor)):
+        _chat_gate(actor)
         return _answer(body.q, actor, fresh=body.fresh)
 
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):
+        _chat_gate(actor)
         user_msgs = [m for m in body.messages if m.get("role") == "user"]
         query = user_msgs[-1].get("content", "") if user_msgs else ""
         if not query:
@@ -1129,7 +1141,9 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
-                      action: str | None = None, _auth: str = Depends(require_user_web)):
+                      action: str | None = None,
+                      actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # audit trag otkriva tuđe akcije — nije za svakog člana
         rows = auditlog.search(spine, client=client, user=user, action=action)
         return [dict(r) for r in rows]
 

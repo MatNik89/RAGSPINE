@@ -168,7 +168,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     extra_context = _org_context(spine, actor, query) if actor is not None else ""
     # Faza 3: višeprolazna provjera prije odgovora (retrieve→nacrt→citati→proširi).
     try:
-        best = verify.run(spine, query, hits, llm, prior_turns, extra=extra_context)
+        best = verify.run(spine, query, hits, llm, prior_turns, extra=extra_context,
+                          org_id=org_id)
     except (LLMUnavailable, LLMError):
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
