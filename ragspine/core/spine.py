@@ -42,6 +42,17 @@ CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
   active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
   PRIMARY KEY(client_id, kind));
+CREATE TABLE IF NOT EXISTS orgs(id INTEGER PRIMARY KEY, name TEXT,
+  created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS memberships(id INTEGER PRIMARY KEY, org_id INTEGER,
+  user_id INTEGER, role TEXT DEFAULT 'member', created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(org_id, user_id));
+CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, org_id INTEGER, name TEXT);
+CREATE TABLE IF NOT EXISTS team_members(team_id INTEGER, user_id INTEGER,
+  PRIMARY KEY(team_id, user_id));
+CREATE TABLE IF NOT EXISTS asset_acl(id INTEGER PRIMARY KEY, asset_type TEXT,
+  asset_id INTEGER, subject_type TEXT, subject_id TEXT, permission TEXT,
+  UNIQUE(asset_type, asset_id, subject_type, subject_id, permission));
 CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE,
   role TEXT, label TEXT, enabled INTEGER DEFAULT 1, added_by TEXT,
   added_at TEXT DEFAULT (datetime('now')), last_synced TEXT);
