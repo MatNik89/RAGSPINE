@@ -54,11 +54,18 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
     uid, org_id = payload.get("uid"), payload.get("org_id")
     if uid is None or org_id is None:
         row = spine.read().execute(
-            "SELECT id, role FROM users WHERE username=?", (payload["sub"],)).fetchone()
+            "SELECT id FROM users WHERE username=?", (payload["sub"],)).fetchone()
         if row is None:
             raise HTTPException(401, "nepoznat korisnik")
         uid = row["id"]
-        org_id, _ = tenancy.resolve_login_org(spine, uid, row["role"])
+        # read-only fallback: NE stvara membership (to radi samo login) —
+        # stari token korisnika bez članstva znači ponovnu prijavu, ne upis.
+        m = spine.read().execute(
+            "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+            (uid,)).fetchone()
+        if m is None:
+            raise HTTPException(401, "prijavite se ponovno")
+        org_id = m["org_id"]
     actor = tenancy.actor_for(spine, org_id, uid)
     if actor is None:
         raise HTTPException(403, "niste član organizacije")

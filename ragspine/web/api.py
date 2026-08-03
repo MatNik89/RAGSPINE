@@ -409,6 +409,11 @@ def create_app(spine, cfg) -> FastAPI:
                                  (body.username,)).fetchone()
         if u is None:
             raise HTTPException(404, "nepoznat korisnik — prvo mu kreiraj račun")
+        # add je insert-only: postojećem članu se uloga mijenja ISKLJUČIVO kroz
+        # /org/members/{id}/role (koji nosi owner-only + last-owner guardove) —
+        # inače bi admin upsertom "dodavanja" mogao degradirati ownera.
+        if tenancy.role_of(spine, actor.org_id, u["id"]) is not None:
+            raise HTTPException(409, "već je član — ulogu mijenjaj kroz promjenu uloge")
         tenancy.add_member(spine, actor.org_id, u["id"], body.role, user=actor.username)
         return {"ok": True}
 

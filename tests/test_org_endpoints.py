@@ -42,6 +42,18 @@ def test_member_cannot_manage_members(spine, cfg):
     assert r.status_code == 403
 
 
+def test_add_member_cannot_upsert_demote_owner(spine, cfg):
+    """Codex nalaz: 'dodaj člana' s postojećim članom NE smije biti upsert uloge —
+    admin bi tako degradirao ownera zaobilazeći guardove promjene uloge."""
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana")                         # owner
+    admin = _tok(c, spine, "boris", role="admin")  # org admin
+    r = c.post("/org/members", json={"username": "ana", "role": "member"}, headers=_h(admin))
+    assert r.status_code == 409
+    members = c.get("/org", headers=_h(admin)).json()["members"]
+    assert next(m for m in members if m["username"] == "ana")["role"] == "owner"
+
+
 def test_last_owner_cannot_be_demoted(spine, cfg):
     c = _client(spine, cfg)
     owner = _tok(c, spine, "ana")

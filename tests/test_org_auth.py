@@ -67,6 +67,15 @@ def test_org_requires_auth(spine, cfg):
     assert _client(spine, cfg).get("/org").status_code == 401
 
 
+def test_old_token_without_membership_forces_relogin(spine, cfg):
+    """Fallback je read-only: NE stvara membership na GET zahtjevu."""
+    c = _client(spine, cfg)
+    add_user(spine, "novi", "pw")  # račun postoji, nikad se nije logirao
+    old = jwt_encode({"sub": "novi", "role": "radnik"}, cfg.jwt_secret)
+    assert c.get("/org", headers={"Authorization": f"Bearer {old}"}).status_code == 401
+    assert spine.read().execute("SELECT COUNT(*) AS n FROM memberships").fetchone()["n"] == 0
+
+
 def test_unknown_user_in_old_token_401(spine, cfg):
     c = _client(spine, cfg)
     ghost = jwt_encode({"sub": "duh", "role": "radnik"}, cfg.jwt_secret)
