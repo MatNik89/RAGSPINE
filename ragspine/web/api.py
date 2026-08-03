@@ -15,9 +15,11 @@ from ragspine.business import cjenik
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
+from ragspine.business import folders as folders_mod
 from ragspine.business import kalendar
 from ragspine.business import karton as karton_mod
 from ragspine.business import knjizenje  # noqa: F401 — register knjizenje lane handler
+from ragspine.business import model_settings
 from ragspine.business import monthly
 from ragspine.business import nldate
 from ragspine.business import notes
@@ -47,9 +49,11 @@ from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
 from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
 from ragspine.web.templates_login import render_login
+from ragspine.web.templates_mape import mape_page
+from ragspine.web.templates_model import model_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
-                                        klijenti_page, obavijesti_page, upute_page)
+                                        klijenti_page, obavijesti_page, postavke_page, upute_page)
 
 
 class ChatBody(BaseModel):
@@ -151,6 +155,27 @@ class ObligationTypeBody(BaseModel):
     active: int = 1
     sort: int = 100
     description: str = ""
+
+
+class ModelSettingsBody(BaseModel):
+    provider: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    embed_model: str = ""
+    ollama_url: str = ""
+
+
+class FolderBody(BaseModel):
+    path: str
+    role: str = "ostalo"
+    label: str = ""
+
+
+class FolderUpdateBody(BaseModel):
+    role: str | None = None
+    label: str | None = None
+    enabled: int | None = None
 
 
 class ClientObligationsBody(BaseModel):
@@ -317,7 +342,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     def _answer(query: str, user: str, fresh: bool = False) -> dict:
         try:
-            return pipeline.answer(spine, cfg, query, user, llm=LLMClient(cfg), fresh=fresh)
+            return pipeline.answer(spine, cfg, query, user,
+                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh)
         except (LLMUnavailable, LLMError):
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
@@ -412,6 +438,86 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return obveze_types_page()
+
+    @app.get("/ui/postavke", response_class=HTMLResponse)
+    def ui_postavke(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return postavke_page()
+
+    @app.get("/ui/mape", response_class=HTMLResponse)
+    def ui_mape(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return mape_page()
+
+    @app.get("/ui/model", response_class=HTMLResponse)
+    def ui_model(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return model_page()
+
+    @app.get("/model")
+    def model_get(user: str = Depends(require_user_web)):
+        return model_settings.get(spine)
+
+    @app.post("/model")
+    def model_save(body: ModelSettingsBody, user: str = Depends(require_user_web)):
+        try:
+            return model_settings.save(spine, body.provider, body.model, body.base_url,
+                                       body.api_key, body.embed_model, body.ollama_url, user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/model/test")
+    def model_test(user: str = Depends(require_user_web)):
+        return model_settings.test_connection(spine, cfg)
+
+    @app.get("/folders/browse")
+    def folders_browse(path: str | None = None, user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.browse(cfg, path)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/folders")
+    def folders_list(user: str = Depends(require_user_web)):
+        return folders_mod.list_folders(spine)
+
+    @app.post("/folders/sync")
+    def folders_sync_now(user: str = Depends(require_user_web)):
+        from ragspine.business import folder_sync
+        return folder_sync.sync_all(spine, cfg)
+
+    @app.post("/folders")
+    def folders_register(body: FolderBody, user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.register(spine, cfg, body.path, body.role, body.label, user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/folders/{folder_id}")
+    def folders_update(folder_id: int, body: FolderUpdateBody,
+                       user: str = Depends(require_user_web)):
+        try:
+            return folders_mod.update(spine, folder_id, role=body.role, label=body.label,
+                                      enabled=body.enabled, user=user)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.delete("/folders/{folder_id}")
+    def folders_delete(folder_id: int, user: str = Depends(require_user_web)):
+        try:
+            folders_mod.remove(spine, folder_id, user)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"id": folder_id, "removed": True}
 
     @app.get("/ui/dokumenti", response_class=HTMLResponse)
     def ui_dokumenti(request: Request):
@@ -789,7 +895,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/translate")
     def translate_text(body: TranslateBody, user: str = Depends(require_user_web)):
         try:
-            text = translate_mod.translate(LLMClient(cfg), body.text, body.target)
+            text = translate_mod.translate(LLMClient(model_settings.apply(spine, cfg)), body.text, body.target)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except (LLMUnavailable, LLMError) as e:

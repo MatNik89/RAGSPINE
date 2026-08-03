@@ -168,10 +168,11 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
     return doc_id
 
 
-def ingest_file(spine, path: str, client_id=None):
+def ingest_file(spine, path: str, client_id=None, doc_type: str | None = None):
     fsha = _file_sha(path)
     text = extract_text(path)
-    doc_id = ingest_text(spine, text, os.path.basename(path), client_id=client_id, path=path)
+    doc_id = ingest_text(spine, text, os.path.basename(path), doc_type=doc_type,
+                         client_id=client_id, path=path)
     if doc_id is not None:
         with spine.write() as c:
             c.execute("UPDATE documents SET file_sha=? WHERE id=?", (fsha, doc_id))

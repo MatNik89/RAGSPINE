@@ -34,14 +34,18 @@ def search(spine, query: str, k: int = 8, freshness: bool = True) -> list[Hit]:
         return []
 
     conn = spine.read()
+    # Over-fetch kandidata (200): status/freshness filtar dolazi tek nakon
+    # RRF-a, pa superseded/stale chunkovi ne smiju istisnuti aktivne iz uskog
+    # skupa kandidata (inače aktualna verzija propisa postane nevidljiva).
+    _CAND = 200
     fts_rows = conn.execute(
-        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT 30",
-        (fts_q,),
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?",
+        (fts_q, _CAND),
     ).fetchall()
     rank_lists = [[r["rowid"] for r in fts_rows]]
 
     if embed.available():
-        vec_ids = [cid for cid, _ in embed.query_vec(spine, query, 30)]
+        vec_ids = [cid for cid, _ in embed.query_vec(spine, query, _CAND)]
         if vec_ids:
             rank_lists.append(vec_ids)
 

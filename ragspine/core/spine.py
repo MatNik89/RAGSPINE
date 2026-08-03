@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
   active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
   PRIMARY KEY(client_id, kind));
+CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE,
+  role TEXT, label TEXT, enabled INTEGER DEFAULT 1, added_by TEXT,
+  added_at TEXT DEFAULT (datetime('now')), last_synced TEXT);
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, client_id INTEGER, author TEXT,
   body TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action TEXT,
@@ -139,6 +142,7 @@ class Spine:
                 "access_count": "INTEGER DEFAULT 0",
             })
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
+            _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
 
     def _conn(self) -> sqlite3.Connection:

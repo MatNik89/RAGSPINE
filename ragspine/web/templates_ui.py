@@ -246,6 +246,7 @@ _NAV = [
     ("rokovi", "/ui/rokovi", "Rokovi"),
     ("obavijesti", "/ui/obavijesti", "Obavijesti"),
     ("dokumenti", "/ui/dokumenti", "Dokumenti"),
+    ("postavke", "/ui/postavke", "Postavke"),
 ]
 
 # Unseen-notifications badge next to the "Obavijesti" nav link. Best-effort:
@@ -590,6 +591,23 @@ q.addEventListener('keydown', function (e) {
   if (e.key === 'Enter') { e.preventDefault(); send(); }
 });
 """
+
+
+def postavke_page() -> str:
+    cards = [
+        ("Model (LLM)", "/ui/model", "Odaberi preko čega RAGSPINE radi (Claude / ChatGPT / lokalni). Mozak vs gorivo."),
+        ("Mrežne mape", "/ui/mape", "Poveži NAS / Windows mape i dodijeli im uloge (propisi, klijenti…)."),
+        ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
+    ]
+    tiles = "".join(
+        f'<a class="card" href="{html.escape(href)}"><h2>{html.escape(t)}</h2>'
+        f'<p>{html.escape(d)}</p></a>'
+        for t, href, d in cards
+    )
+    body = f"""<h1>Postavke</h1>
+<p class="meta">Konfiguracija ureda — odvojeno od svakodnevnog rada.</p>
+<div class="grid">{tiles}</div>"""
+    return page_shell("Postavke", body, active="postavke")
 
 
 def chat_page() -> str:

@@ -3,7 +3,7 @@ signature fn(spine, cfg) -> None per ops/scheduler.py's Job contract."""
 import logging
 from datetime import date
 
-from ragspine.business import expiry, kalendar, obveze, rokovi
+from ragspine.business import expiry, folder_sync, kalendar, obveze, rokovi
 from ragspine.core import memory
 from ragspine.docs import imap_fetch
 from ragspine.ops import digest, health, reminders_dump
@@ -68,6 +68,12 @@ def rokovi_job(spine, cfg) -> None:
     logger.info("rokovi_job: %d new deadline dates materialised", added)
 
 
+def folders_sync_job(spine, cfg) -> None:
+    r = folder_sync.sync_all(spine, cfg)
+    logger.info("folders_sync_job: %(folders)d folders, %(ingested)d ingested, "
+                "%(superseded)d superseded, %(skipped)d skipped", r)
+
+
 def stale_job(spine, cfg) -> None:
     count = watchlist.mark_stale(spine)
     logger.info("stale_job: %d documents marked stale", count)
@@ -94,6 +100,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="rokovi", fn=rokovi_job, interval_s=0, daily=True, at_hour=5))
+    sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))
     sched.register(
