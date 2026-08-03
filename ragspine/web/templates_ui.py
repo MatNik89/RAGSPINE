@@ -247,6 +247,7 @@ _NAV = [
     ("home", "/", "Nadzorna ploča"),
     ("chat", "/ui/chat", "Chat"),
     ("klijenti", "/ui/klijenti", "Klijenti"),
+    ("klijenti-uvoz", "/ui/klijenti-uvoz", "Uvoz klijenata"),
     ("upute", "/ui/upute", "Upute"),
     ("obveze", "/obveze", "Obveze"),
     ("rokovi", "/ui/rokovi", "Rokovi"),

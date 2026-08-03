@@ -98,6 +98,11 @@ class FolderNoteBody(BaseModel):
     body: str
 
 
+class DiscoverCommitBody(BaseModel):
+    folder_id: int
+    items: list[dict]
+
+
 class SkillBody(BaseModel):
     name: str
     description: str = ""
@@ -632,6 +637,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return klijenti_page()
 
+    @app.get("/ui/klijenti-uvoz", response_class=HTMLResponse)
+    def ui_klijenti_uvoz(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_uvoz import uvoz_page
+        return uvoz_page()
+
     @app.get("/ui/klijent/{client_id}", response_class=HTMLResponse)
     def ui_klijent(request: Request, client_id: int):
         try:
@@ -1042,6 +1056,22 @@ def create_app(spine, cfg) -> FastAPI:
         if vis is not None:
             client_visibility.grant(spine, actor.user_id, result["id"], actor.username)
         return {"id": result["id"], "nas_folder": result["nas_folder"]}
+
+    @app.get("/clients/discover")
+    def clients_discover(folder_id: int, user: str = Depends(require_user_web)):
+        from ragspine.business import client_discovery
+        try:
+            return client_discovery.discover(spine, cfg, folder_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.post("/clients/discover/commit")
+    def clients_discover_commit(body: DiscoverCommitBody, user: str = Depends(require_user_web)):
+        from ragspine.business import client_discovery
+        try:
+            return client_discovery.commit(spine, cfg, body.folder_id, body.items)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
 
     @app.get("/clients")
     def clients_list(actor: Actor = Depends(require_actor_web)):
