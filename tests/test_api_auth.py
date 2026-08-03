@@ -1,9 +1,17 @@
 from fastapi.testclient import TestClient
 from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from ragspine.web.deps import COOKIE_NAME, add_user
 
 def _client(spine, cfg):
     return TestClient(create_app(spine, cfg))
+
+def _auth_cookie(client):
+    """Parsani cookie iz jar-a (ima .secure flag) — robusno preko httpx/starlette
+    verzija; novije verzije ne izlažu 'set-cookie' kroz r.headers.get()."""
+    for ck in client.cookies.jar:
+        if ck.name == COOKIE_NAME:
+            return ck
+    return None
 
 def test_health_no_auth(spine, cfg):
     r = _client(spine, cfg).get("/health")
@@ -32,20 +40,19 @@ def test_unknown_user_login_401(spine, cfg):
 
 def test_login_cookie_not_secure_by_default(spine, cfg):
     add_user(spine, "ana", "tajna")
-    r = _client(spine, cfg).post("/auth/login", data={"username": "ana", "password": "tajna"},
-                                  follow_redirects=False)
-    assert "Secure" not in r.headers.get("set-cookie", "")
+    c = _client(spine, cfg)
+    c.post("/auth/login", data={"username": "ana", "password": "tajna"}, follow_redirects=False)
+    ck = _auth_cookie(c)
+    assert ck is not None and not ck.secure
 
 def test_login_cookie_secure_when_https_only(spine, cfg):
     add_user(spine, "ana", "tajna")
     cfg.https_only = True
-    # https base_url: novija starlette/httpx (1.3+) strippa Secure cookie iz
-    # odgovora kad je konekcija http:// (Secure preko http-a je nevaljan) —
-    # test mora simulirati https kontekst da cookie uopće bude vidljiv
+    # https base_url: Secure cookie httpx prihvaća u jar samo preko https konteksta
     c = TestClient(create_app(spine, cfg), base_url="https://testserver")
-    r = c.post("/auth/login", data={"username": "ana", "password": "tajna"},
-               follow_redirects=False)
-    assert "Secure" in r.headers.get("set-cookie", "")
+    c.post("/auth/login", data={"username": "ana", "password": "tajna"}, follow_redirects=False)
+    ck = _auth_cookie(c)
+    assert ck is not None and ck.secure
 
 def test_malformed_login_body_400(spine, cfg):
     c = _client(spine, cfg)
