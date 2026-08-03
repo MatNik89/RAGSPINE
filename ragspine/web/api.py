@@ -93,6 +93,11 @@ class WorkerVisibilityBody(BaseModel):
     client_ids: list[int] = []
 
 
+class FolderNoteBody(BaseModel):
+    folder_id: int | None = None
+    body: str
+
+
 class SkillBody(BaseModel):
     name: str
     description: str = ""
@@ -793,6 +798,15 @@ def create_app(spine, cfg) -> FastAPI:
     def folder_scan_get(folder_id: int, user: str = Depends(require_user_web)):
         from ragspine.business import folder_scan as fs
         return fs.latest(spine, folder_id) or {}
+
+    @app.post("/notes/folder")
+    def folder_note(body: FolderNoteBody, user: str = Depends(require_user_web)):
+        key = f"note:folder:{body.folder_id}" if body.folder_id is not None else "note:global"
+        with spine.write() as c:
+            c.execute("INSERT INTO memory(user,key,value) VALUES(?,?,?) "
+                      "ON CONFLICT(user,key) DO UPDATE SET value=excluded.value",
+                      (user, key, body.body))
+        return {"ok": True, "key": key}
 
     @app.get("/ui/dokumenti", response_class=HTMLResponse)
     def ui_dokumenti(request: Request):
