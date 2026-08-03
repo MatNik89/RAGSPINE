@@ -187,7 +187,18 @@ def home_data(spine, cap: int = 8) -> dict:
     ).fetchall()
     notifications = [dict(r) for r in notif_rows]
 
+    folders_rows = spine.read().execute(
+        "SELECT f.id, f.label, f.role, f.path, s.n_subdirs, s.n_docs, s.n_pdf_no_text "
+        "FROM folders f LEFT JOIN folder_scan s ON s.folder_id=f.id "
+        "WHERE f.enabled=1 ORDER BY f.role, f.label COLLATE NOCASE").fetchall()
+    orientation = {"folders": [
+        {"id": r["id"], "label": r["label"] or r["path"], "role": r["role"],
+         "scan": {"n_subdirs": r["n_subdirs"], "n_docs": r["n_docs"],
+                  "n_pdf_no_text": r["n_pdf_no_text"]}}
+        for r in folders_rows]}
+
     return {
+        "orientation": orientation,
         "stats": st,
         "calendar": calendar,
         "deadlines": deadlines,

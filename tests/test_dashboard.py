@@ -135,3 +135,23 @@ def test_pipeline_monthly_intent(spine, cfg, monkeypatch):
     assert r["lane"] == "monthly"
     assert r["confidence"] == 1.0
     assert isinstance(r["answer"], str) and r["answer"]
+
+
+def test_home_data_has_orientation(spine, tmp_path):
+    import os
+    from ragspine.business import dashboard, folders, folder_scan
+    from ragspine.config import Config
+    old = dict(os.environ)
+    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "data"),
+                       "RAGSPINE_MOUNT_ROOTS": str(tmp_path / "share")})
+    try:
+        cfg = Config.from_env()
+    finally:
+        os.environ.clear(); os.environ.update(old)
+    kl = tmp_path / "share" / "KLIJENTI"; (kl / "A").mkdir(parents=True)
+    fid = folders.register(spine, cfg, str(kl), "klijenti")["id"]
+    folder_scan.scan(spine, cfg, fid)
+    data = dashboard.home_data(spine)
+    assert "orientation" in data
+    assert data["orientation"]["folders"][0]["role"] == "klijenti"
+    assert data["orientation"]["folders"][0]["scan"]["n_subdirs"] == 1

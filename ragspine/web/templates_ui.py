@@ -439,11 +439,40 @@ function renderNotifications(rows) {
   });
 }
 
+function renderOrientation(orientation) {
+  var box = $('orientation-list'); if (!box) return; box.textContent = '';
+  var folders = (orientation && orientation.folders) || [];
+  if (!folders.length) { emptyMsg(box, 'Spoji mapu u Postavke → Mrežne mape.'); return; }
+  folders.forEach(function (f) {
+    var row = document.createElement('div'); row.className = 'nrow';
+    var chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = f.role;
+    var txt = document.createElement('span'); txt.className = 'ntext';
+    var s = f.scan || {};
+    txt.textContent = f.label + (s.n_subdirs != null
+      ? ' — ' + s.n_subdirs + ' podmapa, ' + (s.n_docs || 0) + ' dok., ' + (s.n_pdf_no_text || 0) + ' bez OCR'
+      : ' — nije još skenirano');
+    row.appendChild(chip); row.appendChild(txt);
+    var scanBtn = document.createElement('button'); scanBtn.className = 'btn btn-ghost';
+    scanBtn.textContent = 'Skeniraj sad';
+    scanBtn.addEventListener('click', function () {
+      fetch('/folders/' + f.id + '/scan', {method:'POST', credentials:'same-origin'})
+        .then(function(){ loadDashboard(); });
+    });
+    row.appendChild(scanBtn);
+    if (f.role === 'klijenti') {
+      var a = document.createElement('a'); a.href = '/ui/klijenti-uvoz'; a.className = 'btn';
+      a.textContent = 'Uvezi klijente'; row.appendChild(a);
+    }
+    box.appendChild(row);
+  });
+}
+
 async function loadDashboard() {
   try {
     const res = await fetch('/dashboard.json', { credentials: 'same-origin' });
     if (!res.ok) throw new Error('status ' + res.status);
     const data = await res.json();
+    renderOrientation(data.orientation);
     const cal = data.calendar || { year: 2026, month: 1, today: 1, events: [] };
 
     const dt = new Date(cal.year, cal.month - 1, cal.today);
@@ -482,6 +511,10 @@ def dashboard_page() -> str:
   <div class="sub" id="dash-sub">Učitavanje…</div>
 </div>
 <div id="dashboard-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
+<div class="panel" style="margin-bottom:1rem">
+  <div class="panel-head"><span class="panel-title">Orijentacija — spojene mape</span></div>
+  <div id="orientation-list"><p class="meta">Učitavanje…</p></div>
+</div>
 <div class="dash-wrap">
   <div class="panel">
     <div class="cal-head">
