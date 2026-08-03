@@ -118,27 +118,40 @@ def _norm_sha(text: str) -> str:
     return hashlib.sha256(re.sub(r"\s+", " ", text.strip()).encode("utf-8")).hexdigest()
 
 
-_PAGENO_RE = re.compile(r"^\s*(?:str(?:anica)?\.?|page)?\s*\d{1,4}\s*(?:/|od|of)?\s*\d{0,4}\s*$",
+# Codex nalaz: prefiks je OBAVEZAN — gola brojka ("2024", "1000") ili "12/2024"
+# je legitiman sadržaj (godina, iznos, obračunski period), ne paginacija.
+_PAGENO_RE = re.compile(r"^\s*(?:str(?:anica)?\.?|page)\s*\d{1,4}\s*(?:/|od|of)?\s*\d{0,4}\s*$",
                         re.IGNORECASE)
+_HAS_LETTER_RE = re.compile(r"[^\W\d_]")
+
+
+def _boiler_key(line: str) -> str | None:
+    """Ključ za repeat-collapse SAMO za linije koje liče na header/footer:
+    15-80 znakova I sadrže slova. Kratke oznake ('Članak') i čisto numeričke
+    tablične linije ('0,00 0,00') se NE diraju — Codex nalaz: kolaps im mijenja
+    značenje dokumenta. Bolje propustiti šum nego izgubiti sadržaj."""
+    key = " ".join(line.split()).lower()
+    if 15 <= len(key) < 80 and _HAS_LETTER_RE.search(key):
+        return key
+    return None
 
 
 def clean_noise(text: str) -> str:
-    """Čišćenje šuma prije indeksa (TIER 2): paginacijske linije van; kratka
-    linija koja se ponavlja ≥3× (header/footer svake stranice PDF-a) ostaje
-    samo prvi put. Sadržajne linije se ne diraju — bolje propustiti šum nego
-    izgubiti sadržaj."""
+    """Čišćenje šuma prije indeksa (TIER 2): eksplicitne paginacijske linije
+    ('Stranica 2/3') van; header/footer linija koja se ponavlja ≥3× ostaje
+    samo prvi put."""
     lines = text.splitlines()
     freq: dict[str, int] = {}
     for ln in lines:
-        key = " ".join(ln.split()).lower()
-        if key and len(key) < 80:
+        key = _boiler_key(ln)
+        if key:
             freq[key] = freq.get(key, 0) + 1
     out, seen_boiler = [], set()
     for ln in lines:
-        key = " ".join(ln.split()).lower()
-        if key and _PAGENO_RE.fullmatch(ln):
+        if _PAGENO_RE.fullmatch(ln):
             continue
-        if key and len(key) < 80 and freq.get(key, 0) >= 3:
+        key = _boiler_key(ln)
+        if key and freq.get(key, 0) >= 3:
             if key in seen_boiler:
                 continue
             seen_boiler.add(key)

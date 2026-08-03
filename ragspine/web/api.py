@@ -1144,7 +1144,10 @@ def create_app(spine, cfg) -> FastAPI:
                       action: str | None = None,
                       actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)  # audit trag otkriva tuđe akcije — nije za svakog člana
-        rows = auditlog.search(spine, client=client, user=user, action=action)
+        # Codex nalaz: bez org-filtra admin org-a A vidi audit org-a B
+        members = [m["username"] for m in tenancy.list_members(spine, actor.org_id)]
+        rows = auditlog.search(spine, client=client, user=user, action=action,
+                               usernames=members)
         return [dict(r) for r in rows]
 
     @app.get("/doctor")

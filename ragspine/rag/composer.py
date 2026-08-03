@@ -1,5 +1,4 @@
 """Build the LLM prompt: system instruction + numbered, tagged source block."""
-from ragspine.rag import budget
 from ragspine.rag.citations import IDK
 
 _TYPE_TAGS = {"zakon": "ZAKON", "racun": "ERAČUN", "sop": "SOP", "kontni": "KONTNI"}
@@ -21,9 +20,9 @@ def _tag(doc_type: str) -> str:
 
 
 def compose(query: str, hits: list, extra: str = "") -> tuple[str, list[dict]]:
-    # Kompakcija čuva redoslijed prefiksa, pa [n] u odgovoru i dalje pokazuje
-    # na isti hit u pozivateljevoj listi (model ne može citirati ispušteni rep).
-    hits = budget.compact(hits)
+    # Kompakcija se NE radi ovdje: pozivatelj (verify.run) mora prompt,
+    # citation-verifikaciju i source-mapiranje graditi nad ISTIM skupom hitova —
+    # Codex nalaz: interna kompakcija je puštala citate na nevidljive izvore.
     lines = [
         f"[{i}] ({_tag(h.doc_type)}) {h.title}: {h.text}"
         for i, h in enumerate(hits, start=1)

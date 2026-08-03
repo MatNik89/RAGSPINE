@@ -15,6 +15,8 @@ def test_no_cyrillic_homoglyphs_in_repo():
                            text=True, check=True).stdout.splitlines()
     offenders = []
     for rel in files:
+        if rel == "tests/test_no_cyrillic.py":  # jedina legitimna ćirilica (primjeri + regex)
+            continue
         p = REPO / rel
         if p.suffix.lower() not in _TEXT_EXT or not p.is_file():
             continue

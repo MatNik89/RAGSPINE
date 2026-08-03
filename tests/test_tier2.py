@@ -27,15 +27,29 @@ def test_clean_noise_keeps_normal_text():
     assert ingest.clean_noise(text) == text
 
 
+def test_clean_noise_spares_numbers_labels_and_table_rows():
+    """Codex nalazi #1/#2: gole brojke, periodi, kratke oznake i numeričke
+    tablične linije su SADRŽAJ — ne smiju se brisati ni kolabirati."""
+    text = "\n".join(["Prihodi po godinama", "2024", "1000", "12/2024",
+                      "Članak", "prvi", "Članak", "drugi", "Članak", "treći",
+                      "0,00 0,00", "0,00 0,00", "0,00 0,00"])
+    cleaned = ingest.clean_noise(text)
+    for keep in ("2024", "1000", "12/2024"):
+        assert keep in cleaned
+    assert cleaned.count("Članak") == 3
+    assert cleaned.count("0,00 0,00") == 3
+
+
 # --- dedup-ljestvica ---
 
-def test_ingest_dedups_identical_chunks_within_doc(spine):
-    para = "Ovo je identičan odlomak koji se ponavlja u dokumentu. " * 20
-    text = f"{para}\n\nJedinstveni odlomak o JOPPD obrascu.\n\n{para}"
-    doc_id = ingest.ingest_text(spine, text, "dupli")
+def test_ingest_dedups_identical_chunks_within_doc(spine, monkeypatch):
+    # revert-proof (Codex nalaz #6): forsiraj chunker da vrati duplikate —
+    # bez dedup petlje u ingest_text upisale bi se 3 chunka, s njom 2.
+    monkeypatch.setattr(ingest, "chunk_text", lambda t: ["dupli chunk", "dupli chunk", "unikat"])
+    doc_id = ingest.ingest_text(spine, "svejedno", "dupli")
     chunks = [r["text"] for r in spine.read().execute(
-        "SELECT text FROM chunks WHERE doc_id=?", (doc_id,)).fetchall()]
-    assert len(chunks) == len({ingest._norm_sha(c) for c in chunks})
+        "SELECT text FROM chunks WHERE doc_id=? ORDER BY seq", (doc_id,)).fetchall()]
+    assert chunks == ["dupli chunk", "unikat"]
 
 
 # --- kompakcija ---
@@ -62,7 +76,45 @@ def test_est_tokens_monotone():
     assert budget.est_tokens("") <= budget.est_tokens("riječ") < budget.est_tokens("riječ " * 50)
 
 
+# --- kompakcija × verifikacija (Codex nalaz #3) ---
+
+class _CiteLLM:
+    def __init__(self, text):
+        self._text = text
+
+    def complete(self, messages, system=None):
+        class R:
+            pass
+        r = R(); r.text = self._text
+        return r
+
+
+def test_citation_to_unseen_compacted_source_not_grounded(spine):
+    """Odgovor koji citira izvor ispušten kompakcijom NE smije proći kao
+    utemeljen — prompt, verifikacija i sources rade nad istim skupom."""
+    hits = [_hit(i, "riječ " * 800) for i in range(1, 31)]
+    best = verify.run(spine, "pitanje?", hits, _CiteLLM("Izmišljena tvrdnja [30]."))
+    assert not verify.accepted(best)
+    assert best["confidence"] == 0
+    assert len(best["hits"]) < 30  # verificirano nad kompaktiranim skupom
+
+
 # --- rate-limit ---
+
+def test_ratelimiter_evicts_stale_keys(monkeypatch):
+    """Codex nalaz #4: hladni ključevi moraju ispasti — inače jedinstveni
+    usernameovi rastu memoriju bez granice."""
+    from ragspine.web import ratelimit as rl_mod
+    clock = [0.0]
+    monkeypatch.setattr(rl_mod.time, "monotonic", lambda: clock[0])
+    rl = RateLimiter()
+    rl._MAX_KEYS = 100
+    for i in range(101):
+        rl.allow(f"login:ip:user{i}", 10)
+    clock[0] = 120.0  # svi prozori istekli
+    rl.allow("fresh", 10)  # trigger eviction (preko praga)
+    assert len(rl._events) <= 2  # samo fresh (+eventualno zadnji dirani)
+
 
 def test_ratelimiter_window():
     rl = RateLimiter()
@@ -90,7 +142,17 @@ def test_chat_rate_limited(spine, cfg):
     assert c.post("/chat", json={"q": "bok"}, headers=h).status_code == 429
 
 
-# --- audit admin-gate ---
+# --- audit admin-gate + org-scope ---
+
+def test_audit_org_scoped(spine, cfg):
+    """Codex nalaz #5: admin org-a A ne smije vidjeti audit zapise org-a B."""
+    from ragspine.business import auditlog
+    spine.audit("ana", "wiki_lock", "wiki:1:x")
+    spine.audit("tudja-org-user", "skill_create", "skill:9")
+    rows = auditlog.search(spine, usernames=["ana"])
+    assert [r["user"] for r in rows] == ["ana"]
+    assert auditlog.search(spine, usernames=[]) == []
+
 
 def test_audit_admin_only(spine, cfg):
     c = TestClient(create_app(spine, cfg))

@@ -4,7 +4,7 @@ ponovno — pa tek onda odluči. Ispod praga (80%) ne odgovara nego objasni zaš
 Ograničeno na MAX_PASSES; bez LLM-a se ne poziva (pipeline degradira zasebno)."""
 import re
 
-from ragspine.rag import citations, composer, conversation, retrieval
+from ragspine.rag import budget, citations, composer, conversation, retrieval
 from ragspine.rag.authority import detect_authority
 
 THRESHOLD = 0.80
@@ -36,6 +36,10 @@ def run(spine, query: str, hits, llm, prior_turns=None,
     best = None
     prev_conf = -1.0
     for p in range(1, max_passes + 1):
+        # Kompaktiraj PRIJE composea i verificiraj nad istim (kompaktiranim)
+        # skupom — model ne smije dobiti bod za citat izvora kojeg nije vidio,
+        # ni za činjenicu odrezanu truncationom.
+        hits = budget.compact(hits)
         system, messages = composer.compose(query, hits, extra=extra)
         if prior_turns:
             messages = conversation.as_messages(prior_turns) + messages
