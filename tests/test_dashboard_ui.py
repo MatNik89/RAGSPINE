@@ -276,3 +276,12 @@ def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
     r = c.get("/dashboard.json", headers=_auth(tok))
     body = r.json()
     assert len(body["unsent_obligations"]) <= 8
+
+
+def test_shell_uses_left_sidebar():
+    from ragspine.web.templates_ui import page_shell
+    html = page_shell("Test", "<p>x</p>", active="home")
+    assert 'class="sidebar"' in html
+    assert '<main' in html
+    assert 'RAGSPINE' in html
+    assert 'aria-current' in html or 'class="active"' in html

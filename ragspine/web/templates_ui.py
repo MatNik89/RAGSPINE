@@ -58,19 +58,25 @@ h2{font-size:1.05rem;margin:1.5rem 0 .5rem}
 .container{max-width:1200px;margin:0 auto;padding:1.5rem 1.25rem 3rem}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
-/* nav */
-.nav{display:flex;align-items:center;gap:.25rem;flex-wrap:wrap;padding:.75rem 1.25rem;
-  background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
-.nav .brand{font-weight:700;letter-spacing:.02em;margin-right:1rem;color:var(--text)}
-.nav a{color:var(--muted);text-decoration:none;padding:.4rem .7rem;border-radius:6px;font-size:.9rem;
+/* layout + lijevi sidebar */
+.layout{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+.sidebar{display:flex;flex-direction:column;gap:.35rem;padding:1rem .75rem;
+  background:var(--surface);border-right:1px solid var(--border);position:sticky;top:0;height:100vh;z-index:10}
+.sidebar .brand{font-weight:700;letter-spacing:.02em;color:var(--text);padding:.3rem .6rem .6rem}
+.sidebar nav{display:flex;flex-direction:column;gap:.1rem}
+.sidebar a{color:var(--muted);text-decoration:none;padding:.45rem .6rem;border-radius:6px;font-size:.9rem;
   transition:color .12s,background-color .12s}
-.nav a:hover{color:var(--text);background:var(--surface-2)}
-.nav a.active{color:var(--text);box-shadow:inset 0 -2px 0 var(--accent)}
-.nav .spacer{flex:1}
-.nav .theme-toggle{background:none;border:1px solid var(--border);color:var(--text);border-radius:6px;
-  padding:.35rem .6rem;cursor:pointer;font-size:1rem;line-height:1;margin-right:.5rem}
-.nav .theme-toggle:hover{background:var(--surface-2)}
-.nav a.logout{color:var(--muted)}
+.sidebar a:hover{color:var(--text);background:var(--surface-2)}
+.sidebar a.active{color:var(--text);background:var(--surface-2);font-weight:600;box-shadow:inset 2px 0 0 var(--accent)}
+.sidebar .spacer{flex:1}
+.sidebar .theme-toggle{background:none;border:1px solid var(--border);color:var(--text);border-radius:6px;
+  padding:.35rem .6rem;cursor:pointer;font-size:1rem;line-height:1;align-self:flex-start}
+.sidebar .theme-toggle:hover{background:var(--surface-2)}
+.sidebar a.logout{color:var(--muted)}
+@media(max-width:640px){.layout{grid-template-columns:1fr}
+  .sidebar{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;
+    border-right:0;border-bottom:1px solid var(--border)}
+  .sidebar nav{flex-direction:row;flex-wrap:wrap}.sidebar .spacer{flex:0}}
 
 /* grid + card */
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1rem;margin-top:1rem}
@@ -297,7 +303,7 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
     title_e = html.escape(title)
     links = []
     for key, href, label in _NAV:
-        cls = ' class="active"' if key == active else ""
+        cls = ' class="active" aria-current="page"' if key == active else ""
         badge = (' <span id="nav-unseen" class="chip bad" style="display:none"></span>'
                   if key == "obavijesti" else "")
         links.append(f'<a href="{html.escape(href)}"{cls}>{html.escape(label)}{badge}</a>')
@@ -312,17 +318,19 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 </head>
 <body>
 <script>{_THEME_INIT_JS}</script>
-<nav class="nav" aria-label="Glavna navigacija">
+<div class="layout">
+<aside class="sidebar" aria-label="Glavna navigacija">
 <span class="brand">RAGSPINE</span>
-{nav_links}
+<nav>{nav_links}</nav>
 <span class="spacer"></span>
 <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Promijeni temu"
   onclick="toggleTheme()">&#9790;</button>
 <a href="/logout" class="logout">Odjava</a>
-</nav>
+</aside>
 <main class="container">
 {body_html}
 </main>
+</div>
 <script>{_THEME_TOGGLE_JS}</script>
 <script>{_NAV_BADGE_JS}</script>
 </body>
