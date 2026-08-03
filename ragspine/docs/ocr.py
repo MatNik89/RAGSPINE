@@ -242,8 +242,29 @@ def ocr_pdf(spine, cfg, path: str, transport=None, force: bool = False) -> dict:
     return {"skipped": False, "pages": len(page_texts), "out": path, "engines": engines}
 
 
+def audit_folder(cfg, base: str) -> dict:
+    """Read-only: koliko PDF-ova u mapi treba OCR (nemaju tekstualni sloj)."""
+    base = resolve_scoped_path(cfg, base)
+    n_pdf = n_no = 0
+    sample = []
+    for root, _d, files in os.walk(base):
+        for f in files:
+            if not f.lower().endswith(".pdf"):
+                continue
+            n_pdf += 1
+            fp = os.path.join(root, f)
+            try:
+                if not has_text_layer(fp):
+                    n_no += 1
+                    if len(sample) < 20:
+                        sample.append(fp)
+            except Exception:
+                pass
+    return {"n_pdf": n_pdf, "n_pdf_no_text": n_no, "sample": sample}
+
+
 def bulk_ocr(spine, cfg, folder: str, transport=None) -> dict:
-    result = {"processed": 0, "skipped": 0, "errors": []}
+    result = {"processed": 0, "skipped": 0, "engines": {}, "errors": []}
     for root, _, files in os.walk(folder):
         for fname in files:
             if not fname.lower().endswith(".pdf"):
@@ -255,4 +276,6 @@ def bulk_ocr(spine, cfg, folder: str, transport=None) -> dict:
                 result["errors"].append(f"{fpath}: {e}")
                 continue
             result["skipped" if res["skipped"] else "processed"] += 1
+            for eng, n in (res.get("engines") or {}).items():
+                result["engines"][eng] = result["engines"].get(eng, 0) + n
     return result
