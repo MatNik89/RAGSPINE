@@ -196,35 +196,50 @@ def write_text_layer(path: str, page_texts: list[str], out_path: str | None = No
             if text:
                 _insert_all(page, text, fontname=fontname, fontfile=fontfile)
         out = out_path or f"{os.path.splitext(path)[0]}_ocr.pdf"
-        doc.save(out)
+        if os.path.realpath(out) == os.path.realpath(path):
+            # fitz ne da save preko otvorenog originala — save u temp pa atomično zamijeni
+            tmp = f"{out}.ocrtmp"
+            doc.save(tmp)
+            doc.close()
+            os.replace(tmp, out)
+        else:
+            doc.save(out)
+            doc.close()
         return out
     finally:
-        doc.close()
+        if not doc.is_closed:
+            doc.close()
 
 
 def resolve_scoped_path(cfg, path: str) -> str:
-    """Resolve path and require it to live inside cfg.nas_root (or cfg.data_dir
-    if no NAS root configured) — blocks arbitrary file read/write via a
-    client-supplied path (OCR output is written next to the input, and OCR
-    text is ingested into the SHARED RAG index)."""
-    root = os.path.realpath(cfg.nas_root or cfg.data_dir)
+    """Resolve path and require it to live inside a mount_root (spojene mape),
+    nas_root ili data_dir — blocks arbitrary file read/write via a client-supplied
+    path (OCR piše u isti PDF, a tekst ide u DIJELJENI RAG indeks)."""
+    roots = [os.path.realpath(r) for r in (cfg.mount_roots or [])]
+    roots.append(os.path.realpath(cfg.nas_root or cfg.data_dir))
     resolved = os.path.realpath(path)
-    if os.path.commonpath([resolved, root]) != root:
-        raise ValueError(f"put izvan dozvoljenog direktorija: {path!r}")
-    return resolved
+    for root in roots:
+        if root and os.path.commonpath([resolved, root]) == root:
+            return resolved
+    raise ValueError(f"put izvan dozvoljenih korijena: {path!r}")
 
 
 def ocr_pdf(spine, cfg, path: str, transport=None, force: bool = False) -> dict:
     path = resolve_scoped_path(cfg, path)
     if not force and has_text_layer(path):
-        return {"skipped": True, "out": path, "pages": 0}
-    page_texts = [ocr_page(png, cfg, transport=transport) for png in rasterize(path)]
-    out = write_text_layer(path, page_texts)
+        return {"skipped": True, "out": path, "pages": 0, "engines": {}}
+    pairs = [ocr_page_best(png, cfg, transport=transport) for png in rasterize(path)]
+    page_texts = [t for t, _e in pairs]
+    engines: dict[str, int] = {}
+    for _t, e in pairs:
+        engines[e] = engines.get(e, 0) + 1
+    write_text_layer(path, page_texts, out_path=path)  # pretraživi sloj U ISTI PDF
     full_text = "\n\n".join(t for t in page_texts if t)
     if not full_text.strip():
-        return {"skipped": False, "pages": len(page_texts), "out": out, "ocr_empty": True}
+        return {"skipped": False, "pages": len(page_texts), "out": path,
+                "ocr_empty": True, "engines": engines}
     ingest_text(spine, full_text, title=os.path.basename(path), path=path)
-    return {"skipped": False, "pages": len(page_texts), "out": out}
+    return {"skipped": False, "pages": len(page_texts), "out": path, "engines": engines}
 
 
 def bulk_ocr(spine, cfg, folder: str, transport=None) -> dict:
