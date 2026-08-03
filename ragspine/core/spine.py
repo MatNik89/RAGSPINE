@@ -54,6 +54,13 @@ CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(title, body, page_id UNIN
   tokenize='unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS orgs(id INTEGER PRIMARY KEY, name TEXT,
   created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l0(id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER,
+  session_id TEXT, role TEXT, content TEXT, distilled INTEGER DEFAULT 0,
+  at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l1(id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER,
+  kind TEXT, content TEXT, confidence REAL DEFAULT 0.8, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l3(org_id INTEGER, user_id INTEGER, persona TEXT,
+  updated_at TEXT DEFAULT (datetime('now')), PRIMARY KEY(org_id, user_id));
 CREATE TABLE IF NOT EXISTS skills(id INTEGER PRIMARY KEY, org_id INTEGER, name TEXT,
   description TEXT, trigger TEXT, steps TEXT, validation TEXT, version INTEGER DEFAULT 1,
   status TEXT DEFAULT 'draft', owner_user_id INTEGER, visibility TEXT DEFAULT 'private',
