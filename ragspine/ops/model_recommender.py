@@ -14,7 +14,7 @@ _WARN_NEED_VLM = "treba jaci hardver za lokalni vizualni model (VLM)"
 TIERS = {
     "tiny": {
         "chat": {"warn": _WARN_NEED_8GB},
-        "embed": {"model": "nomic-embed-text", "note": "laganо ugrađivanje, radi i na CPU-u"},
+        "embed": {"model": "nomic-embed-text", "note": "lagano ugrađivanje, radi i na CPU-u"},
         "utility": {"warn": _WARN_NEED_8GB},
         "vlm": {"warn": _WARN_NEED_VLM},
     },

@@ -5,12 +5,20 @@
 from ragspine.rag import clarify
 
 
-def resolve_client(spine, query: str) -> dict | None:
+def resolve_client(spine, query: str, actor=None) -> dict | None:
     name = clarify.mentions_client(spine, query)
     if name is None:
         return None
     row = spine.read().execute("SELECT * FROM clients WHERE name=?", (name,)).fetchone()
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    # radnik s ograničenom vidljivošću ne smije dobiti bilješke/SOP klijenta
+    # kojeg ne smije vidjeti (inače bi curili kroz chat napomenu)
+    if actor is not None:
+        from ragspine.business import client_visibility
+        if not client_visibility.can_see(spine, actor.user_id, row["id"], actor.role):
+            return None
+    return dict(row)
 
 
 def client_sops(spine, client_id: int, topic_query: str = "") -> list[dict]:

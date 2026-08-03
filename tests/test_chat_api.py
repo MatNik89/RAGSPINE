@@ -50,9 +50,9 @@ def test_chat_completions_is_stateless_fresh(spine, cfg, monkeypatch):
     calls = []
     real_answer = pipeline.answer
 
-    def _spy(spine_, cfg_, query, user, llm=None, fresh=False):
+    def _spy(spine_, cfg_, query, user, llm=None, fresh=False, **kw):
         calls.append(fresh)
-        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh)
+        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh, **kw)
 
     monkeypatch.setattr(pipeline, "answer", _spy)
 
@@ -69,9 +69,9 @@ def test_chat_is_stateful_by_default(spine, cfg, monkeypatch):
     calls = []
     real_answer = pipeline.answer
 
-    def _spy(spine_, cfg_, query, user, llm=None, fresh=False):
+    def _spy(spine_, cfg_, query, user, llm=None, fresh=False, **kw):
         calls.append(fresh)
-        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh)
+        return real_answer(spine_, cfg_, query, user, llm=llm, fresh=fresh, **kw)
 
     monkeypatch.setattr(pipeline, "answer", _spy)
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ragspine.business import auditlog
 from ragspine.business import checklist
 from ragspine.business import cjenik
+from ragspine.business import client_visibility
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
@@ -28,6 +29,10 @@ from ragspine.business import onboarding
 from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
 from ragspine.business import sop_images
+from ragspine.business import tenancy
+from ragspine.business.acl import ROLE_RANK, VISIBILITIES, Actor, Asset, can
+from ragspine.knowledge import skills as skills_mod
+from ragspine.knowledge import wiki as wiki_mod
 from ragspine.web import messaging
 from ragspine.web import static as static_mod
 from ragspine.browser import agent as agent_mod
@@ -45,13 +50,17 @@ from ragspine.rag import pipeline
 from ragspine.rag import versioning
 from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
 from ragspine.web import learn  # noqa: F401 — register learn lane handler
+from ragspine.web.ratelimit import RateLimiter
 from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
-from ragspine.web.deps import COOKIE_NAME, require_user, require_user_web
+from ragspine.web.deps import (COOKIE_NAME, require_actor, require_actor_web, require_user,
+                               require_user_web)
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_model import model_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
+from ragspine.web.templates_org import (org_page, radnici_page, skills_page,
+                                        wiki_page as wiki_page_ui)
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, postavke_page, upute_page)
 
@@ -64,6 +73,46 @@ class ChatBody(BaseModel):
 class ChatCompletionsBody(BaseModel):
     messages: list[dict]
     model: str | None = None
+
+
+class OrgMemberBody(BaseModel):
+    username: str
+    role: str = "member"
+
+
+class OrgRoleBody(BaseModel):
+    role: str
+
+
+class WikiLockBody(BaseModel):
+    locked: bool
+
+
+class WorkerVisibilityBody(BaseModel):
+    sees_all: bool
+    client_ids: list[int] = []
+
+
+class SkillBody(BaseModel):
+    name: str
+    description: str = ""
+    trigger: str = ""
+    steps: str = ""
+    validation: str = ""
+    visibility: str = "org"
+
+
+class SkillUpdateBody(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    trigger: str | None = None
+    steps: str | None = None
+    validation: str | None = None
+    visibility: str | None = None
+
+
+class SkillStatusBody(BaseModel):
+    status: str
 
 
 class WatchSourceBody(BaseModel):
@@ -292,6 +341,9 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
+    tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
+    limiter = RateLimiter()
+    _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba
     app.include_router(static_mod.router)
 
     @app.get("/health")
@@ -319,15 +371,27 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, "neispravan zahtjev")
         if not username or not password:
             raise HTTPException(400, "neispravan zahtjev")
+        ip = request.client.host if request.client else "?"
+        # IP-only limiter uz per-user: bez njega napadač churnom junk-usernameova
+        # napuni limiter preko capa i evicta žrtvin blokirani bucket (Codex r3).
+        # 30/min po IP-u ograničava i stopu stvaranja novih ključeva.
+        if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
+            raise HTTPException(429, "previše pokušaja prijave s ove adrese — pričekajte minutu")
+        if not limiter.allow(f"login:{ip}:{username}", _LOGIN_PER_MIN):
+            raise HTTPException(429, "previše pokušaja prijave — pričekajte minutu")
         row = spine.read().execute(
-            "SELECT pw_hash, role FROM users WHERE username=?", (username,)
+            "SELECT id, pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
         if row is None:
             verify_password(password, _DUMMY_PW_HASH)  # constant-time-ish: keep latency ~equal
             raise HTTPException(401, "invalid credentials")
         if not verify_password(password, row["pw_hash"]):
             raise HTTPException(401, "invalid credentials")
-        token = jwt_encode({"sub": username, "role": row["role"]}, cfg.jwt_secret)
+        # uid+org_id su pokazivači za Actor lookup; org-uloga se NE stavlja u
+        # token (čita se svježa iz memberships na svakom zahtjevu).
+        org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
+        token = jwt_encode({"sub": username, "role": row["role"],
+                            "uid": row["id"], "org_id": org_id}, cfg.jwt_secret)
         # ponytail: CSRF for POST /obveze/mark deferred — SameSite=Lax already blocks
         # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
         # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
@@ -340,25 +404,173 @@ def create_app(spine, cfg) -> FastAPI:
     def models(user: str = Depends(require_user)):
         return {"object": "list", "data": [{"id": cfg.llm_model or "ragspine", "object": "model"}]}
 
-    def _answer(query: str, user: str, fresh: bool = False) -> dict:
+    def _require_admin(actor: Actor) -> Actor:
+        if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
+            raise HTTPException(403, "potrebna admin uloga")
+        return actor
+
+    @app.get("/org")
+    def org_info(actor: Actor = Depends(require_actor_web)):
+        org = spine.read().execute("SELECT id, name FROM orgs WHERE id=?",
+                                   (actor.org_id,)).fetchone()
+        return {"org": dict(org) if org else None, "role": actor.role,
+                "members": tenancy.list_members(spine, actor.org_id)}
+
+    @app.post("/org/members")
+    def org_add_member(body: OrgMemberBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if body.role not in ROLE_RANK:
+            raise HTTPException(400, "nepoznata uloga")
+        if body.role == "owner" and actor.role != "owner":
+            raise HTTPException(403, "samo owner dodjeljuje owner ulogu")
+        u = spine.read().execute("SELECT id FROM users WHERE username=?",
+                                 (body.username,)).fetchone()
+        if u is None:
+            raise HTTPException(404, "nepoznat korisnik — prvo mu kreiraj račun")
+        # add je insert-only: postojećem članu se uloga mijenja ISKLJUČIVO kroz
+        # /org/members/{id}/role (koji nosi owner-only + last-owner guardove) —
+        # inače bi admin upsertom "dodavanja" mogao degradirati ownera.
+        if tenancy.role_of(spine, actor.org_id, u["id"]) is not None:
+            raise HTTPException(409, "već je član — ulogu mijenjaj kroz promjenu uloge")
+        tenancy.add_member(spine, actor.org_id, u["id"], body.role, user=actor.username)
+        return {"ok": True}
+
+    @app.post("/org/members/{member_id}/role")
+    def org_set_role(member_id: int, body: OrgRoleBody,
+                     actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if body.role not in ROLE_RANK:
+            raise HTTPException(400, "nepoznata uloga")
+        current = tenancy.role_of(spine, actor.org_id, member_id)
+        if current is None:
+            raise HTTPException(404, "nije član organizacije")
+        # owner ulogu dira samo owner; zadnji owner je nedegradabilan
+        if (current == "owner" or body.role == "owner") and actor.role != "owner":
+            raise HTTPException(403, "samo owner mijenja owner ulogu")
+        if current == "owner" and body.role != "owner":
+            owners = spine.read().execute(
+                "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role='owner'",
+                (actor.org_id,)).fetchone()["n"]
+            if owners <= 1:
+                raise HTTPException(400, "zadnji owner se ne može degradirati")
+        tenancy.add_member(spine, actor.org_id, member_id, body.role, user=actor.username)
+        return {"ok": True}
+
+    @app.get("/workers")
+    def workers_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        out = []
+        for m in tenancy.list_members(spine, actor.org_id):
+            pol = client_visibility.get_policy(spine, m["user_id"])
+            out.append({**m, **pol})
+        return out
+
+    @app.post("/workers/{worker_id}/visibility")
+    def worker_set_visibility(worker_id: int, body: WorkerVisibilityBody,
+                              actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if tenancy.role_of(spine, actor.org_id, worker_id) is None:
+            raise HTTPException(404, "nije član organizacije")
+        client_visibility.set_policy(spine, worker_id, body.sees_all,
+                                     body.client_ids, actor_name=actor.username)
+        return {"ok": True}
+
+    @app.get("/wiki")
+    def wiki_list(actor: Actor = Depends(require_actor_web)):
+        return wiki_mod.list_pages(spine, actor.org_id)
+
+    @app.get("/wiki/search")
+    def wiki_search(q: str, actor: Actor = Depends(require_actor_web)):
+        return wiki_mod.search(spine, actor.org_id, q)
+
+    @app.get("/wiki/{slug}")
+    def wiki_get(slug: str, actor: Actor = Depends(require_actor_web)):
+        page = wiki_mod.get_page(spine, actor.org_id, slug)
+        if page is None:
+            raise HTTPException(404, "nepoznata stranica")
+        return page
+
+    @app.post("/wiki/{slug}/lock")
+    def wiki_lock(slug: str, body: WikiLockBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
         try:
-            return pipeline.answer(spine, cfg, query, user,
-                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh)
+            wiki_mod.set_locked(spine, actor.org_id, slug, body.locked, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"ok": True}
+
+    def _skill_or_404(skill_id: int, actor: Actor, action: str) -> dict:
+        s = skills_mod.get_skill(spine, skill_id)
+        if s is None:
+            raise HTTPException(404, "nepoznat skill")
+        asset = Asset("skill", s["id"], s["org_id"], s["owner_user_id"] or 0,
+                      s["visibility"] or "org", s["team_id"])
+        if not can(spine, actor, asset, action):  # tvrda org-izolacija + ACL
+            raise HTTPException(404 if actor.org_id != s["org_id"] else 403, "nedozvoljeno")
+        return s
+
+    @app.get("/skills")
+    def skills_list(status: str | None = None, actor: Actor = Depends(require_actor_web)):
+        return skills_mod.readable(skills_mod.list_skills(spine, actor.org_id, status), actor)
+
+    @app.post("/skills")
+    def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
+        if body.visibility not in VISIBILITIES:
+            raise HTTPException(400, "nepoznata vidljivost")
+        try:
+            sid = skills_mod.create_skill(
+                spine, actor.org_id, body.name, body.description, body.trigger,
+                body.steps, body.validation, owner_user_id=actor.user_id,
+                visibility=body.visibility, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": sid}
+
+    @app.post("/skills/{skill_id}")
+    def skills_update(skill_id: int, body: SkillUpdateBody,
+                      actor: Actor = Depends(require_actor_web)):
+        if body.visibility is not None and body.visibility not in VISIBILITIES:
+            raise HTTPException(400, "nepoznata vidljivost")
+        _skill_or_404(skill_id, actor, "write")
+        return skills_mod.update_skill(spine, skill_id, user=actor.username,
+                                       **body.model_dump(exclude_none=True))
+
+    @app.post("/skills/{skill_id}/status")
+    def skills_status(skill_id: int, body: SkillStatusBody,
+                      actor: Actor = Depends(require_actor_web)):
+        _skill_or_404(skill_id, actor, "manage")
+        try:
+            skills_mod.set_status(spine, skill_id, body.status, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
+    def _answer(query: str, actor: Actor, fresh: bool = False) -> dict:
+        try:
+            return pipeline.answer(spine, cfg, query, actor.username,
+                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh,
+                                   actor=actor)
         except (LLMUnavailable, LLMError):
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
 
+    def _chat_gate(actor: Actor) -> None:
+        if not limiter.allow(f"chat:{actor.username}", _CHAT_PER_MIN):
+            raise HTTPException(429, "previše upita — pričekajte minutu")
+
     @app.post("/chat")
-    def chat(body: ChatBody, user: str = Depends(require_user)):
-        return _answer(body.q, user, fresh=body.fresh)
+    def chat(body: ChatBody, actor: Actor = Depends(require_actor)):
+        _chat_gate(actor)
+        return _answer(body.q, actor, fresh=body.fresh)
 
     @app.post("/v1/chat/completions")
-    def chat_completions(body: ChatCompletionsBody, user: str = Depends(require_user)):
+    def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):
+        _chat_gate(actor)
         user_msgs = [m for m in body.messages if m.get("role") == "user"]
         query = user_msgs[-1].get("content", "") if user_msgs else ""
         if not query:
             raise HTTPException(400, "no user message content")
-        result = _answer(query, user, fresh=True)  # OpenAI-compat clients own their own history
+        result = _answer(query, actor, fresh=True)  # OpenAI-compat clients own their own history
         return {
             "choices": [{"message": {"role": "assistant", "content": result["answer"]}}],
             "model": cfg.llm_model or "ragspine",
@@ -455,6 +667,38 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return mape_page()
 
+    @app.get("/ui/org", response_class=HTMLResponse)
+    def ui_org(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return org_page()
+
+    @app.get("/ui/radnici", response_class=HTMLResponse)
+    def ui_radnici(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return radnici_page()
+
+    @app.get("/ui/wiki", response_class=HTMLResponse)
+    def ui_wiki(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return wiki_page_ui()
+
+    @app.get("/ui/skills", response_class=HTMLResponse)
+    def ui_skills(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return skills_page()
+
     @app.get("/ui/model", response_class=HTMLResponse)
     def ui_model(request: Request):
         try:
@@ -468,10 +712,15 @@ def create_app(spine, cfg) -> FastAPI:
         return model_settings.get(spine)
 
     @app.post("/model")
-    def model_save(body: ModelSettingsBody, user: str = Depends(require_user_web)):
+    def model_save(body: ModelSettingsBody, actor: Actor = Depends(require_actor_web)):
+        # Codex nalaz #7: mijenjanje LLM endpointa je exfiltracijski vektor
+        # (bilo koji radnik preusmjeri "mozak" na tuđi server i procuri sve
+        # upite) — smije samo admin/vlasnik ureda.
+        _require_admin(actor)
         try:
             return model_settings.save(spine, body.provider, body.model, body.base_url,
-                                       body.api_key, body.embed_model, body.ollama_url, user)
+                                       body.api_key, body.embed_model, body.ollama_url,
+                                       actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -586,7 +835,8 @@ def create_app(spine, cfg) -> FastAPI:
         return {"kind": kind}
 
     @app.get("/clients/{client_id}/obveze-postavke")
-    def client_obligations_get(client_id: int, user: str = Depends(require_user_web)):
+    def client_obligations_get(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         if row is None:
@@ -604,7 +854,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/obveze-postavke")
     def client_obligations_set(client_id: int, body: ClientObligationsBody,
-                                user: str = Depends(require_user_web)):
+                                actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if body.pdv_freq is not None and body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
         if body.regime is not None and body.regime not in obveze.REGIMES:
@@ -623,7 +874,7 @@ def create_app(spine, cfg) -> FastAPI:
             with spine.write() as c:
                 c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", (*vals, client_id))
         if body.manual_kinds is not None:
-            obveze.set_client_types(spine, client_id, body.manual_kinds, user=user)
+            obveze.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         return {"client_id": client_id, "has_employees": row["has_employees"] or 0,
@@ -736,23 +987,33 @@ def create_app(spine, cfg) -> FastAPI:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def _guard_client(actor: Actor, client_id: int) -> None:
+        if not client_visibility.can_see(spine, actor.user_id, client_id, actor.role):
+            raise HTTPException(403, "nemate pristup ovom klijentu")
+
     @app.post("/clients")
-    def client_create(body: ClientCreateBody, user: str = Depends(require_user_web)):
+    def client_create(body: ClientCreateBody, actor: Actor = Depends(require_actor_web)):
         try:
-            result = onboarding.create_client(spine, cfg, body.model_dump(), user)
+            result = onboarding.create_client(spine, cfg, body.model_dump(), actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+        # restringirani kreator inače ne bi vidio vlastito djelo
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is not None:
+            client_visibility.grant(spine, actor.user_id, result["id"], actor.username)
         return {"id": result["id"], "nas_folder": result["nas_folder"]}
 
     @app.get("/clients")
-    def clients_list(user: str = Depends(require_user_web)):
+    def clients_list(actor: Actor = Depends(require_actor_web)):
         rows = spine.read().execute(
             "SELECT id, name, oib, pdv_status, industry, regime, active FROM clients ORDER BY name"
         ).fetchall()
-        return [dict(r) for r in rows]
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        return [dict(r) for r in rows if vis is None or r["id"] in vis]
 
     @app.get("/clients/{client_id}")
-    def client_get(client_id: int, user: str = Depends(require_user_web)):
+    def client_get(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "nepoznat klijent")
@@ -760,7 +1021,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/document")
     def client_document_add(client_id: int, body: ClientDocumentBody,
-                             user: str = Depends(require_user_web)):
+                             actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         try:
@@ -770,19 +1032,22 @@ def create_app(spine, cfg) -> FastAPI:
         if len(data) > 25 * 1024 * 1024:
             raise HTTPException(400, "dokument prevelik (max 25MB)")
         try:
-            return onboarding.add_document(spine, cfg, client_id, body.filename, data, owner=user)
+            return onboarding.add_document(spine, cfg, client_id, body.filename, data,
+                                           owner=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.get("/clients/{client_id}/documents")
-    def client_documents_list(client_id: int, user: str = Depends(require_user_web)):
+    def client_documents_list(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         try:
             return onboarding.list_documents(spine, cfg, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/clients/{client_id}/karton.json")
-    def client_karton(client_id: int, user: str = Depends(require_user_web)):
+    def client_karton(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         try:
             return karton_mod.karton_data(spine, cfg, client_id)
         except ValueError as e:
@@ -790,7 +1055,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/messaging")
     def client_messaging_set(client_id: int, body: ClientMessagingBody,
-                              user: str = Depends(require_user_web)):
+                              actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if body.consent not in (0, 1):
             raise HTTPException(400, "consent mora biti 0 ili 1")
         if body.target and not messaging._target_scheme_ok(body.target):
@@ -824,7 +1090,8 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
 
     @app.post("/clients/{client_id}/pausal")
-    def client_pausal_set(client_id: int, body: PausalBody, user: str = Depends(require_user_web)):
+    def client_pausal_set(client_id: int, body: PausalBody, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         with spine.write() as c:
@@ -936,8 +1203,12 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/audit")
     def audit_search(client: str | None = None, user: str | None = None,
-                      action: str | None = None, _auth: str = Depends(require_user_web)):
-        rows = auditlog.search(spine, client=client, user=user, action=action)
+                      action: str | None = None,
+                      actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # audit trag otkriva tuđe akcije — nije za svakog člana
+        # Codex nalaz: bez org-filtra admin org-a A vidi audit org-a B
+        rows = auditlog.search(spine, client=client, user=user, action=action,
+                               org_id=actor.org_id)
         return [dict(r) for r in rows]
 
     @app.get("/doctor")

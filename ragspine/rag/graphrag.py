@@ -8,8 +8,12 @@ import re
 
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.core.security import oib_valid
-from ragspine.rag import composer
+from ragspine.rag import budget, composer
 from ragspine.rag.retrieval import Hit
+
+def _q_tokens(s: str) -> set:
+    return {w for w in re.findall(r"\w+", (s or "").lower()) if len(w) >= 3}
+
 
 _OIB_RE = re.compile(r"\b\d{11}\b")
 _KONTO_RE = re.compile(r"\bkonto\s+(\d{3,4})\b", re.IGNORECASE)
@@ -139,6 +143,14 @@ def handle(spine, cfg, query: str, llm) -> str:
         Hit(r["chunk_id"], r["doc_id"], r["title"], r["text"], 1.0, r["doc_type"])
         for r in rows
     ]
+    # graf zna vratiti SVE chunkove povezanih dokumenata — bez kompakcije
+    # prompt eksplodira (144k znakova u probi). Ali kompakcija čuva PREFIKS, a
+    # graf-hitovi su poredani po (doc_id, seq) s uniformnim scoreom — Codex r3:
+    # stari/veliki dokumenti pojedu budžet i izbace baš relevantni. Zato prvo
+    # leksičko rangiranje prema upitu (stabilno: overlap desc, pa izvorni red).
+    qt = _q_tokens(query)
+    hits.sort(key=lambda h: -len(qt & _q_tokens(h.text)))
+    hits = budget.compact(hits)
     system, messages = composer.compose(query, hits)
     try:
         result = llm.complete(messages, system=system)

@@ -598,6 +598,10 @@ def postavke_page() -> str:
         ("Model (LLM)", "/ui/model", "Odaberi preko čega RAGSPINE radi (Claude / ChatGPT / lokalni). Mozak vs gorivo."),
         ("Mrežne mape", "/ui/mape", "Poveži NAS / Windows mape i dodijeli im uloge (propisi, klijenti…)."),
         ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
+        ("Organizacija", "/ui/org", "Članovi i uloge (viewer/member/admin/owner)."),
+        ("Radnici", "/ui/radnici", "Ograniči kojem radniku su vidljivi koji klijenti."),
+        ("Wiki", "/ui/wiki", "Interno znanje ureda koje LLM održava; zaključavanje stranica."),
+        ("Skills", "/ui/skills", "Interni postupci s okidačima — chat ih automatski nudi."),
     ]
     tiles = "".join(
         f'<a class="card" href="{html.escape(href)}"><h2>{html.escape(t)}</h2>'

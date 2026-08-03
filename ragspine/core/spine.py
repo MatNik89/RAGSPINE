@@ -42,6 +42,41 @@ CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
   active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
   PRIMARY KEY(client_id, kind));
+CREATE TABLE IF NOT EXISTS wiki_pages(id INTEGER PRIMARY KEY, org_id INTEGER,
+  type TEXT, title TEXT, slug TEXT, body TEXT, locked INTEGER DEFAULT 0,
+  version INTEGER DEFAULT 1, owner_user_id INTEGER, visibility TEXT DEFAULT 'org',
+  team_id INTEGER, updated_at TEXT DEFAULT (datetime('now')), UNIQUE(org_id, slug));
+CREATE TABLE IF NOT EXISTS wiki_links(org_id INTEGER, src_page_id INTEGER, dst_slug TEXT,
+  PRIMARY KEY(src_page_id, dst_slug));
+CREATE TABLE IF NOT EXISTS wiki_sources(id INTEGER PRIMARY KEY, org_id INTEGER,
+  source_key TEXT, sha256 TEXT, UNIQUE(org_id, source_key));
+CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(title, body, page_id UNINDEXED,
+  tokenize='unicode61 remove_diacritics 2');
+CREATE TABLE IF NOT EXISTS orgs(id INTEGER PRIMARY KEY, name TEXT,
+  created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l0(id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER,
+  session_id TEXT, role TEXT, content TEXT, distilled INTEGER DEFAULT 0,
+  at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l1(id INTEGER PRIMARY KEY, org_id INTEGER, user_id INTEGER,
+  kind TEXT, content TEXT, confidence REAL DEFAULT 0.8, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS mem_l3(org_id INTEGER, user_id INTEGER, persona TEXT,
+  updated_at TEXT DEFAULT (datetime('now')), PRIMARY KEY(org_id, user_id));
+CREATE TABLE IF NOT EXISTS skills(id INTEGER PRIMARY KEY, org_id INTEGER, name TEXT,
+  description TEXT, trigger TEXT, steps TEXT, validation TEXT, version INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'draft', owner_user_id INTEGER, visibility TEXT DEFAULT 'private',
+  team_id INTEGER, created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS memberships(id INTEGER PRIMARY KEY, org_id INTEGER,
+  user_id INTEGER, role TEXT DEFAULT 'member', created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(org_id, user_id));
+CREATE TABLE IF NOT EXISTS teams(id INTEGER PRIMARY KEY, org_id INTEGER, name TEXT);
+CREATE TABLE IF NOT EXISTS team_members(team_id INTEGER, user_id INTEGER,
+  PRIMARY KEY(team_id, user_id));
+CREATE TABLE IF NOT EXISTS client_visibility(user_id INTEGER, client_id INTEGER,
+  PRIMARY KEY(user_id, client_id));
+CREATE TABLE IF NOT EXISTS asset_acl(id INTEGER PRIMARY KEY, asset_type TEXT,
+  asset_id INTEGER, subject_type TEXT, subject_id TEXT, permission TEXT,
+  UNIQUE(asset_type, asset_id, subject_type, subject_id, permission));
 CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE,
   role TEXT, label TEXT, enabled INTEGER DEFAULT 1, added_by TEXT,
   added_at TEXT DEFAULT (datetime('now')), last_synced TEXT);
@@ -135,7 +170,12 @@ class Spine:
                 "status": "TEXT DEFAULT 'active'",
                 "supersedes": "INTEGER",
                 "version": "INTEGER DEFAULT 1",
+                "org_id": "INTEGER",
             })
+            _ensure_columns(c, "knowledge", {"org_id": "INTEGER"})
+            # sees_all_clients=1 (zadano) → radnik vidi sve klijente; 0 → samo
+            # one iz client_visibility (per-radnik ograničenje vidljivosti)
+            _ensure_columns(c, "users", {"sees_all_clients": "INTEGER DEFAULT 1"})
             _ensure_columns(c, "memory", {
                 "hot_score": "REAL DEFAULT 1.0",
                 "last_access": "TEXT DEFAULT (datetime('now'))",

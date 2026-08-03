@@ -4,7 +4,7 @@ ponovno — pa tek onda odluči. Ispod praga (80%) ne odgovara nego objasni zaš
 Ograničeno na MAX_PASSES; bez LLM-a se ne poziva (pipeline degradira zasebno)."""
 import re
 
-from ragspine.rag import citations, composer, conversation, retrieval
+from ragspine.rag import budget, citations, composer, conversation, retrieval
 from ragspine.rag.authority import detect_authority
 
 THRESHOLD = 0.80
@@ -29,13 +29,18 @@ def _merge(a, b):
 
 
 def run(spine, query: str, hits, llm, prior_turns=None,
-        threshold: float = THRESHOLD, max_passes: int = MAX_PASSES) -> dict:
+        threshold: float = THRESHOLD, max_passes: int = MAX_PASSES, extra: str = "",
+        org_id=None) -> dict:
     """Vrati najbolji kandidat: {text, report, confidence, cited_hits, hits, passes, threshold}.
     llm.complete može podići LLMError/LLMUnavailable — pušta se pozivatelju."""
     best = None
     prev_conf = -1.0
     for p in range(1, max_passes + 1):
-        system, messages = composer.compose(query, hits)
+        # Kompaktiraj PRIJE composea i verificiraj nad istim (kompaktiranim)
+        # skupom — model ne smije dobiti bod za citat izvora kojeg nije vidio,
+        # ni za činjenicu odrezanu truncationom.
+        hits = budget.compact(hits)
+        system, messages = composer.compose(query, hits, extra=extra)
         if prior_turns:
             messages = conversation.as_messages(prior_turns) + messages
         result = llm.complete(messages, system=system)
@@ -57,7 +62,9 @@ def run(spine, query: str, hits, llm, prior_turns=None,
         if p >= max_passes or not hits:  # zadnji prolaz / prazan retrieval — bez širenja
             break
         prev_conf = conf
-        more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4)
+        # org_id MORA pratiti i ekspanziju — bez njega bi 2.+ prolaz pobjegao
+        # iz tenant filtra i umiješao tuđe dokumente u kontekst
+        more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4, org_id=org_id)
         merged = _merge(hits, more)
         if len(merged) == len(hits):  # ništa novo — nema smisla ponavljati isti nacrt
             break

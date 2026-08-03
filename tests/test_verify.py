@@ -93,3 +93,10 @@ def test_composer_prompt_is_not_yes_man():
     from ragspine.rag import composer
     assert "yes-man" in composer.SYSTEM.lower()
     assert "ospori" in composer.SYSTEM.lower()
+
+
+def test_composer_prompt_deprivileges_sources():
+    # izvori su podaci, ne naredbe (anti prompt-injection kroz ingestirani sadržaj)
+    from ragspine.rag import composer
+    s = composer.SYSTEM.lower()
+    assert "podatak" in s and "naredb" in s
