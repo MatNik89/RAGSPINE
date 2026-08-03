@@ -29,13 +29,13 @@ def _merge(a, b):
 
 
 def run(spine, query: str, hits, llm, prior_turns=None,
-        threshold: float = THRESHOLD, max_passes: int = MAX_PASSES) -> dict:
+        threshold: float = THRESHOLD, max_passes: int = MAX_PASSES, extra: str = "") -> dict:
     """Vrati najbolji kandidat: {text, report, confidence, cited_hits, hits, passes, threshold}.
     llm.complete može podići LLMError/LLMUnavailable — pušta se pozivatelju."""
     best = None
     prev_conf = -1.0
     for p in range(1, max_passes + 1):
-        system, messages = composer.compose(query, hits)
+        system, messages = composer.compose(query, hits, extra=extra)
         if prior_turns:
             messages = conversation.as_messages(prior_turns) + messages
         result = llm.complete(messages, system=system)

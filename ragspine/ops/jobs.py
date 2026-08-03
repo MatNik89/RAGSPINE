@@ -93,6 +93,27 @@ def memory_decay_job(spine, cfg) -> None:
     logger.info("memory_decay_job: %d rows decayed", count)
 
 
+def memory_distill_job(spine, cfg) -> None:
+    """L0 → L1 atomi → L3 persona za svakog korisnika s nedestiliranim
+    replikama. Bez dostupnog LLM-a distill sam tiho preskače."""
+    from ragspine.business import model_settings
+    from ragspine.core.llm import LLMClient
+    from ragspine.knowledge import memory_layers
+    llm = LLMClient(model_settings.apply(spine, cfg))
+    pairs = spine.read().execute(
+        "SELECT DISTINCT org_id, user_id FROM mem_l0 WHERE distilled=0").fetchall()
+    done = 0
+    for p in pairs:
+        try:
+            res = memory_layers.distill(spine, p["org_id"], p["user_id"], llm)
+            if res.get("atoms"):
+                memory_layers.build_persona(spine, p["org_id"], p["user_id"], llm)
+            done += 1
+        except Exception:
+            logger.exception("memory_distill_job: org=%s user=%s", p["org_id"], p["user_id"])
+    logger.info("memory_distill_job: %d/%d korisnika destilirano", done, len(pairs))
+
+
 def register_defaults(sched) -> None:
     sched.register(Job(name="watchlist", fn=watchlist_job, interval_s=3600))
     sched.register(Job(name="imap", fn=imap_job, interval_s=300))
@@ -108,3 +129,4 @@ def register_defaults(sched) -> None:
     )
     sched.register(Job(name="reminders_dump", fn=reminders_dump_job, interval_s=3600))
     sched.register(Job(name="memory_decay", fn=memory_decay_job, interval_s=0, daily=True, at_hour=4))
+    sched.register(Job(name="memory_distill", fn=memory_distill_job, interval_s=0, daily=True, at_hour=3))
