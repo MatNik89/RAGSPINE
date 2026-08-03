@@ -1,8 +1,11 @@
-"""Unlimited-OCR client: rasterize PDF, OCR via VLM server, invisible text layer, bulk skip-if-text."""
+"""OCR: rasterize PDF, OCR via tesseract (lokalno) ili VLM server, invisible text
+layer, bulk skip-if-text."""
 import base64
 import json
 import logging
 import os
+import shutil
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -89,6 +92,52 @@ def ocr_page(png: bytes, cfg, transport=None) -> str:
         return resp["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError, urllib.error.URLError):
         return ""
+
+
+def tesseract_available() -> bool:
+    return shutil.which("tesseract") is not None
+
+
+def ocr_page_tesseract(png: bytes, cfg) -> str:
+    """Lokalni OCR jedne stranice tesseractom (jezik iz cfg.ocr_langs). Nikad ne
+    baca — vrati "" na grešci/nedostupno."""
+    if not tesseract_available():
+        return ""
+    langs = getattr(cfg, "ocr_langs", "hrv+eng") or "hrv+eng"
+    from ragspine.core.subproc import run_isolated
+    tmp = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(png)
+            tmp = f.name
+        rc, out, _err = run_isolated(["tesseract", tmp, "stdout", "-l", langs], timeout=120)
+        return out if rc == 0 else ""
+    except Exception:
+        return ""
+    finally:
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+_MIN_OK_CHARS = 20
+
+
+def ocr_page_best(png: bytes, cfg, transport=None):
+    """Vrati (tekst, motor). tesseract prvo; ako je prekratak i ocr_url je zadan,
+    probaj VLM i uzmi dulji. motor ∈ 'tesseract'|'vlm'|'none'."""
+    t = ocr_page_tesseract(png, cfg)
+    if len(t.strip()) >= _MIN_OK_CHARS:
+        return t, "tesseract"
+    if getattr(cfg, "ocr_url", ""):
+        v = ocr_page(png, cfg, transport=transport)
+        if len(v.strip()) > len(t.strip()):
+            return v, "vlm"
+    if t.strip():
+        return t, "tesseract"
+    return "", "none"
 
 
 def _insert_all(page, text: str, fontsize: int = 6, min_fontsize: int = 3, chunk: int = 4000,
