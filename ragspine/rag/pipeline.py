@@ -5,8 +5,8 @@ from ragspine.business import monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import features, kb
 from ragspine.rag import (
-    authority, cache, citations, clarify, client_context, composer, conversation,
-    retrieval, router, selfrag,
+    authority, cache, citations, clarify, client_context, conversation,
+    retrieval, router, selfrag, verify,
 )
 
 # Later tasks register sql/learn/web/graph/ocr handlers here.
@@ -121,17 +121,16 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
                 _record(spine, user, query, "web", res, 1.0, cache_write=not skip_cache)
                 return _package(res, "web", 1.0, [], False)
 
-    system, messages = composer.compose(query, hits)
-    messages = conversation.as_messages(prior_turns) + messages
-
     if llm is None:
         return _package(_LLM_DOWN, "chat", 0, [], False)
+    # Faza 3: višeprolazna provjera prije odgovora (retrieve→nacrt→citati→proširi).
     try:
-        result = llm.complete(messages, system=system)
+        best = verify.run(spine, query, hits, llm, prior_turns)
     except (LLMUnavailable, LLMError):
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
-    report = citations.verify(result.text, hits)
+    report = best["report"]
+    bhits = best["hits"]  # skup izvora iz prolaza koji je dao najbolji rezultat
 
     # W3: the client-specific napomena is independent of citation verification
     # (it comes from clients/sop_pages/notes, not from `hits`) — compute it
@@ -146,20 +145,26 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
         except Exception:
             napomena_block = ""
 
-    if not report.ok:
+    pct = round(best["confidence"] * 100)
+    if not verify.accepted(best):
+        # ispod praga (80%) — ne nagađa; objasni zašto (anti-yes-man)
         if resolved_client is not None and napomena_block:
-            final_text = f"Ne znam općenito, ali imam napomenu za ovog klijenta:\n\n{napomena_block}"
+            final_text = (f"Nisam dovoljno siguran općenito (točnost {pct}%), ali imam "
+                          f"napomenu za ovog klijenta:\n\n{napomena_block}")
+        elif not verify.grounded(best):
+            final_text = citations.IDK  # nema citiranog izvora → ne znam
         else:
-            final_text = citations.IDK
-        confidence, sources = 0, []
+            final_text = (f"Nisam dovoljno siguran (točnost {pct}%) — {verify.reason(best)}. "
+                          f"Ne želim nagađati; provjerite izvor ili preformulirajte pitanje.")
+        confidence = best["confidence"] if verify.grounded(best) else 0
+        sources = []
     else:
-        final_text = result.text
-        cited_hits = [hits[n - 1] for n in report.cited if 1 <= n <= len(hits)]
-        confidence = citations.blend_authority(report.confidence, cited_hits)
-        sources = [{"n": n, "title": hits[n - 1].title, "doc_id": hits[n - 1].doc_id}
-                   for n in report.cited]
+        final_text = best["text"]
+        confidence = best["confidence"]
+        sources = [{"n": n, "title": bhits[n - 1].title, "doc_id": bhits[n - 1].doc_id}
+                   for n in report.cited if 1 <= n <= len(bhits)]
         try:
-            related = authority.related_documents(spine, hits)
+            related = authority.related_documents(spine, bhits)
             if related:
                 titles = ", ".join(r["title"] for r in related)
                 final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
@@ -167,13 +172,14 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
             pass
         if napomena_block:
             final_text = f"{final_text}\n\n{napomena_block}"
+        final_text = f"{final_text}\n\nTočnost: {pct}% · {verify.explain(best)}"
 
     _record(spine, user, query, "chat", final_text, confidence, cache_write=not skip_cache)
     try:
         features.maybe_file_gap(spine, user, query, final_text, confidence)
     except Exception:
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
-    if report.ok and resolved_client is None:
+    if verify.accepted(best) and resolved_client is None:
         kb.save(spine, query, final_text)
     result = _package(final_text, "chat", confidence, sources, False)
     if resolved_client is not None:
