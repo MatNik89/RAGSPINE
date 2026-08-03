@@ -115,6 +115,15 @@ def _cmd_setup(args) -> int:
 
     cfg = get_config()
     init_spine(cfg.db_path)
+    if getattr(args, "download_models", False):
+        from ragspine.rag import embed
+        print(f"Povlačim embedding model: {cfg.embed_model} … (jednokratno, može potrajati)")
+        res = embed.download_model()
+        if res["ok"]:
+            print(f"✓ Spremno: {res['model']} (dim={res['dim']}). Vektorska pretraga je aktivna.")
+            return 0
+        print(f"✗ Neuspjeh: {res['error']}")
+        return 1
     print(setup.run(cfg))
     return 0
 
@@ -255,7 +264,10 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("serve").set_defaults(func=_cmd_serve)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
-    sub.add_parser("setup").set_defaults(func=_cmd_setup)
+    _setup = sub.add_parser("setup")
+    _setup.add_argument("--download-models", action="store_true",
+                        help="povuci embedding model (aktivira vektorsku pretragu)")
+    _setup.set_defaults(func=_cmd_setup)
     sub.add_parser("models").set_defaults(func=_cmd_models)
     sub.add_parser("daemon").set_defaults(func=_cmd_daemon)
     sub.add_parser("digest").set_defaults(func=_cmd_digest)
