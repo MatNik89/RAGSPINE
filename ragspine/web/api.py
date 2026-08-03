@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ragspine.business import auditlog
 from ragspine.business import checklist
 from ragspine.business import cjenik
+from ragspine.business import client_visibility
 from ragspine.business import dashboard
 from ragspine.business import expiry as expiry_mod
 from ragspine.business import feedback_learn
@@ -58,7 +59,8 @@ from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_model import model_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
-from ragspine.web.templates_org import org_page, skills_page, wiki_page as wiki_page_ui
+from ragspine.web.templates_org import (org_page, radnici_page, skills_page,
+                                        wiki_page as wiki_page_ui)
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, postavke_page, upute_page)
 
@@ -84,6 +86,11 @@ class OrgRoleBody(BaseModel):
 
 class WikiLockBody(BaseModel):
     locked: bool
+
+
+class WorkerVisibilityBody(BaseModel):
+    sees_all: bool
+    client_ids: list[int] = []
 
 
 class SkillBody(BaseModel):
@@ -449,6 +456,25 @@ def create_app(spine, cfg) -> FastAPI:
         tenancy.add_member(spine, actor.org_id, member_id, body.role, user=actor.username)
         return {"ok": True}
 
+    @app.get("/workers")
+    def workers_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        out = []
+        for m in tenancy.list_members(spine, actor.org_id):
+            pol = client_visibility.get_policy(spine, m["user_id"])
+            out.append({**m, **pol})
+        return out
+
+    @app.post("/workers/{worker_id}/visibility")
+    def worker_set_visibility(worker_id: int, body: WorkerVisibilityBody,
+                              actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if tenancy.role_of(spine, actor.org_id, worker_id) is None:
+            raise HTTPException(404, "nije član organizacije")
+        client_visibility.set_policy(spine, worker_id, body.sees_all,
+                                     body.client_ids, actor_name=actor.username)
+        return {"ok": True}
+
     @app.get("/wiki")
     def wiki_list(actor: Actor = Depends(require_actor_web)):
         return wiki_mod.list_pages(spine, actor.org_id)
@@ -649,6 +675,14 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return org_page()
 
+    @app.get("/ui/radnici", response_class=HTMLResponse)
+    def ui_radnici(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return radnici_page()
+
     @app.get("/ui/wiki", response_class=HTMLResponse)
     def ui_wiki(request: Request):
         try:
@@ -678,10 +712,15 @@ def create_app(spine, cfg) -> FastAPI:
         return model_settings.get(spine)
 
     @app.post("/model")
-    def model_save(body: ModelSettingsBody, user: str = Depends(require_user_web)):
+    def model_save(body: ModelSettingsBody, actor: Actor = Depends(require_actor_web)):
+        # Codex nalaz #7: mijenjanje LLM endpointa je exfiltracijski vektor
+        # (bilo koji radnik preusmjeri "mozak" na tuđi server i procuri sve
+        # upite) — smije samo admin/vlasnik ureda.
+        _require_admin(actor)
         try:
             return model_settings.save(spine, body.provider, body.model, body.base_url,
-                                       body.api_key, body.embed_model, body.ollama_url, user)
+                                       body.api_key, body.embed_model, body.ollama_url,
+                                       actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -796,7 +835,8 @@ def create_app(spine, cfg) -> FastAPI:
         return {"kind": kind}
 
     @app.get("/clients/{client_id}/obveze-postavke")
-    def client_obligations_get(client_id: int, user: str = Depends(require_user_web)):
+    def client_obligations_get(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         if row is None:
@@ -814,7 +854,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/obveze-postavke")
     def client_obligations_set(client_id: int, body: ClientObligationsBody,
-                                user: str = Depends(require_user_web)):
+                                actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if body.pdv_freq is not None and body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
         if body.regime is not None and body.regime not in obveze.REGIMES:
@@ -833,7 +874,7 @@ def create_app(spine, cfg) -> FastAPI:
             with spine.write() as c:
                 c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", (*vals, client_id))
         if body.manual_kinds is not None:
-            obveze.set_client_types(spine, client_id, body.manual_kinds, user=user)
+            obveze.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         return {"client_id": client_id, "has_employees": row["has_employees"] or 0,
@@ -946,23 +987,33 @@ def create_app(spine, cfg) -> FastAPI:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def _guard_client(actor: Actor, client_id: int) -> None:
+        if not client_visibility.can_see(spine, actor.user_id, client_id, actor.role):
+            raise HTTPException(403, "nemate pristup ovom klijentu")
+
     @app.post("/clients")
-    def client_create(body: ClientCreateBody, user: str = Depends(require_user_web)):
+    def client_create(body: ClientCreateBody, actor: Actor = Depends(require_actor_web)):
         try:
-            result = onboarding.create_client(spine, cfg, body.model_dump(), user)
+            result = onboarding.create_client(spine, cfg, body.model_dump(), actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+        # restringirani kreator inače ne bi vidio vlastito djelo
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is not None:
+            client_visibility.grant(spine, actor.user_id, result["id"], actor.username)
         return {"id": result["id"], "nas_folder": result["nas_folder"]}
 
     @app.get("/clients")
-    def clients_list(user: str = Depends(require_user_web)):
+    def clients_list(actor: Actor = Depends(require_actor_web)):
         rows = spine.read().execute(
             "SELECT id, name, oib, pdv_status, industry, regime, active FROM clients ORDER BY name"
         ).fetchall()
-        return [dict(r) for r in rows]
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        return [dict(r) for r in rows if vis is None or r["id"] in vis]
 
     @app.get("/clients/{client_id}")
-    def client_get(client_id: int, user: str = Depends(require_user_web)):
+    def client_get(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "nepoznat klijent")
@@ -970,7 +1021,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/document")
     def client_document_add(client_id: int, body: ClientDocumentBody,
-                             user: str = Depends(require_user_web)):
+                             actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         try:
@@ -980,19 +1032,22 @@ def create_app(spine, cfg) -> FastAPI:
         if len(data) > 25 * 1024 * 1024:
             raise HTTPException(400, "dokument prevelik (max 25MB)")
         try:
-            return onboarding.add_document(spine, cfg, client_id, body.filename, data, owner=user)
+            return onboarding.add_document(spine, cfg, client_id, body.filename, data,
+                                           owner=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.get("/clients/{client_id}/documents")
-    def client_documents_list(client_id: int, user: str = Depends(require_user_web)):
+    def client_documents_list(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         try:
             return onboarding.list_documents(spine, cfg, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/clients/{client_id}/karton.json")
-    def client_karton(client_id: int, user: str = Depends(require_user_web)):
+    def client_karton(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         try:
             return karton_mod.karton_data(spine, cfg, client_id)
         except ValueError as e:
@@ -1000,7 +1055,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/clients/{client_id}/messaging")
     def client_messaging_set(client_id: int, body: ClientMessagingBody,
-                              user: str = Depends(require_user_web)):
+                              actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if body.consent not in (0, 1):
             raise HTTPException(400, "consent mora biti 0 ili 1")
         if body.target and not messaging._target_scheme_ok(body.target):
@@ -1034,7 +1090,8 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
 
     @app.post("/clients/{client_id}/pausal")
-    def client_pausal_set(client_id: int, body: PausalBody, user: str = Depends(require_user_web)):
+    def client_pausal_set(client_id: int, body: PausalBody, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         with spine.write() as c:

@@ -114,7 +114,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # (b) get a client-scoped napomena appended later regardless of whether
     # citation verification succeeds. Best-effort: never break the answer.
     try:
-        resolved_client = client_context.resolve_client(spine, query)
+        resolved_client = client_context.resolve_client(spine, query, actor=actor)
     except Exception:
         resolved_client = None
 

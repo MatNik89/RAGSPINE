@@ -86,6 +86,104 @@ def org_page() -> str:
     return page_shell("Organizacija", body, active="postavke")
 
 
+_RADNICI_JS = """
+function $(id){ return document.getElementById(id); }
+var CLIENTS = [];
+
+async function loadClients(){
+  var res = await fetch('/clients', {credentials:'same-origin'});
+  CLIENTS = res.ok ? await res.json() : [];
+}
+
+async function load(){
+  await loadClients();
+  var res = await fetch('/workers', {credentials:'same-origin'});
+  if (!res.ok){ $('r-err').textContent = 'Samo administrator vidi ovu stranicu.'; return; }
+  var workers = await res.json();
+  var tb = $('r-list'); tb.textContent = '';
+  workers.forEach(function(w){
+    var tr = document.createElement('tr');
+    var td1 = document.createElement('td'); td1.textContent = w.username + ' (' + w.role + ')';
+    var td2 = document.createElement('td');
+    td2.textContent = w.sees_all ? 'svi klijenti'
+                    : (w.client_ids.length + ' odabrano');
+    var td3 = document.createElement('td');
+    var b = document.createElement('button'); b.className = 'btn btn-ghost'; b.textContent = 'Uredi';
+    b.addEventListener('click', function(){ edit(w); });
+    td3.appendChild(b);
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+    tb.appendChild(tr);
+  });
+}
+
+function edit(w){
+  $('e-title').textContent = 'Vidljivost — ' + w.username;
+  $('e-worker').value = w.user_id;
+  var sel = new Set(w.client_ids);
+  document.querySelector('input[name=e-mode][value=' + (w.sees_all ? 'all' : 'some') + ']').checked = true;
+  var box = $('e-clients'); box.textContent = '';
+  CLIENTS.forEach(function(c){
+    var lab = document.createElement('label'); lab.style.display = 'block';
+    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = c.id;
+    cb.className = 'e-client'; if (sel.has(c.id)) cb.checked = true;
+    lab.appendChild(cb); lab.appendChild(document.createTextNode(' ' + c.name));
+    box.appendChild(lab);
+  });
+  toggleBox();
+  $('e-panel').style.display = '';
+}
+
+function toggleBox(){
+  var some = document.querySelector('input[name=e-mode][value=some]').checked;
+  $('e-clients').style.display = some ? '' : 'none';
+}
+
+async function save(){
+  var some = document.querySelector('input[name=e-mode][value=some]').checked;
+  var ids = Array.prototype.map.call(document.querySelectorAll('.e-client:checked'),
+                                     function(cb){ return parseInt(cb.value, 10); });
+  var res = await fetch('/workers/' + $('e-worker').value + '/visibility', {method:'POST',
+    credentials:'same-origin', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({sees_all: !some, client_ids: ids})});
+  var msg = $('e-msg');
+  if (res.ok){ msg.textContent = 'Spremljeno.'; $('e-panel').style.display = 'none'; load(); }
+  else { var e = await res.json().catch(function(){return{};});
+         msg.textContent = 'Greška: ' + (e.detail || res.status); }
+}
+
+Array.prototype.forEach.call(document.getElementsByName('e-mode'), function(r){
+  r.addEventListener('change', toggleBox);
+});
+$('e-save').addEventListener('click', save);
+load();
+"""
+
+
+def radnici_page() -> str:
+    body = f"""<h1>Radnici — vidljivost klijenata</h1>
+<p class="meta"><a href="/ui/postavke">← Postavke</a> · Zadano svaki radnik vidi
+sve klijente. Ovdje možeš pojedinom radniku ograničiti vidljivost na izabrane
+klijente. Administrator i vlasnik uvijek vide sve.</p>
+<p id="r-err" class="meta"></p>
+<div class="card" style="max-width:640px">
+  <table><thead><tr><th>Radnik</th><th>Vidi</th><th></th></tr></thead>
+    <tbody id="r-list"></tbody></table>
+</div>
+<div class="card" id="e-panel" style="max-width:640px;display:none">
+  <h2 id="e-title"></h2>
+  <input type="hidden" id="e-worker">
+  <label style="display:block"><input type="radio" name="e-mode" value="all" checked> Vidi sve klijente</label>
+  <label style="display:block"><input type="radio" name="e-mode" value="some"> Samo izabrane klijente</label>
+  <div id="e-clients" style="margin:.5rem 0;max-height:260px;overflow:auto;display:none"></div>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <button type="button" class="btn" id="e-save">Spremi</button>
+    <span id="e-msg" class="meta"></span>
+  </div>
+</div>
+<script>{_RADNICI_JS}</script>"""
+    return page_shell("Radnici", body, active="postavke")
+
+
 _WIKI_JS = """
 function $(id){ return document.getElementById(id); }
 var IS_ADMIN = false;
