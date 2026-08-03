@@ -74,13 +74,27 @@ def list_skills(spine, org_id: int, status: str | None = None) -> list[dict]:
     return [dict(r) for r in spine.read().execute(q, args).fetchall()]
 
 
-def match(spine, org_id: int, query: str, k: int = 3) -> list[dict]:
-    """Aktivni skillovi čiji naziv/okidač/opis leksički preklapaju upit. Org-scoped."""
+def readable(rows: list[dict], actor) -> list[dict]:
+    """Vidljivost-filtar preko ACL fast patha (private/team/org + owner/admin).
+    ponytail: 'restricted' skill bez učitanog ACL-a ostaje skriven — upgrade
+    path je acl.can() po retku kad restricted skillovi počnu postojati u praksi."""
+    from ragspine.business.acl import Asset, check
+    return [s for s in rows if check(actor, Asset(
+        "skill", s["id"], s["org_id"], s["owner_user_id"] or 0,
+        s["visibility"] or "org", s["team_id"]), "read")]
+
+
+def match(spine, org_id: int, query: str, k: int = 3, actor=None) -> list[dict]:
+    """Aktivni skillovi čiji naziv/okidač/opis leksički preklapaju upit. Org-scoped;
+    s actorom dodatno filtrirano po vidljivosti."""
     qt = _tokens(query)
     if not qt:
         return []
+    rows = list_skills(spine, org_id, status="active")
+    if actor is not None:
+        rows = readable(rows, actor)
     scored = []
-    for s in list_skills(spine, org_id, status="active"):
+    for s in rows:
         st = _tokens(s["name"]) | _tokens(s["trigger"]) | _tokens(s["description"])
         overlap = len(qt & st)
         if overlap:

@@ -28,7 +28,8 @@ def _seed_doc(spine, org_id=1):
 def test_chat_prompt_includes_skill_and_memory(spine, cfg):
     _seed_doc(spine)
     sid = skills.create_skill(spine, 1, "JOPPD predaja", trigger="joppd",
-                              steps="1. Otvori ePoreznu\n2. Učitaj obrazac")
+                              steps="1. Otvori ePoreznu\n2. Učitaj obrazac",
+                              visibility="org")
     skills.set_status(spine, sid, "active")
     with spine.write() as c:
         c.execute("INSERT INTO mem_l1(org_id,user_id,kind,content) VALUES(1,1,'preference',"

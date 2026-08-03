@@ -57,7 +57,7 @@ def _org_context(spine, actor, query: str) -> str:
     except Exception:
         pass
     try:
-        for s in skills.match(spine, actor.org_id, query, k=1):
+        for s in skills.match(spine, actor.org_id, query, k=1, actor=actor):
             parts.append(f"Interni postupak '{s['name']}':\n{s['steps']}")
     except Exception:
         pass

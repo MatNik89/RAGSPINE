@@ -29,7 +29,9 @@ from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
 from ragspine.business import sop_images
 from ragspine.business import tenancy
-from ragspine.business.acl import ROLE_RANK, Actor
+from ragspine.business.acl import ROLE_RANK, VISIBILITIES, Actor, Asset, can
+from ragspine.knowledge import skills as skills_mod
+from ragspine.knowledge import wiki as wiki_mod
 from ragspine.web import messaging
 from ragspine.web import static as static_mod
 from ragspine.browser import agent as agent_mod
@@ -55,6 +57,7 @@ from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_model import model_page
 from ragspine.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
+from ragspine.web.templates_org import org_page, skills_page, wiki_page as wiki_page_ui
 from ragspine.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, postavke_page, upute_page)
 
@@ -67,6 +70,41 @@ class ChatBody(BaseModel):
 class ChatCompletionsBody(BaseModel):
     messages: list[dict]
     model: str | None = None
+
+
+class OrgMemberBody(BaseModel):
+    username: str
+    role: str = "member"
+
+
+class OrgRoleBody(BaseModel):
+    role: str
+
+
+class WikiLockBody(BaseModel):
+    locked: bool
+
+
+class SkillBody(BaseModel):
+    name: str
+    description: str = ""
+    trigger: str = ""
+    steps: str = ""
+    validation: str = ""
+    visibility: str = "org"
+
+
+class SkillUpdateBody(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    trigger: str | None = None
+    steps: str | None = None
+    validation: str | None = None
+    visibility: str | None = None
+
+
+class SkillStatusBody(BaseModel):
+    status: str
 
 
 class WatchSourceBody(BaseModel):
@@ -360,6 +398,111 @@ def create_app(spine, cfg) -> FastAPI:
         return {"org": dict(org) if org else None, "role": actor.role,
                 "members": tenancy.list_members(spine, actor.org_id)}
 
+    @app.post("/org/members")
+    def org_add_member(body: OrgMemberBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if body.role not in ROLE_RANK:
+            raise HTTPException(400, "nepoznata uloga")
+        if body.role == "owner" and actor.role != "owner":
+            raise HTTPException(403, "samo owner dodjeljuje owner ulogu")
+        u = spine.read().execute("SELECT id FROM users WHERE username=?",
+                                 (body.username,)).fetchone()
+        if u is None:
+            raise HTTPException(404, "nepoznat korisnik — prvo mu kreiraj račun")
+        tenancy.add_member(spine, actor.org_id, u["id"], body.role, user=actor.username)
+        return {"ok": True}
+
+    @app.post("/org/members/{member_id}/role")
+    def org_set_role(member_id: int, body: OrgRoleBody,
+                     actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if body.role not in ROLE_RANK:
+            raise HTTPException(400, "nepoznata uloga")
+        current = tenancy.role_of(spine, actor.org_id, member_id)
+        if current is None:
+            raise HTTPException(404, "nije član organizacije")
+        # owner ulogu dira samo owner; zadnji owner je nedegradabilan
+        if (current == "owner" or body.role == "owner") and actor.role != "owner":
+            raise HTTPException(403, "samo owner mijenja owner ulogu")
+        if current == "owner" and body.role != "owner":
+            owners = spine.read().execute(
+                "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role='owner'",
+                (actor.org_id,)).fetchone()["n"]
+            if owners <= 1:
+                raise HTTPException(400, "zadnji owner se ne može degradirati")
+        tenancy.add_member(spine, actor.org_id, member_id, body.role, user=actor.username)
+        return {"ok": True}
+
+    @app.get("/wiki")
+    def wiki_list(actor: Actor = Depends(require_actor_web)):
+        return wiki_mod.list_pages(spine, actor.org_id)
+
+    @app.get("/wiki/search")
+    def wiki_search(q: str, actor: Actor = Depends(require_actor_web)):
+        return wiki_mod.search(spine, actor.org_id, q)
+
+    @app.get("/wiki/{slug}")
+    def wiki_get(slug: str, actor: Actor = Depends(require_actor_web)):
+        page = wiki_mod.get_page(spine, actor.org_id, slug)
+        if page is None:
+            raise HTTPException(404, "nepoznata stranica")
+        return page
+
+    @app.post("/wiki/{slug}/lock")
+    def wiki_lock(slug: str, body: WikiLockBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        try:
+            wiki_mod.set_locked(spine, actor.org_id, slug, body.locked, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"ok": True}
+
+    def _skill_or_404(skill_id: int, actor: Actor, action: str) -> dict:
+        s = skills_mod.get_skill(spine, skill_id)
+        if s is None:
+            raise HTTPException(404, "nepoznat skill")
+        asset = Asset("skill", s["id"], s["org_id"], s["owner_user_id"] or 0,
+                      s["visibility"] or "org", s["team_id"])
+        if not can(spine, actor, asset, action):  # tvrda org-izolacija + ACL
+            raise HTTPException(404 if actor.org_id != s["org_id"] else 403, "nedozvoljeno")
+        return s
+
+    @app.get("/skills")
+    def skills_list(status: str | None = None, actor: Actor = Depends(require_actor_web)):
+        return skills_mod.readable(skills_mod.list_skills(spine, actor.org_id, status), actor)
+
+    @app.post("/skills")
+    def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
+        if body.visibility not in VISIBILITIES:
+            raise HTTPException(400, "nepoznata vidljivost")
+        try:
+            sid = skills_mod.create_skill(
+                spine, actor.org_id, body.name, body.description, body.trigger,
+                body.steps, body.validation, owner_user_id=actor.user_id,
+                visibility=body.visibility, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": sid}
+
+    @app.post("/skills/{skill_id}")
+    def skills_update(skill_id: int, body: SkillUpdateBody,
+                      actor: Actor = Depends(require_actor_web)):
+        if body.visibility is not None and body.visibility not in VISIBILITIES:
+            raise HTTPException(400, "nepoznata vidljivost")
+        _skill_or_404(skill_id, actor, "write")
+        return skills_mod.update_skill(spine, skill_id, user=actor.username,
+                                       **body.model_dump(exclude_none=True))
+
+    @app.post("/skills/{skill_id}/status")
+    def skills_status(skill_id: int, body: SkillStatusBody,
+                      actor: Actor = Depends(require_actor_web)):
+        _skill_or_404(skill_id, actor, "manage")
+        try:
+            skills_mod.set_status(spine, skill_id, body.status, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True}
+
     def _answer(query: str, actor: Actor, fresh: bool = False) -> dict:
         try:
             return pipeline.answer(spine, cfg, query, actor.username,
@@ -475,6 +618,30 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return mape_page()
+
+    @app.get("/ui/org", response_class=HTMLResponse)
+    def ui_org(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return org_page()
+
+    @app.get("/ui/wiki", response_class=HTMLResponse)
+    def ui_wiki(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return wiki_page_ui()
+
+    @app.get("/ui/skills", response_class=HTMLResponse)
+    def ui_skills(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return skills_page()
 
     @app.get("/ui/model", response_class=HTMLResponse)
     def ui_model(request: Request):

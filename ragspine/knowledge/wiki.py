@@ -119,6 +119,16 @@ def ingest_source(spine, org_id: int, source_key: str, text: str, llm,
     return {"skipped": False, "pages": len(pages), "written": n}
 
 
+def get_page(spine, org_id: int, slug: str) -> dict | None:
+    return _page_by_slug(spine, org_id, slug)
+
+
+def list_pages(spine, org_id: int) -> list[dict]:
+    return [dict(r) for r in spine.read().execute(
+        "SELECT id, type, title, slug, locked, version, updated_at FROM wiki_pages "
+        "WHERE org_id=? ORDER BY title COLLATE NOCASE", (org_id,)).fetchall()]
+
+
 def _page_by_slug(spine, org_id: int, slug: str) -> dict | None:
     r = spine.read().execute(
         "SELECT id, type, title, slug, body, locked, version FROM wiki_pages WHERE org_id=? AND slug=?",
