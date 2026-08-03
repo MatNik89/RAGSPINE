@@ -1,4 +1,5 @@
 """Build the LLM prompt: system instruction + numbered, tagged source block."""
+from ragspine.rag import budget
 from ragspine.rag.citations import IDK
 
 _TYPE_TAGS = {"zakon": "ZAKON", "racun": "ERAČUN", "sop": "SOP", "kontni": "KONTNI"}
@@ -20,6 +21,9 @@ def _tag(doc_type: str) -> str:
 
 
 def compose(query: str, hits: list, extra: str = "") -> tuple[str, list[dict]]:
+    # Kompakcija čuva redoslijed prefiksa, pa [n] u odgovoru i dalje pokazuje
+    # na isti hit u pozivateljevoj listi (model ne može citirati ispušteni rep).
+    hits = budget.compact(hits)
     lines = [
         f"[{i}] ({_tag(h.doc_type)}) {h.title}: {h.text}"
         for i, h in enumerate(hits, start=1)
