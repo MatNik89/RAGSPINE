@@ -54,6 +54,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS wiki_fts USING fts5(title, body, page_id UNIN
   tokenize='unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS orgs(id INTEGER PRIMARY KEY, name TEXT,
   created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS skills(id INTEGER PRIMARY KEY, org_id INTEGER, name TEXT,
+  description TEXT, trigger TEXT, steps TEXT, validation TEXT, version INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'draft', owner_user_id INTEGER, visibility TEXT DEFAULT 'private',
+  team_id INTEGER, created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memberships(id INTEGER PRIMARY KEY, org_id INTEGER,
   user_id INTEGER, role TEXT DEFAULT 'member', created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(org_id, user_id));
