@@ -2,6 +2,7 @@
 import hashlib, os, re, sqlite3
 from pathlib import Path
 
+from ragspine.business import tenancy
 from ragspine.core import optional
 
 
@@ -128,16 +129,18 @@ def _file_sha(path: str, bufsize: int = 1 << 20) -> str:
 
 
 def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
-                 client_id=None, source_url: str = "", path: str = ""):
+                 client_id=None, source_url: str = "", path: str = "", org_id=None):
     sha = _norm_sha(text)
     if spine.read().execute("SELECT id FROM documents WHERE sha256=?", (sha,)).fetchone():
         return None
     dtype = doc_type or detect_doc_type(text, path or title)
+    if org_id is None:
+        org_id = tenancy.default_org_id(spine)  # svaki insert je uvijek stampan
     with spine.write() as c:
         try:
             doc_id = c.execute(
-                "INSERT INTO documents(title,path,doc_type,client_id,sha256,source_url) VALUES(?,?,?,?,?,?)",
-                (title, path, dtype, client_id, sha, source_url),
+                "INSERT INTO documents(title,path,doc_type,client_id,sha256,source_url,org_id) VALUES(?,?,?,?,?,?,?)",
+                (title, path, dtype, client_id, sha, source_url, org_id),
             ).lastrowid
         except sqlite3.IntegrityError:
             # lost a dedup race: another writer inserted the same sha256 first

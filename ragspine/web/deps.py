@@ -69,3 +69,15 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
 def require_actor_web(request: Request) -> Actor:
     """Org-svjesna varijanta require_user_web: vraća Actor za ACL odluke."""
     return _actor_from_payload(request, _decode_web(request))
+
+
+def require_actor(request: Request) -> Actor:
+    """Org-svjesna varijanta require_user (samo Bearer, za API klijente)."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        raise HTTPException(401, "missing bearer token")
+    try:
+        payload = jwt_decode(auth.removeprefix("Bearer "), request.app.state.cfg.jwt_secret)
+    except AuthError as e:
+        raise HTTPException(401, str(e)) from e
+    return _actor_from_payload(request, payload)

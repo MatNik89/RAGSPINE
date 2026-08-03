@@ -24,9 +24,10 @@ def _package(answer_text: str, lane: str, confidence: float, sources: list, cach
 
 
 def _record(spine, user: str, query: str, lane: str, answer_text: str, confidence: float,
-            cache_write: bool = True) -> None:
+            cache_write: bool = True, org_id=None) -> None:
     if cache_write:
-        cache.put(spine, query, answer_text, meta=json.dumps({"lane": lane, "confidence": confidence}))
+        cache.put(spine, query, answer_text, org_id=org_id,
+                  meta=json.dumps({"lane": lane, "confidence": confidence}))
     with spine.write() as c:
         c.execute(
             "INSERT INTO interactions(user,query,lane,answer,confidence) VALUES(?,?,?,?,?)",
@@ -34,7 +35,9 @@ def _record(spine, user: str, query: str, lane: str, answer_text: str, confidenc
         )
 
 
-def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> dict:
+def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
+           actor=None) -> dict:
+    org_id = actor.org_id if actor is not None else None
     lane = router.route(query)
 
     if lane == "reject":
@@ -91,7 +94,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
     skip_cache = has_history or resolved_client is not None
 
     if not skip_cache:
-        cached_answer = cache.get(spine, query)
+        cached_answer = cache.get(spine, query, org_id=org_id)
         if cached_answer is not None:
             return _package(cached_answer, "chat", 1.0, [], True)
 
@@ -99,7 +102,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
     # reason as the cache skip above — a kb hit keyed on plain query text may
     # have been saved for a different (or no) client and would silently drop
     # the napomena/"client" key on repeat.
-    kb_answer = kb.lookup(spine, query) if resolved_client is None else None
+    kb_answer = kb.lookup(spine, query, org_id=org_id) if resolved_client is None else None
     if kb_answer is not None:
         return _package(kb_answer, "chat", 0.9, [], False)
 
@@ -107,18 +110,18 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
     if handler is not None:
         res = handler(spine, cfg, query, llm)
         if res is not None:
-            _record(spine, user, query, lane, res, 1.0, cache_write=not skip_cache)
+            _record(spine, user, query, lane, res, 1.0, cache_write=not skip_cache, org_id=org_id)
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
-    hits = retrieval.search(spine, query, k=selfrag.k_for(query))
+    hits = retrieval.search(spine, query, k=selfrag.k_for(query), org_id=org_id)
 
     if not selfrag.check_relevance(llm, query, hits):
         web_handler = LANE_HANDLERS.get("web")
         if web_handler is not None:
             res = web_handler(spine, cfg, query, llm)
             if res is not None:
-                _record(spine, user, query, "web", res, 1.0, cache_write=not skip_cache)
+                _record(spine, user, query, "web", res, 1.0, cache_write=not skip_cache, org_id=org_id)
                 return _package(res, "web", 1.0, [], False)
 
     if llm is None:
@@ -174,13 +177,14 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False) -> 
             final_text = f"{final_text}\n\n{napomena_block}"
         final_text = f"{final_text}\n\nTočnost: {pct}% · {verify.explain(best)}"
 
-    _record(spine, user, query, "chat", final_text, confidence, cache_write=not skip_cache)
+    _record(spine, user, query, "chat", final_text, confidence, cache_write=not skip_cache,
+            org_id=org_id)
     try:
         features.maybe_file_gap(spine, user, query, final_text, confidence)
     except Exception:
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
     if verify.accepted(best) and resolved_client is None:
-        kb.save(spine, query, final_text)
+        kb.save(spine, query, final_text, org_id=org_id)
     result = _package(final_text, "chat", confidence, sources, False)
     if resolved_client is not None:
         result["client"] = {"id": resolved_client["id"], "name": resolved_client["name"]}

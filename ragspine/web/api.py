@@ -49,7 +49,8 @@ from ragspine.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph
 from ragspine.web import learn  # noqa: F401 — register learn lane handler
 from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
-from ragspine.web.deps import COOKIE_NAME, require_actor_web, require_user, require_user_web
+from ragspine.web.deps import (COOKIE_NAME, require_actor, require_actor_web, require_user,
+                               require_user_web)
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
 from ragspine.web.templates_model import model_page
@@ -294,6 +295,7 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
+    tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
     app.include_router(static_mod.router)
 
     @app.get("/health")
@@ -358,25 +360,26 @@ def create_app(spine, cfg) -> FastAPI:
         return {"org": dict(org) if org else None, "role": actor.role,
                 "members": tenancy.list_members(spine, actor.org_id)}
 
-    def _answer(query: str, user: str, fresh: bool = False) -> dict:
+    def _answer(query: str, actor: Actor, fresh: bool = False) -> dict:
         try:
-            return pipeline.answer(spine, cfg, query, user,
-                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh)
+            return pipeline.answer(spine, cfg, query, actor.username,
+                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh,
+                                   actor=actor)
         except (LLMUnavailable, LLMError):
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
                     "confidence": 0, "sources": [], "cached": False}
 
     @app.post("/chat")
-    def chat(body: ChatBody, user: str = Depends(require_user)):
-        return _answer(body.q, user, fresh=body.fresh)
+    def chat(body: ChatBody, actor: Actor = Depends(require_actor)):
+        return _answer(body.q, actor, fresh=body.fresh)
 
     @app.post("/v1/chat/completions")
-    def chat_completions(body: ChatCompletionsBody, user: str = Depends(require_user)):
+    def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):
         user_msgs = [m for m in body.messages if m.get("role") == "user"]
         query = user_msgs[-1].get("content", "") if user_msgs else ""
         if not query:
             raise HTTPException(400, "no user message content")
-        result = _answer(query, user, fresh=True)  # OpenAI-compat clients own their own history
+        result = _answer(query, actor, fresh=True)  # OpenAI-compat clients own their own history
         return {
             "choices": [{"message": {"role": "assistant", "content": result["answer"]}}],
             "model": cfg.llm_model or "ragspine",

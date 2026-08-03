@@ -64,10 +64,19 @@ def default_org_id(spine) -> int:
     """ID zadane organizacije; ako nijedna ne postoji, kreira 'Ured' (bootstrap
     jedno-uredske instalacije bez ikakvog setup koraka)."""
     r = spine.read().execute("SELECT MIN(id) AS id FROM orgs").fetchone()
-    if r["id"] is not None:
+    if r is not None and r["id"] is not None:
         return r["id"]
     with spine.write() as c:
         return c.execute("INSERT INTO orgs(name) VALUES('Ured')").lastrowid
+
+
+def backfill_org(spine) -> None:
+    """Jednokratna aditivna migracija jedno-uredske instalacije: postojeći
+    dokumenti/znanje bez org_id pripadaju default organizaciji. Idempotentno."""
+    org_id = default_org_id(spine)
+    with spine.write() as c:
+        c.execute("UPDATE documents SET org_id=? WHERE org_id IS NULL", (org_id,))
+        c.execute("UPDATE knowledge SET org_id=? WHERE org_id IS NULL", (org_id,))
 
 
 def resolve_login_org(spine, user_id: int, sys_role: str = "") -> tuple[int, str]:

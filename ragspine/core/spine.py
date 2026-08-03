@@ -168,7 +168,9 @@ class Spine:
                 "status": "TEXT DEFAULT 'active'",
                 "supersedes": "INTEGER",
                 "version": "INTEGER DEFAULT 1",
+                "org_id": "INTEGER",
             })
+            _ensure_columns(c, "knowledge", {"org_id": "INTEGER"})
             _ensure_columns(c, "memory", {
                 "hot_score": "REAL DEFAULT 1.0",
                 "last_access": "TEXT DEFAULT (datetime('now'))",

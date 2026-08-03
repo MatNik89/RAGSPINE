@@ -28,7 +28,7 @@ def _fts_query(q: str) -> str:
     return " OR ".join(f'"{t}"' for t in tokens)
 
 
-def search(spine, query: str, k: int = 8, freshness: bool = True) -> list[Hit]:
+def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None) -> list[Hit]:
     fts_q = _fts_query(query)
     if not fts_q:
         return []
@@ -55,6 +55,7 @@ def search(spine, query: str, k: int = 8, freshness: bool = True) -> list[Hit]:
 
     ids = list(fused.keys())
     placeholders = ",".join("?" * len(ids))
+    params: list = list(ids)
     freshness_sql = ""
     if freshness:
         freshness_sql = (
@@ -62,11 +63,16 @@ def search(spine, query: str, k: int = 8, freshness: bool = True) -> list[Hit]:
             " AND (d.valid_until IS NULL OR d.valid_until='' OR d.valid_until >= date('now'))"
             " AND (d.status IS NULL OR d.status='active')"
         )
+    org_sql = ""
+    if org_id is not None:
+        # tvrda tenant-izolacija: dokument bez podudarnog org_id nikad ne izlazi
+        org_sql = " AND d.org_id = ?"
+        params.append(org_id)
     rows = conn.execute(
         f"""SELECT c.id AS chunk_id, c.doc_id, c.title, c.text, d.doc_type
             FROM chunks c JOIN documents d ON d.id = c.doc_id
-            WHERE c.id IN ({placeholders}){freshness_sql}""",
-        ids,
+            WHERE c.id IN ({placeholders}){freshness_sql}{org_sql}""",
+        params,
     ).fetchall()
 
     hits = [
