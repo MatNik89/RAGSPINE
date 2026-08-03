@@ -458,6 +458,16 @@ function renderOrientation(orientation) {
         .then(function(){ loadDashboard(); });
     });
     row.appendChild(scanBtn);
+    if ((f.scan || {}).n_pdf_no_text > 0) {
+      var ocrBtn = document.createElement('button'); ocrBtn.className = 'btn';
+      ocrBtn.textContent = 'OCR-aj mapu (' + f.scan.n_pdf_no_text + ')';
+      ocrBtn.addEventListener('click', function () {
+        ocrBtn.disabled = true; ocrBtn.textContent = 'OCR u tijeku…';
+        fetch('/folders/' + f.id + '/ocr', {method:'POST', credentials:'same-origin'})
+          .then(function(){ loadDashboard(); });
+      });
+      row.appendChild(ocrBtn);
+    }
     box.appendChild(row);
   });
 }

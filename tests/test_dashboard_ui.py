@@ -285,3 +285,9 @@ def test_shell_uses_left_sidebar():
     assert '<main' in html
     assert 'RAGSPINE' in html
     assert 'aria-current' in html or 'class="active"' in html
+
+
+def test_dashboard_has_ocr_action_js():
+    from ragspine.web.templates_ui import dashboard_page
+    html = dashboard_page()
+    assert "/folders/" in html and "/ocr" in html and "OCR-aj mapu" in html
