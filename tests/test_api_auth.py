@@ -39,8 +39,12 @@ def test_login_cookie_not_secure_by_default(spine, cfg):
 def test_login_cookie_secure_when_https_only(spine, cfg):
     add_user(spine, "ana", "tajna")
     cfg.https_only = True
-    r = _client(spine, cfg).post("/auth/login", data={"username": "ana", "password": "tajna"},
-                                  follow_redirects=False)
+    # https base_url: novija starlette/httpx (1.3+) strippa Secure cookie iz
+    # odgovora kad je konekcija http:// (Secure preko http-a je nevaljan) —
+    # test mora simulirati https kontekst da cookie uopće bude vidljiv
+    c = TestClient(create_app(spine, cfg), base_url="https://testserver")
+    r = c.post("/auth/login", data={"username": "ana", "password": "tajna"},
+               follow_redirects=False)
     assert "Secure" in r.headers.get("set-cookie", "")
 
 def test_malformed_login_body_400(spine, cfg):

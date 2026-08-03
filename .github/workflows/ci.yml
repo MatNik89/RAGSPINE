@@ -6,13 +6,16 @@ on:
 
 jobs:
   test:
+    # ponytail: Linux-only zasad — dev + dogfood teku na Piju (Linux). Windows
+    # ima poznate cross-OS rupe (hrvatski Č/cp1252 encoding, path separatori,
+    # drive-mismatch, subprocess kill) koje CI je ulovio; zaseban Windows-compat
+    # zadatak prije bilo kakvog Windows deploya (vidi docs/WINDOWS_COMPAT.md).
     strategy:
       fail-fast: false
       matrix:
         include:
           - { os: ubuntu-latest, python: "3.11" }
           - { os: ubuntu-latest, python: "3.13" }
-          - { os: windows-latest, python: "3.11" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
