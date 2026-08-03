@@ -197,3 +197,8 @@ def test_dashboard_nav_has_postavke_not_mape(spine, tmp_path):
     r = c.get("/", headers={"Authorization": f"Bearer {tok}"})
     assert '/ui/postavke"' in r.text
     assert '>Mape<' not in r.text  # nema Mape linka u ribonu
+
+
+def test_skener_is_valid_role():
+    from ragspine.business import folders
+    assert "skener" in folders.ROLES
