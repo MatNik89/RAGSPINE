@@ -102,6 +102,45 @@ def test_citation_to_unseen_compacted_source_not_grounded(spine):
     assert len(best["hits"]) < 30  # verificirano nad kompaktiranim skupom
 
 
+# --- lane kompakcija (Codex r3 LOW: revert compact() poziva mora pasti) ---
+
+class _CaptureLLM:
+    def __init__(self):
+        self.prompts = []
+
+    def complete(self, messages, system=None):
+        self.prompts.append("\n".join(m["content"] for m in messages))
+        class R:
+            text = "Odgovor [1]."
+        return R()
+
+
+def test_graph_lane_compacts_and_keeps_relevant_doc(spine, cfg):
+    from ragspine.rag import graphrag
+    oib = "69435151530"
+    filler = ("nebitan sadržaj o nečem desetom " * 300)
+    for i in range(12):
+        ingest.ingest_text(spine, f"{filler} OIB {oib} konto 4010 dokument broj {i}", f"filler{i}")
+    ingest.ingest_text(spine, f"Rok za JOPPD obrazac je 15. u mjesecu. OIB {oib} konto 4010.",
+                       "relevantni")
+    llm = _CaptureLLM()
+    graphrag.handle(spine, cfg, f"rok joppd obrazac {oib}", llm)
+    prompt = llm.prompts[-1]
+    assert "JOPPD obrazac je 15" in prompt          # relevantni doc preživio kompakciju
+    assert len(prompt) < budget.DEFAULT_BUDGET_TOKENS * budget.CHARS_PER_TOKEN * 1.5
+
+
+def test_web_lane_compacts_prompt(monkeypatch, spine, cfg):
+    from ragspine.web import websearch
+    results = [{"title": f"Naslov {i}", "url": f"https://x.hr/{i}",
+                "snippet": "dugačak snippet " * 200} for i in range(50)]
+    monkeypatch.setattr(websearch, "ddg", lambda q, fetch=None: results)
+    llm = _CaptureLLM()
+    websearch.handle(spine, cfg, "pdv stopa", llm)
+    raw = sum(len(r["snippet"]) for r in results)
+    assert len(llm.prompts[-1]) < raw / 3            # kompaktirano, ne sirovo
+
+
 # --- rate-limit ---
 
 def test_ratelimiter_evicts_stale_keys(monkeypatch):
@@ -146,6 +185,16 @@ def test_login_rate_limited(spine, cfg):
     for _ in range(10):
         c.post("/auth/login", json={"username": "ana", "password": "kriva"})
     r = c.post("/auth/login", json={"username": "ana", "password": "tajna"})
+    assert r.status_code == 429
+
+
+def test_login_ip_rate_limited_across_usernames(spine, cfg):
+    """Codex r3 HIGH: churn junk-usernameova s jedne adrese mora udariti u
+    IP-only cap — inače evicta žrtvin blokirani bucket i resetira brojač."""
+    c = TestClient(create_app(spine, cfg))
+    for i in range(30):
+        c.post("/auth/login", json={"username": f"junk{i}", "password": "x"})
+    r = c.post("/auth/login", json={"username": "junk-zadnji", "password": "x"})
     assert r.status_code == 429
 
 

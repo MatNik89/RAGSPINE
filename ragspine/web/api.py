@@ -336,7 +336,7 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.bridge = Bridge()
     tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
     limiter = RateLimiter()
-    _LOGIN_PER_MIN, _CHAT_PER_MIN = 10, 30  # ponytail: config knob tek kad zatreba
+    _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba
     app.include_router(static_mod.router)
 
     @app.get("/health")
@@ -365,6 +365,11 @@ def create_app(spine, cfg) -> FastAPI:
         if not username or not password:
             raise HTTPException(400, "neispravan zahtjev")
         ip = request.client.host if request.client else "?"
+        # IP-only limiter uz per-user: bez njega napadač churnom junk-usernameova
+        # napuni limiter preko capa i evicta žrtvin blokirani bucket (Codex r3).
+        # 30/min po IP-u ograničava i stopu stvaranja novih ključeva.
+        if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
+            raise HTTPException(429, "previše pokušaja prijave s ove adrese — pričekajte minutu")
         if not limiter.allow(f"login:{ip}:{username}", _LOGIN_PER_MIN):
             raise HTTPException(429, "previše pokušaja prijave — pričekajte minutu")
         row = spine.read().execute(
