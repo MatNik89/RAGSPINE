@@ -768,6 +768,32 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
         return {"id": folder_id, "removed": True}
 
+    @app.post("/folders/{folder_id}/scan")
+    def folder_scan_run(folder_id: int, user: str = Depends(require_user_web)):
+        from ragspine.business import folder_scan as fs
+        try:
+            res = fs.scan(spine, cfg, folder_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        row = spine.read().execute("SELECT role, label, path FROM folders WHERE id=?",
+                                   (folder_id,)).fetchone()
+        name = row["label"] or row["path"]
+        body = (f"Spojena mapa „{name}\": {res['n_subdirs']} podmapa, {res['n_docs']} dokumenata, "
+                f"{res['n_pdf_no_text']} PDF bez pretraživog teksta. Što želiš dalje?")
+        with spine.write() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM notifications WHERE kind='folder_connected' AND body=? "
+                "AND at >= datetime('now','-1 day')", (body,)).fetchone()
+            if not exists:
+                conn.execute("INSERT INTO notifications(kind, body) VALUES('folder_connected', ?)",
+                             (body,))
+        return {**res, "notified": True, "role": row["role"]}
+
+    @app.get("/folders/{folder_id}/scan")
+    def folder_scan_get(folder_id: int, user: str = Depends(require_user_web)):
+        from ragspine.business import folder_scan as fs
+        return fs.latest(spine, folder_id) or {}
+
     @app.get("/ui/dokumenti", response_class=HTMLResponse)
     def ui_dokumenti(request: Request):
         try:
