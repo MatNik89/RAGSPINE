@@ -247,7 +247,6 @@ _NAV = [
     ("home", "/", "Nadzorna ploča"),
     ("chat", "/ui/chat", "Chat"),
     ("klijenti", "/ui/klijenti", "Klijenti"),
-    ("klijenti-uvoz", "/ui/klijenti-uvoz", "Uvoz klijenata"),
     ("upute", "/ui/upute", "Upute"),
     ("obveze", "/obveze", "Obveze"),
     ("rokovi", "/ui/rokovi", "Rokovi"),
@@ -459,10 +458,6 @@ function renderOrientation(orientation) {
         .then(function(){ loadDashboard(); });
     });
     row.appendChild(scanBtn);
-    if (f.role === 'klijenti') {
-      var a = document.createElement('a'); a.href = '/ui/klijenti-uvoz'; a.className = 'btn';
-      a.textContent = 'Uvezi klijente'; row.appendChild(a);
-    }
     box.appendChild(row);
   });
 }
