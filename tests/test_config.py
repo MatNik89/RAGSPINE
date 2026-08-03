@@ -26,3 +26,9 @@ def test_https_only_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("RAGSPINE_HTTPS_ONLY", "1")
     assert Config.from_env().https_only is True
+
+
+def test_ocr_langs_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    from ragspine.config import Config
+    assert Config.from_env().ocr_langs == "hrv+eng"

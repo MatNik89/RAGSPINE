@@ -16,6 +16,7 @@ class Config:
     anthropic_base_url: str
     ollama_url: str
     ocr_url: str
+    ocr_langs: str
     embed_model: str
     nas_root: str
     imap_host: str
@@ -57,6 +58,7 @@ class Config:
             # RAGSPINE_EMBED_MODEL=intfloat/multilingual-e5-large (2.24GB, dim 1024).
             # embed kod je model-agnostičan (dim iz modela, e5-prefiks uvjetno).
             ocr_url=e("RAGSPINE_OCR_URL", ""),
+            ocr_langs=e("RAGSPINE_OCR_LANGS", "hrv+eng"),
             embed_model=e("RAGSPINE_EMBED_MODEL",
                           "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
             nas_root=e("RAGSPINE_NAS_ROOT", ""), imap_host=e("RAGSPINE_IMAP_HOST", ""),
