@@ -18,7 +18,8 @@ def _cmd_serve(args) -> int:
 
     cfg = get_config()
     spine = init_spine(cfg.db_path)
-    uvicorn.run(create_app(spine, cfg), host=cfg.host, port=cfg.port)
+    # server_header=False: ne curi "uvicorn" verziju; middleware već šalje Server: RAGSPINE
+    uvicorn.run(create_app(spine, cfg), host=cfg.host, port=cfg.port, server_header=False)
     return 0
 
 
@@ -170,8 +171,9 @@ def _cmd_forget(args) -> int:
     from ragspine.core.spine import init_spine
     from ragspine.docs.forget import forget
 
-    spine = init_spine(get_config().db_path)
-    result = forget(spine, args.term, dry=args.dry)
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    result = forget(spine, args.term, dry=args.dry, cfg=cfg)
     print(result)
     return 0
 

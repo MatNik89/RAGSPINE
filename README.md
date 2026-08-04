@@ -145,16 +145,26 @@ obliku. U Open WebUI dodaj novi OpenAI-connection:
 
 ## Sigurnost
 
+Postavljanje u uredu: **[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
+
 - JWT auth (HS256, stdlib `hashlib`/`hmac`) na svim endpointima osim
-  `/health` i `/login`.
-- SSRF guard na svim vanjskim fetchevima (watchlist, learn, web pretraga):
-  samo http/https, blokira privatne/loopback/link-local IP-ove osim
-  eksplicitno allowlistanih hostova (`RAGSPINE_EGRESS_ALLOW`).
-- Path-traversal zaštita na NAS operacijama (e-račun auto-sort, bulk ingest).
-- PII redakcija (mail/telefon/IBAN/OIB) prije slanja LLM-u kad je uključena.
-- GDPR forget + SHA-256 hash-chain audit log (append-only, verifikabilan).
-- v1 je zamišljen za LAN/plaintext: cookie `secure` flag je namjerno
-  isključen dok se ne posluži preko HTTPS-a.
+  `/health` i `/login`. Uloga se čita svježa iz `memberships` (revokacija odmah).
+- **Vidljivost klijenata po radniku** enforcana kroz sve client-scope endpointe
+  (dokumenti, bilješke, poruke, cjenik, ekstrakcija, obavijesti, isteci) i kroz
+  RAG dohvat/keš — restringirani radnik ne dosegne skrivenog klijenta.
+- SSRF guard na vanjskim fetchevima (samo http/https, blokira privatne/loopback/
+  link-local osim `RAGSPINE_EGRESS_ALLOW`) i **LAN guard** na uređajima (samo
+  privatne adrese; loopback OK, link-local/cloud-metadata/IPv4-mapped odbijeni).
+- Path-traversal zaštita na NAS operacijama; e-račun auto-sort ne pregazi
+  postojeći fajl (uniquify).
+- **XML (e-račun/RSS) odbija DTD/entitete** → nema billion-laughs/XXE.
+- xlsx izvoz otporan na formula-injection; prirez override ograničen na 0–30%.
+- **Sigurnosna zaglavlja** (CSP, X-Frame-Options DENY, nosniff, no-referrer) na
+  svim odgovorima; `/docs`/`/openapi.json` isključeni; pred-decode limit tijela.
+- **DB + tajna 0600, data_dir 0700**; PII redakcija prije LLM-a kad je uključena.
+- GDPR forget briše DB retke **i izvorne datoteke** (skenovi/e-računi) pod
+  dozvoljenim korijenima + SHA-256 hash-chain audit (append-only, verifikabilan).
+- v1 je zamišljen za LAN/plaintext: cookie `Secure` + HSTS uz `RAGSPINE_HTTPS_ONLY=1`.
 
 ## Arhitektura
 

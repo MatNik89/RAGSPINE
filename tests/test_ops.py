@@ -84,3 +84,16 @@ def test_nis2_stubs():
     assert nis2.smart() == {"status": "stub"}
     assert nis2.lynis() == {"status": "stub"}
     assert nis2.nmap() == {"status": "stub"}
+
+
+def test_doctor_production_checks_present(cfg):
+    """Nove produkcijske provjere (deploy priprema): korisnici, llm, nas, perms."""
+    names = {r["check"] for r in doctor.run(cfg)}
+    assert {"korisnici", "llm_provider", "nas", "perms"} <= names
+
+
+def test_doctor_flags_missing_users(cfg):
+    from ragspine.core.spine import init_spine
+    init_spine(cfg.db_path)  # prazna baza, 0 korisnika
+    r = next(x for x in doctor.run(cfg) if x["check"] == "korisnici")
+    assert r["ok"] is False

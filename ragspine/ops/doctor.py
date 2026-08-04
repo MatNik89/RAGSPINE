@@ -114,9 +114,71 @@ def _check_db_writable(cfg) -> dict:
         return {"check": "db_writable", "ok": False, "detail": str(e)}
 
 
+def _check_admin_exists(cfg) -> dict:
+    """Za produkciju mora postojati barem jedan korisnik — inače se nitko ne može
+    prijaviti (svjež install)."""
+    try:
+        conn = sqlite3.connect(cfg.db_path, timeout=5)
+        try:
+            n = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        finally:
+            conn.close()
+        return {"check": "korisnici", "ok": n > 0,
+                "detail": f"{n} korisnika" if n else "nema korisnika — kreiraj (ragspine auth add)"}
+    except Exception as e:
+        return {"check": "korisnici", "ok": True, "detail": f"nije provjereno ({e})"}
+
+
+def _check_llm_configured(cfg) -> dict:
+    """RAG bez LLM-a radi degradirano (samo regex/FTS) — javi ako provider fali."""
+    try:
+        from ragspine.core.llm import load_oauth_token
+        has = bool(cfg.llm_provider or cfg.llm_api_key or load_oauth_token())
+    except Exception:
+        has = bool(cfg.llm_provider or cfg.llm_api_key)
+    return {"check": "llm_provider", "ok": has,
+            "detail": cfg.llm_provider or ("konfiguriran" if has else "nije konfiguriran — RAG degradiran")}
+
+
+def _check_nas_configured(cfg) -> dict:
+    """Uredske funkcije (skeni, arhitektura, e-račun autosort) trebaju registriranu
+    KLIJENTI mapu unutar dozvoljenih mount_roots."""
+    if not cfg.mount_roots:
+        return {"check": "nas", "ok": True, "detail": "mount_roots prazan (NAS funkcije isključene)"}
+    try:
+        conn = sqlite3.connect(cfg.db_path, timeout=5)
+        try:
+            r = conn.execute("SELECT COUNT(*) FROM folders WHERE role='klijenti'").fetchone()[0]
+        finally:
+            conn.close()
+        return {"check": "nas", "ok": r > 0,
+                "detail": "KLIJENTI mapa registrirana" if r else "nema role='klijenti' mape — registriraj"}
+    except Exception as e:
+        return {"check": "nas", "ok": True, "detail": f"nije provjereno ({e})"}
+
+
+def _check_secret_perms(cfg) -> dict:
+    """DB + secret smiju biti čitljivi samo vlasniku (0600) — inače drugi lokalni
+    korisnici hosta vide PII/hasheve/JWT tajnu."""
+    if os.name == "nt":
+        return {"check": "perms", "ok": True, "detail": "n/a (Windows ACL)"}
+    import stat
+    bad = []
+    for p in (cfg.db_path, os.path.join(cfg.data_dir, "secret")):
+        try:
+            mode = stat.S_IMODE(os.stat(p).st_mode)
+            if mode & 0o077:
+                bad.append(f"{os.path.basename(p)}={oct(mode)}")
+        except OSError:
+            pass
+    return {"check": "perms", "ok": not bad,
+            "detail": "0600" if not bad else "preširoke dozvole: " + ", ".join(bad)}
+
+
 _CHECKS = [
     _check_python_version, _check_disk_space, _check_ram, _check_ntp, _check_luks,
     _check_ollama, _check_ocr_server, _check_optional_deps, _check_db_writable,
+    _check_admin_exists, _check_llm_configured, _check_nas_configured, _check_secret_perms,
 ]
 
 # ponytail: only these gate the CLI exit code — ollama/ocr_server/ntp/luks/
