@@ -185,6 +185,10 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
             except Exception:
                 pass
 
+    # G: pogodak vlastite ključne riječi ureda u PROMJENI (diff, ne cijelom
+    # tekstu) -> zasebna, glasnija obavijest
+    hits = match_keywords(spine, " ".join(diff) if diff else text)
+
     with spine.write() as c:
         for desc, iso in dates:
             c.execute(
@@ -195,6 +199,13 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
             "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
             ("law_change", summary, source_row["client_id"]),
         )
+        if hits:
+            c.execute(
+                "INSERT INTO notifications(kind,body,client_id) VALUES(?,?,?)",
+                ("keyword_hit",
+                 f"Ključne riječi ({', '.join(hits)}) u promjeni: {source_row['url']}",
+                 source_row["client_id"]),
+            )
         c.execute(
             "UPDATE watch_state SET last_hash=?, last_checked=datetime('now'), last_content=? WHERE source_id=?",
             (new_hash, text, source_row["id"]),
@@ -319,3 +330,74 @@ def mark_stale(spine) -> int:
             "UPDATE documents SET stale=1 WHERE valid_until IS NOT NULL AND valid_until < date('now') AND stale=0"
         )
         return cur.rowcount
+
+
+# --- G: vlastite ključne riječi ureda (data-driven, ne hardkod) ---------------
+
+def get_keywords(spine) -> list[str]:
+    raw = spine.get_override("watchlist", "keywords", "")
+    try:
+        data = json.loads(raw) if raw else []
+    except ValueError:
+        data = []
+    return [w for w in data if isinstance(w, str)]
+
+
+def set_keywords(spine, words, user: str = "?") -> list[str]:
+    out, seen = [], set()
+    for w in words or []:
+        if not isinstance(w, str):
+            raise ValueError("ključna riječ mora biti string")
+        w = w.strip()[:60]
+        if not w:
+            continue
+        key = _normalize(w)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+    spine.set_override("watchlist", "keywords", json.dumps(out, ensure_ascii=False))
+    spine.audit(user, "watch_keywords", json.dumps(out, ensure_ascii=False))
+    return out
+
+
+def match_keywords(spine, text: str) -> list[str]:
+    t = _normalize(text or "")
+    return [w for w in get_keywords(spine) if _normalize(w) in t]
+
+
+# --- G: Excel izvoz praćenja (openpyxl je optional [full] ovisnost) -----------
+
+def export_xlsx(spine) -> bytes:
+    from ragspine.core import optional as _optional
+    openpyxl = _optional.need("openpyxl", "Excel izvoz")
+    if openpyxl is None:
+        raise ValueError("openpyxl nije instaliran (pip install ragspine[full])")
+    import io
+
+    from ragspine.business import kalendar
+    wb = openpyxl.Workbook()
+
+    ws = wb.active
+    ws.title = "Nadolazeće promjene"
+    ws.append(["Stupa na snagu", "Opis", "Izvor"])
+    for r in spine.read().execute(
+            """SELECT u.effective_date, u.description, s.url
+               FROM upcoming_changes u LEFT JOIN watch_sources s ON s.id=u.source_id
+               ORDER BY u.effective_date""").fetchall():
+        ws.append([r["effective_date"], r["description"], r["url"]])
+
+    ws2 = wb.create_sheet("Rokovi")
+    ws2.append(["Rok", "Vrsta", "Opis"])
+    for r in kalendar.upcoming(spine, days=60):
+        ws2.append([r["due"], r["kind"], r["description"]])
+
+    ws3 = wb.create_sheet("Izvori")
+    ws3.append(["URL", "Kategorija", "Vrsta", "Aktivan"])
+    for r in spine.read().execute(
+            "SELECT url, category, kind, active FROM watch_sources ORDER BY url").fetchall():
+        ws3.append([r["url"], r["category"], r["kind"], "da" if r["active"] else "ne"])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()

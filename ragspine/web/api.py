@@ -125,6 +125,10 @@ class SkillStatusBody(BaseModel):
     status: str
 
 
+class KeywordsBody(BaseModel):
+    keywords: list[str] = []
+
+
 class WatchSourceBody(BaseModel):
     url: str
     category: str = ""
@@ -635,19 +639,59 @@ def create_app(spine, cfg) -> FastAPI:
             "usage": {},
         }
 
+    # require_user_web: prima i cookie (UI) i Bearer (API klijenti)
     @app.post("/watchlist/run")
-    def watchlist_run(user: str = Depends(require_user)):
+    def watchlist_run(user: str = Depends(require_user_web)):
         return [dataclasses.asdict(c) for c in watchlist.check_all(spine, cfg)]
 
     @app.get("/watchlist/sources")
-    def watchlist_list_sources(user: str = Depends(require_user)):
+    def watchlist_list_sources(user: str = Depends(require_user_web)):
         rows = spine.read().execute("SELECT * FROM watch_sources").fetchall()
         return [dict(r) for r in rows]
 
     @app.post("/watchlist/sources")
-    def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user)):
+    def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user_web)):
         sid = watchlist.add_source(spine, body.url, body.category, body.client_id, user, body.kind)
         return {"id": sid}
+
+    @app.post("/watchlist/sources/{source_id}/toggle")
+    def watchlist_toggle_source(source_id: int, user: str = Depends(require_user_web)):
+        with spine.write() as c:
+            r = c.execute("SELECT active FROM watch_sources WHERE id=?", (source_id,)).fetchone()
+            if r is None:
+                raise HTTPException(404, "nepoznat izvor")
+            c.execute("UPDATE watch_sources SET active=? WHERE id=?",
+                      (0 if r["active"] else 1, source_id))
+        return {"id": source_id, "active": 0 if r["active"] else 1}
+
+    @app.get("/watchlist/upcoming")
+    def watchlist_upcoming(user: str = Depends(require_user_web)):
+        return [dict(r) for r in spine.read().execute(
+            """SELECT u.id, u.effective_date, u.description, s.url
+               FROM upcoming_changes u LEFT JOIN watch_sources s ON s.id=u.source_id
+               ORDER BY u.effective_date""").fetchall()]
+
+    @app.get("/watchlist/keywords")
+    def watchlist_keywords_get(user: str = Depends(require_user_web)):
+        return watchlist.get_keywords(spine)
+
+    @app.post("/watchlist/keywords")
+    def watchlist_keywords_set(body: KeywordsBody, user: str = Depends(require_user_web)):
+        try:
+            return watchlist.set_keywords(spine, body.keywords, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.get("/watchlist/export.xlsx")
+    def watchlist_export(user: str = Depends(require_user_web)):
+        try:
+            data = watchlist.export_xlsx(spine)
+        except ValueError as e:
+            raise HTTPException(503, str(e)) from e
+        return Response(
+            content=data,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": 'attachment; filename="pracenje.xlsx"'})
 
     @app.get("/", response_class=HTMLResponse)
     def ui_home(request: Request):
@@ -734,6 +778,15 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return postavke_page()
+
+    @app.get("/ui/pracenje", response_class=HTMLResponse)
+    def ui_pracenje(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_pracenje import pracenje_page
+        return pracenje_page()
 
     @app.get("/ui/uredjaji", response_class=HTMLResponse)
     def ui_uredjaji(request: Request):
