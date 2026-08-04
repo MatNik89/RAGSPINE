@@ -807,26 +807,32 @@ def create_app(spine, cfg) -> FastAPI:
         from ragspine.business import folder_sync
         return folder_sync.sync_all(spine, cfg)
 
+    # registar mapa mijenja samo admin/owner — role='klijenti' preusmjerava
+    # gdje onboarding PIŠE, pa običan radnik ne smije preregistrirati mape
     @app.post("/folders")
-    def folders_register(body: FolderBody, user: str = Depends(require_user_web)):
+    def folders_register(body: FolderBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
         try:
-            return folders_mod.register(spine, cfg, body.path, body.role, body.label, user)
+            return folders_mod.register(spine, cfg, body.path, body.role, body.label,
+                                        actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/folders/{folder_id}")
     def folders_update(folder_id: int, body: FolderUpdateBody,
-                       user: str = Depends(require_user_web)):
+                       actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
         try:
             return folders_mod.update(spine, folder_id, role=body.role, label=body.label,
-                                      enabled=body.enabled, user=user)
+                                      enabled=body.enabled, user=actor.username)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.delete("/folders/{folder_id}")
-    def folders_delete(folder_id: int, user: str = Depends(require_user_web)):
+    def folders_delete(folder_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
         try:
-            folders_mod.remove(spine, folder_id, user)
+            folders_mod.remove(spine, folder_id, actor.username)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         return {"id": folder_id, "removed": True}
@@ -997,13 +1003,19 @@ def create_app(spine, cfg) -> FastAPI:
     def folder_architecture_preview(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
         _require_admin(actor)
-        return fa.propose(spine, cfg)
+        try:
+            return fa.propose(spine, cfg)
+        except ValueError as e:
+            raise HTTPException(503, str(e)) from e
 
     @app.get("/folder-architecture/learned")
     def folder_architecture_learned(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
         _require_admin(actor)
-        return fa.learn_structure(spine, cfg)
+        try:
+            return fa.learn_structure(spine, cfg)
+        except ValueError as e:
+            raise HTTPException(503, str(e)) from e
 
     @app.get("/folder-architecture/template")
     def folder_architecture_template_get(actor: Actor = Depends(require_actor_web)):
@@ -1027,7 +1039,10 @@ def create_app(spine, cfg) -> FastAPI:
     def folder_architecture_apply(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
         _require_admin(actor)  # kreira mape za SVE klijente — samo admin/owner
-        return fa.apply(spine, cfg, user=actor.username)
+        try:
+            return fa.apply(spine, cfg, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(503, str(e)) from e
 
     @app.get("/doc-types/export")
     def doc_types_export(user: str = Depends(require_user_web)):

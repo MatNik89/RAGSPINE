@@ -81,11 +81,12 @@ RULES: list[tuple[re.Pattern, str]] = [
     _rule(r"kontiranje", "knjizenje"),
     _rule(r"temeljnic", "knjizenje"),
 
-    # --- arhitektura: dogovor o strukturi mapa (pregled + spremanje dogovora) ---
-    _rule(r"dogovor\s+(map|uredsk)", "arhitektura"),
+    # --- arhitektura: dogovor o strukturi mapa — SAMO eksplicitni intenti;
+    # široki substringovi ("struktura mape kontnog plana", "dogovor uredskog
+    # najma", "koje su mape po klijentu oporezive") ne smiju oteti chat ---
+    _rule(r"dogovor\s+map[ae]\s+po\s+klijentu", "arhitektura"),
+    _rule(r"dogovor\s+uredsk\w*\s+map", "arhitektura"),
     _rule(r"arhitektur\w*\s+map", "arhitektura"),
-    _rule(r"struktur\w*\s+map", "arhitektura"),
-    _rule(r"map[ae]\s+po\s+klijentu", "arhitektura"),
 
     # --- graph: relationships between entities ---
     _rule(r"povezan", "graph"),

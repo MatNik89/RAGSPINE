@@ -105,24 +105,47 @@ def test_onboarding_creates_client_in_registered_klijenti(spine, cfg, tmp_path):
     assert os.path.isfile(doc["path"]) if "path" in doc else True
 
 
+def _admin():
+    from ragspine.business.acl import Actor
+    return Actor(user_id=1, org_id=1, role="owner", username="gazda")
+
+
 def test_chat_lane_agreement_saved_and_overview(spine, cfg, tmp_path):
     root = _mk_klijenti(cfg, tmp_path, ("PERIĆ PERO", ["Ugovori"]))
     _register(spine, cfg, root)
-    out = fa.handle(spine, cfg, "dogovor mape po klijentu: Ugovori, Izvodi, Porezna", llm=None)
+    out = fa.handle(spine, cfg, "dogovor mape po klijentu: Ugovori, Izvodi, Porezna",
+                    llm=None, actor=_admin())
     assert "Zapamtio" in out
     assert fa.get_template(spine)["client_subdirs"] == ["Ugovori", "Izvodi", "Porezna"]
-    out = fa.handle(spine, cfg, "dogovor uredske mape: SCANNER, ARHIVA", llm=None)
+    fa.handle(spine, cfg, "dogovor uredske mape: SCANNER, ARHIVA", llm=None, actor=_admin())
     assert fa.get_template(spine)["office"] == ["SCANNER", "ARHIVA"]
     # pregled bez zapovijedi
-    out = fa.handle(spine, cfg, "kakva je arhitektura mapa?", llm=None)
+    out = fa.handle(spine, cfg, "kakva je arhitektura mapa?", llm=None, actor=_admin())
     assert "1 klijenata" in out and "Ugovori" in out
+
+
+def test_chat_lane_requires_admin_and_anchors_commands(spine, cfg, tmp_path):
+    from ragspine.business.acl import Actor
+    # ne-admin: nema spremanja, nema NAS putanja
+    out = fa.handle(spine, cfg, "dogovor mape po klijentu: Zlo", llm=None,
+                    actor=Actor(user_id=2, org_id=1, role="member", username="boris"))
+    assert "vlasnik/admin" in out
+    assert fa.get_template(spine)["client_subdirs"] == []
+    # citat/objašnjenje NIJE komanda (sidreno na cijeli upit)
+    out = fa.handle(spine, cfg,
+                    "je li pametno reći 'dogovor mape po klijentu: X' bez razmišljanja? Ne.",
+                    llm=None, actor=_admin())
+    assert fa.get_template(spine)["client_subdirs"] == []
 
 
 def test_router_routes_to_arhitektura():
     from ragspine.rag import router
     assert router.route("dogovor mape po klijentu: Ugovori") == "arhitektura"
-    assert router.route("kakva je struktura mapa?") == "arhitektura"
     assert router.route("arhitektura mapa") == "arhitektura"
+    # široki substringovi ne otimaju chat
+    assert router.route("dogovor uredskog najma") != "arhitektura"
+    assert router.route("struktura mape kontnog plana") != "arhitektura"
+    assert router.route("koje su mape po klijentu oporezive?") != "arhitektura"
 
 
 def test_api_admin_only_and_flow(spine, cfg, tmp_path):

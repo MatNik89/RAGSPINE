@@ -4,6 +4,7 @@ import os
 import re
 
 from ragspine.business import folders
+from ragspine.core import security
 
 _COMPANY = re.compile(r"\b(d\.?o\.?o\.?|j\.?d\.?o\.?o\.?|d\.?d\.?|obrt)\b", re.IGNORECASE)
 
@@ -49,8 +50,15 @@ def commit(spine, cfg, folder_id: int, items: list[dict]) -> dict:
             if it.get("action") == "skip":
                 skipped += 1
                 continue
-            # apsolutni realpath podmape = stabilan, jedinstven identifikator veze mapa↔klijent
-            nas = os.path.realpath(os.path.join(base, it["subdir"]))
+            # apsolutni realpath podmape = stabilan, jedinstven identifikator veze mapa↔klijent.
+            # subdir iz requesta: samo basename, STROGO ispod base i stvarno
+            # postojeća podmapa — '.'/'..'/tuđi path ne prolazi (fail-closed).
+            sub = os.path.basename((it.get("subdir") or "").strip())
+            if not sub or sub in (".", ".."):
+                raise ValueError(f"neispravna podmapa: {it.get('subdir')!r}")
+            nas = os.path.realpath(os.path.join(base, sub))
+            if not (security.path_under(nas, base) and nas != base and os.path.isdir(nas)):
+                raise ValueError(f"nepostojeća podmapa: {sub!r}")
             if it.get("action") == "merge" and it.get("merge_id"):
                 c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas, it["merge_id"]))
                 merged += 1

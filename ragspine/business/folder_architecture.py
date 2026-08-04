@@ -15,6 +15,10 @@ from ragspine.core import security
 _MODULE = "arhitektura"
 # ime mape: bez separatora, traversala, kontrolnih znakova; Windows-safe
 _BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# rezervirana DOS imena (i s ekstenzijom, npr. CON.txt) — Windows ih odbija
+_DOS_RESERVED = {"con", "prn", "aux", "nul",
+                 *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
+_MAX_NAME = 100
 
 
 def _root(cfg) -> str:
@@ -41,7 +45,7 @@ def _subdirs(path: str, base: str) -> list:
 def learn_structure(spine, cfg) -> dict:
     """Pročitaj kako je KLIJENTI mapa VEĆ organizirana: broj klijenata (podmapa)
     + frekvencija njihovih child-podmapa. Polazište za dogovor, ne dira disk."""
-    root = klijenti_root(spine, cfg)
+    root = klijenti_root(spine, cfg)  # ValueError (nedostupna) propagira pozivatelju
     if root is None:
         return {"root": None, "n_clients": 0, "subdir_counts": {}}
     counts: dict[str, int] = {}
@@ -59,7 +63,8 @@ def _valid_names(names) -> list[str]:
         if not isinstance(n, str):
             raise ValueError("ime mape mora biti string")
         n = n.strip().rstrip(".")  # NTFS strippa završnu točku — ne dopuštamo je
-        if not n or n in (".", "..") or _BAD_NAME.search(n):
+        if (not n or n in (".", "..") or _BAD_NAME.search(n) or len(n) > _MAX_NAME
+                or n.split(".")[0].lower() in _DOS_RESERVED):
             raise ValueError(f"nedozvoljeno ime mape: {n!r}")
         if n.lower() in seen:
             continue
@@ -106,7 +111,7 @@ def propose(spine, cfg) -> dict:
     root = _root(cfg)
     must = [e for n in tpl["office"] if (e := _entry(root, os.path.join(root, n), n))]
     clients = []
-    kroot = klijenti_root(spine, cfg)
+    kroot = klijenti_root(spine, cfg)  # ValueError (nedostupna) propagira — bolje nego kriva stabla
     if kroot and tpl["client_subdirs"]:
         for c in _subdirs(kroot, kroot):
             subs = [e for s in tpl["client_subdirs"]
@@ -144,30 +149,47 @@ def apply(spine, cfg, user: str = "?") -> dict:
 # --- chat lane: dogovor kroz razgovor -----------------------------------------
 # "dogovor mape po klijentu: Ugovori, Izvodi" -> spremi client_subdirs
 # "dogovor uredske mape: PROPISI, SCANNER"    -> spremi office
-# sve ostalo s "arhitektura/struktura mapa"   -> pregled naučenog + dogovorenog
+# sve ostalo s eksplicitnim arhitektura-intentom -> pregled naučenog + dogovora
+# Admin-only (kao API): lane sprema stanje i otkriva NAS putanje/klijente.
 
-_SET_CLIENT = re.compile(r"dogovor\s+map[ae]\s+po\s+klijentu\s*:\s*(.+)", re.IGNORECASE)
-_SET_OFFICE = re.compile(r"dogovor\s+uredsk\w*\s+map[ae]\s*:\s*(.+)", re.IGNORECASE)
+# SIDRENO na cijeli upit (fullmatch) — "u navodu 'dogovor mape...' nemoj" ili
+# rep rečenice iza popisa NE smiju postati konfiguracija datotečnog sustava
+_SET_CLIENT = re.compile(r"\s*dogovor\s+map[ae]\s+po\s+klijentu\s*:\s*([^.?!]+)[.?!]?\s*",
+                         re.IGNORECASE)
+_SET_OFFICE = re.compile(r"\s*dogovor\s+uredsk\w*\s+map[ae]\s*:\s*([^.?!]+)[.?!]?\s*",
+                         re.IGNORECASE)
 
 
 def _fmt_list(names: list[str]) -> str:
     return ", ".join(names) if names else "(nije dogovoreno)"
 
 
-def handle(spine, cfg, query: str, llm) -> str:
+def _is_admin(actor) -> bool:
+    from ragspine.business.acl import ROLE_RANK
+    return actor is not None and ROLE_RANK.get(actor.role or "", 0) >= ROLE_RANK["admin"]
+
+
+def handle(spine, cfg, query: str, llm, actor=None) -> str:
+    if not _is_admin(actor):
+        return ("Arhitekturu mapa dogovara vlasnik/admin ureda — zamoli ih da to "
+                "urede u chatu ili u Postavke → Arhitektura mapa.")
+    user = getattr(actor, "username", "?") or "?"
     for pat, half in ((_SET_CLIENT, "client_subdirs"), (_SET_OFFICE, "office")):
-        m = pat.search(query)
+        m = pat.fullmatch(query)
         if m:
             names = [n for n in (x.strip() for x in m.group(1).split(",")) if n]
             try:
-                tpl = set_template(spine, **{half: names}, user="chat")
+                tpl = set_template(spine, **{half: names}, user=user)
             except ValueError as e:
                 return f"Ne mogu spremiti: {e}"
             return ("Zapamtio sam dogovor. Uredske mape: "
                     f"{_fmt_list(tpl['office'])}. Po klijentu: "
                     f"{_fmt_list(tpl['client_subdirs'])}. Pregled i kreiranje: "
                     "Postavke → Arhitektura mapa.")
-    learned = learn_structure(spine, cfg)
+    try:
+        learned = learn_structure(spine, cfg)
+    except ValueError as e:
+        return f"Mapa klijenata trenutno nije dostupna: {e}"
     tpl = get_template(spine)
     if learned["root"] is None:
         found = ("Nisam našao mapu klijenata — registriraj je u Postavke → "

@@ -110,7 +110,10 @@ def autosort(spine, cfg, xml_path: str, pdf_path: str | None = None) -> str | No
             )
         return None
 
-    dest_dir = _resolve_dest(cfg, client["nas_folder"] or "")
+    # isti two-root guard kao svi ostali konzumenti nas_folder-a — klijent u
+    # registriranoj KLIJENTI mapi (apsolutni nas_folder) inače bude odbijen
+    from ragspine.business.onboarding import _client_dir
+    dest_dir = _client_dir(spine, cfg, client["id"])
     os.makedirs(dest_dir, exist_ok=True)
 
     dest_xml = os.path.join(dest_dir, os.path.basename(xml_path))

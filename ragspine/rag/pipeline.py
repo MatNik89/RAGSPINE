@@ -128,7 +128,9 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         except Exception:
             prior_turns = []  # ponytail: memory is best-effort — never break the answer
     has_history = bool(prior_turns)
-    skip_cache = has_history or resolved_client is not None
+    # arhitektura lane radi side-effect (sprema dogovor) — keširani "Zapamtio"
+    # bez izvršenja bi lagao, pa ni read ni write keša za tu lane
+    skip_cache = has_history or resolved_client is not None or lane == "arhitektura"
 
     if not skip_cache:
         cached_answer = cache.get(spine, query, org_id=org_id)
@@ -145,7 +147,11 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
 
     handler = LANE_HANDLERS.get(lane)
     if handler is not None:
-        res = handler(spine, cfg, query, llm)
+        if lane == "arhitektura":
+            # side-effect lane mora znati TKO pita (admin-gate u handleru)
+            res = handler(spine, cfg, query, llm, actor=actor)
+        else:
+            res = handler(spine, cfg, query, llm)
         if res is not None:
             _record(spine, user, query, lane, res, 1.0, cache_write=not skip_cache,
                     org_id=org_id, actor=actor)

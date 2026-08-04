@@ -30,12 +30,24 @@ KLIJENTI_DIR = "klijenti"
 
 def klijenti_root(spine, cfg) -> str | None:
     """Stvarna mapa klijenata: registrirana mapa role='klijenti'; fallback
-    {root}/klijenti ako postoji na disku; inače None."""
+    {root}/klijenti ako postoji na disku; inače None.
+
+    Registrirani path se RE-VALIDIRA na svaku upotrebu (ne vjeruje se bazi):
+    mora postojati kao direktorij, ne smije biti simlink i mora ležati unutar
+    trenutačnih mount_roots ∪ nas_root — inače ValueError (fail-closed).
+    Odmountan SMB bi inače tiho stvorio lokalno sjenčano stablo, a naknadno
+    preusmjeren path pobjegao iz odobrenog mounta."""
     r = spine.read().execute(
         "SELECT path FROM folders WHERE role='klijenti' AND enabled=1 "
         "ORDER BY id LIMIT 1").fetchone()
     if r:
-        return os.path.realpath(r["path"])
+        rp = os.path.realpath(r["path"])
+        roots = [os.path.realpath(x) for x in (cfg.mount_roots or [])]
+        roots.append(os.path.realpath(cfg.nas_root or cfg.data_dir))
+        if (os.path.isdir(rp) and not os.path.islink(r["path"])
+                and any(b and security.path_under(rp, b) for b in roots)):
+            return rp
+        raise ValueError(f"mapa klijenata nedostupna ili izvan dozvoljenih korijena: {r['path']!r}")
     fb = os.path.join(os.path.realpath(cfg.nas_root or cfg.data_dir), KLIJENTI_DIR)
     return os.path.realpath(fb) if os.path.isdir(fb) else None
 
@@ -109,8 +121,11 @@ def _client_dir(spine, cfg, client_id) -> str:
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     client_dir = os.path.realpath(os.path.join(root, row["nas_folder"] or ""))
     kroot = klijenti_root(spine, cfg)
-    if not (security.path_under(client_dir, root)
-            or (kroot and security.path_under(client_dir, kroot))):
+    # STROGO ispod korijena (klijentova mapa nikad nije korijen sam — nas_folder
+    # '.' bi inače pisao dokumente ravno u KLIJENTI/nas_root)
+    ok_root = security.path_under(client_dir, root) and client_dir != root
+    ok_kroot = bool(kroot) and security.path_under(client_dir, kroot) and client_dir != kroot
+    if not (ok_root or ok_kroot):
         raise ValueError("path traversal blocked")
     return client_dir
 
