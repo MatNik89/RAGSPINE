@@ -55,3 +55,10 @@ def test_export_json_shape(spine):
     assert out["version"] == 1
     keys = [t["key"] for t in out["doc_types"]]
     assert "osobna_iskaznica" in keys
+
+
+def test_upsert_rejects_non_string_key_and_label(spine):
+    with pytest.raises(ValueError):
+        doc_registry.upsert(spine, "x", "X", [{"key": 7, "kind": "text"}])
+    with pytest.raises(ValueError):
+        doc_registry.upsert(spine, "x", "X", [{"key": "a", "label": 7, "kind": "text"}])

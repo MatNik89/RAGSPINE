@@ -216,10 +216,17 @@ class ObligationTypeBody(BaseModel):
     description: str = ""
 
 
+class DocTypeFieldBody(BaseModel):
+    key: str
+    label: str = ""
+    kind: str = "text"
+    expiry: bool = False
+
+
 class DocTypeBody(BaseModel):
     key: str
     label: str = ""
-    fields: list = []
+    fields: list[DocTypeFieldBody] = []
     active: int = 1
     sort: int = 100
 
@@ -942,7 +949,8 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/doc-types")
     def doc_types_upsert(body: DocTypeBody, user: str = Depends(require_user_web)):
         try:
-            key = doc_registry.upsert(spine, body.key, body.label, body.fields,
+            key = doc_registry.upsert(spine, body.key, body.label,
+                                      [f.model_dump() for f in body.fields],
                                       active=bool(body.active), sort=body.sort, user=user)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e

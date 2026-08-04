@@ -22,7 +22,9 @@ DEFAULT_TYPES = [
 
 def _norm_key(key: str) -> str:
     """snake_case ključ: mala slova, dijakritika foldana, ostalo -> _."""
-    k = (key or "").strip().lower()
+    if not isinstance(key, str):
+        raise ValueError(f"key mora biti string, ne {type(key).__name__}")
+    k = key.strip().lower()
     for a, b in zip("čćžšđ", "cczsd"):
         k = k.replace(a, b)
     k = re.sub(r"[^a-z0-9]+", "_", k).strip("_")
@@ -48,7 +50,10 @@ def _validate_fields(fields) -> list[dict]:
         expiry = bool(f.get("expiry"))
         if expiry and kind != "date":
             raise ValueError(f"expiry smije samo na date polje: {fk!r}")
-        out.append({"key": fk, "label": (f.get("label") or fk).strip(),
+        label = f.get("label")
+        if label is not None and not isinstance(label, str):
+            raise ValueError(f"label mora biti string: {fk!r}")
+        out.append({"key": fk, "label": (label or fk).strip(),
                     "kind": kind, "expiry": expiry})
     return out
 

@@ -48,3 +48,18 @@ def test_ui_dok_tipovi_page(spine, cfg):
     c, h = _client(spine, cfg)
     r = c.get("/ui/dok-tipovi", headers=h)
     assert r.status_code == 200 and "Vrste dokumenata" in r.text
+
+
+def test_doc_types_field_coercion_and_types(spine, cfg):
+    # Codex nalaz: "expiry":"false" (string) se prije spremao kao True
+    c, h = _client(spine, cfg)
+    r = c.post("/doc-types", headers=h, json={
+        "key": "vozacka", "fields": [
+            {"key": "vrijedi_do", "kind": "date", "expiry": "false"}]})
+    assert r.status_code == 200
+    t = {x["key"]: x for x in c.get("/doc-types", headers=h).json()}["vozacka"]
+    assert t["fields"][0]["expiry"] is False
+    # numeric key -> validacijska greška, ne 500
+    r = c.post("/doc-types", headers=h, json={
+        "key": "y", "fields": [{"key": 7, "kind": "text"}]})
+    assert r.status_code in (400, 422)
