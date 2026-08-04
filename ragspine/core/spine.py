@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS folders(id INTEGER PRIMARY KEY, path TEXT UNIQUE,
   added_at TEXT DEFAULT (datetime('now')), last_synced TEXT);
 CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, client_id INTEGER, author TEXT,
   body TEXT, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS doc_types(key TEXT PRIMARY KEY, label TEXT,
+  fields_json TEXT DEFAULT '[]', active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100);
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action TEXT,
   entity TEXT, detail TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS hash_chain(id INTEGER PRIMARY KEY, event TEXT, prev_hash TEXT,

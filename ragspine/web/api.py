@@ -24,7 +24,7 @@ from ragspine.business import model_settings
 from ragspine.business import monthly
 from ragspine.business import nldate
 from ragspine.business import notes
-from ragspine.business import obveze
+from ragspine.business import doc_registry, obveze
 from ragspine.business import onboarding
 from ragspine.business import peer_compare
 from ragspine.business import sop as sop_mod
@@ -214,6 +214,14 @@ class ObligationTypeBody(BaseModel):
     active: int = 1
     sort: int = 100
     description: str = ""
+
+
+class DocTypeBody(BaseModel):
+    key: str
+    label: str = ""
+    fields: list = []
+    active: int = 1
+    sort: int = 100
 
 
 class ModelSettingsBody(BaseModel):
@@ -678,6 +686,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return postavke_page()
 
+    @app.get("/ui/dok-tipovi", response_class=HTMLResponse)
+    def ui_dok_tipovi(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_doctypes import doctypes_page
+        return doctypes_page()
+
     @app.get("/ui/mape", response_class=HTMLResponse)
     def ui_mape(request: Request):
         try:
@@ -917,6 +934,25 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"kind": kind}
+
+    @app.get("/doc-types")
+    def doc_types_list(user: str = Depends(require_user_web)):
+        return doc_registry.list_types(spine)
+
+    @app.post("/doc-types")
+    def doc_types_upsert(body: DocTypeBody, user: str = Depends(require_user_web)):
+        try:
+            key = doc_registry.upsert(spine, body.key, body.label, body.fields,
+                                      active=bool(body.active), sort=body.sort, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"key": key}
+
+    @app.get("/doc-types/export")
+    def doc_types_export(user: str = Depends(require_user_web)):
+        return JSONResponse(
+            doc_registry.export_json(spine),
+            headers={"Content-Disposition": 'attachment; filename="doc_types.json"'})
 
     @app.get("/clients/{client_id}/obveze-postavke")
     def client_obligations_get(client_id: int, actor: Actor = Depends(require_actor_web)):
