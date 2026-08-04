@@ -17,7 +17,7 @@ def _cfg_roots(tmp_path, roots):
 def _mk(tmp_path):
     root = tmp_path / "share"; kl = root / "KLIJENTI"
     (kl / "PERIĆ PERO").mkdir(parents=True)
-    (kl / "PODUZEĆE X D.O.O.").mkdir(parents=True)
+    (kl / "PODUZEĆE X D.O.O").mkdir(parents=True)
     return root, kl
 
 
@@ -27,10 +27,10 @@ def test_discover_and_commit(spine, tmp_path):
     fid = folders.register(spine, cfg, str(kl), "klijenti")["id"]
     cand = {c["raw_name"]: c for c in client_discovery.discover(spine, cfg, fid)}
     assert cand["PERIĆ PERO"]["guessed_type"] == "person"
-    assert cand["PODUZEĆE X D.O.O."]["guessed_type"] == "company"
+    assert cand["PODUZEĆE X D.O.O"]["guessed_type"] == "company"
     res = client_discovery.commit(spine, cfg, fid, [
         {"subdir": "PERIĆ PERO", "name": "Perić Pero", "action": "import"},
-        {"subdir": "PODUZEĆE X D.O.O.", "name": "Poduzeće X d.o.o.", "action": "skip"},
+        {"subdir": "PODUZEĆE X D.O.O", "name": "Poduzeće X d.o.o.", "action": "skip"},
     ])
     assert res["created"] == 1 and res["skipped"] == 1
     names = [r["name"] for r in spine.read().execute("SELECT name FROM clients").fetchall()]

@@ -8,7 +8,10 @@ except ImportError:
 
 def _preexec(mem_mb: int):
     limit = mem_mb * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    except (ValueError, OSError):
+        pass  # macOS zna odbiti RLIMIT_AS — bolje bez mem-limita nego pad svakog spawna
 
 
 def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512) -> tuple[int, str, str]:
