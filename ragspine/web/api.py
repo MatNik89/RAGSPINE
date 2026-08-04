@@ -216,6 +216,16 @@ class ObligationTypeBody(BaseModel):
     description: str = ""
 
 
+class DeviceBody(BaseModel):
+    kind: str
+    name: str
+    url: str
+
+
+class PrintBody(BaseModel):
+    doc_id: int
+
+
 class ArchTemplateBody(BaseModel):
     office: list[str] | None = None
     client_subdirs: list[str] | None = None
@@ -704,6 +714,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return postavke_page()
 
+    @app.get("/ui/uredjaji", response_class=HTMLResponse)
+    def ui_uredjaji(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_devices import devices_page
+        return devices_page()
+
     @app.get("/ui/arhitektura", response_class=HTMLResponse)
     def ui_arhitektura(request: Request):
         try:
@@ -995,6 +1014,62 @@ def create_app(spine, cfg) -> FastAPI:
                                           llm=llm, client_id=body.client_id, user=user)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    # Uređaji (E): registar mijenja admin; sken/print koristi svaki radnik
+    # (uz odabir uređaja pri akciji).
+    @app.get("/devices")
+    def devices_list(kind: str | None = None, user: str = Depends(require_user_web)):
+        from ragspine.business import devices as devices_mod
+        return devices_mod.list_devices(spine, kind=kind)
+
+    @app.get("/devices/discover")
+    def devices_discover(actor: Actor = Depends(require_actor_web)):
+        from ragspine.core import lan
+        _require_admin(actor)
+        return lan.discover()
+
+    @app.post("/devices")
+    def devices_add(body: DeviceBody, actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import devices as devices_mod
+        from ragspine.core import lan
+        _require_admin(actor)
+        try:
+            return devices_mod.add_device(spine, body.kind, body.name, body.url,
+                                          user=actor.username)
+        except (ValueError, lan.LanBlocked) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.delete("/devices/{device_id}")
+    def devices_delete(device_id: int, actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import devices as devices_mod
+        _require_admin(actor)
+        try:
+            devices_mod.remove_device(spine, device_id, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"id": device_id, "removed": True}
+
+    @app.post("/devices/{device_id}/scan")
+    def devices_scan(device_id: int, user: str = Depends(require_user_web)):
+        from ragspine.business import devices as devices_mod
+        from ragspine.core import lan
+        try:
+            return devices_mod.scan(spine, cfg, device_id, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except (lan.LanBlocked, RuntimeError) as e:
+            raise HTTPException(502, str(e)) from e
+
+    @app.post("/devices/{device_id}/print")
+    def devices_print(device_id: int, body: PrintBody, user: str = Depends(require_user_web)):
+        from ragspine.business import devices as devices_mod
+        from ragspine.core import lan
+        try:
+            return devices_mod.print_doc(spine, cfg, device_id, body.doc_id, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except (lan.LanBlocked, RuntimeError) as e:
+            raise HTTPException(502, str(e)) from e
 
     # Arhitektura mapa (D2): dogovor o strukturi ureda = admin/owner posao.
     # Preview lista SVE klijente s diska (KLIJENTI mapa) pa nije za
