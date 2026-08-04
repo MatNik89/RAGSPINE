@@ -36,12 +36,19 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
             elif os.name == "nt":
                 # ubij CIJELO stablo — samo proc.kill() ostavlja unuke koji drže
                 # stdout pipe pa communicate() visi do njihova kraja
-                subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                               capture_output=True)
+                tk = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                    capture_output=True)
+                if tk.returncode != 0:
+                    proc.kill()
             else:
                 proc.kill()
         except (ProcessLookupError, OSError):
             pass
-        out, err = proc.communicate()
+        try:
+            # bounded drain: preživjeli unuk s naslijeđenim pipeom ne smije
+            # držati poziv zauvijek
+            out, err = proc.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            out, err = "", ""
         rc = proc.returncode if proc.returncode is not None else -9
         return rc, out, err

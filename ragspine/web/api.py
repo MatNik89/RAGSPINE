@@ -822,8 +822,14 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, "nepoznata mapa")
         base = folders_mod._scoped(cfg, row["path"])
         res = ocr_mod.bulk_ocr(spine, cfg, base)
+        from ragspine.business import folder_scan as fs
+        fs.scan(spine, cfg, folder_id)  # osvježi brojke — dugme ne smije ostati stale
         name = row["label"] or row["path"]
         body = f"OCR gotov za „{name}\": {res['processed']} obrađeno, {res['skipped']} preskočeno."
+        if res.get("signed"):
+            body += f" {res['signed']} potpisanih netaknuto."
+        if res.get("ocr_empty"):
+            body += f" {res['ocr_empty']} nečitljivih."
         with spine.write() as conn:
             conn.execute("INSERT INTO notifications(kind, body) VALUES('folder_ocred', ?)", (body,))
         return {**res, "notified": True}

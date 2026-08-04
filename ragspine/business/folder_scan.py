@@ -11,14 +11,16 @@ _DOC_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md", ".odt", ".r
 
 
 def pdf_has_text(path: str):
-    """True/False ima li PDF tekstualni sloj; None ako fitz nedostupan."""
+    """True/False ima li PDF tekstualni sloj; None ako fitz nedostupan.
+    Isti prag (100 znakova) kao ocr.has_text_layer — dashboard brojka i bulk OCR
+    moraju gledati isti kriterij, inače dugme laže."""
     fitz = optional.need("fitz", "PDF tekst-detekcija")
     if fitz is None:
         return None
     try:
         doc = fitz.open(path)
         try:
-            return any(page.get_text().strip() for page in doc)
+            return sum(len(page.get_text()) for page in doc) >= 100
         finally:
             doc.close()
     except Exception:

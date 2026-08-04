@@ -26,6 +26,12 @@ _UNICODE_FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    # macOS
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    # Windows (%WINDIR% se ekspandira pri probi)
+    "%WINDIR%\\Fonts\\arial.ttf",
+    "%WINDIR%\\Fonts\\calibri.ttf",
 ]
 _unicode_font_path: str | None = None  # None = not probed yet, "" = probed, none found
 _warned_no_unicode_font = False
@@ -38,7 +44,9 @@ def _find_unicode_font() -> str:
     '?????' for Croatian text."""
     global _unicode_font_path
     if _unicode_font_path is None:
-        _unicode_font_path = next((p for p in _UNICODE_FONT_CANDIDATES if os.path.exists(p)), "")
+        _unicode_font_path = next(
+            (q for q in (os.path.expandvars(p) for p in _UNICODE_FONT_CANDIDATES)
+             if os.path.exists(q)), "")
     return _unicode_font_path
 
 
@@ -57,6 +65,22 @@ def has_text_layer(path: str, min_chars: int = 100) -> bool:
     finally:
         doc.close()
     return total >= min_chars
+
+
+def pdf_is_signed(path: str) -> bool:
+    """True ako PDF ima digitalni potpis (sigflags > 0). In-place OCR bi ga
+    poništio — potpisani dokumenti (e-računi) se preskaču."""
+    fitz = _fitz()
+    try:
+        doc = fitz.open(path)
+    except Exception:
+        return False
+    try:
+        return doc.get_sigflags() > 0
+    except Exception:
+        return False
+    finally:
+        doc.close()
 
 
 def rasterize(path: str, dpi: int = 300) -> list[bytes]:
@@ -197,11 +221,23 @@ def write_text_layer(path: str, page_texts: list[str], out_path: str | None = No
                 _insert_all(page, text, fontname=fontname, fontfile=fontfile)
         out = out_path or f"{os.path.splitext(path)[0]}_ocr.pdf"
         if os.path.realpath(out) == os.path.realpath(path):
-            # fitz ne da save preko otvorenog originala — save u temp pa atomično zamijeni
-            tmp = f"{out}.ocrtmp"
-            doc.save(tmp)
-            doc.close()
-            os.replace(tmp, out)
+            # fitz ne da save preko otvorenog originala — save u temp pa atomično zamijeni.
+            # pid u imenu: dva konkurentna OCR-a istog PDF-a si ne gaze temp.
+            tmp = f"{out}.{os.getpid()}.ocrtmp"
+            try:
+                doc.save(tmp)
+                doc.close()
+                try:
+                    # zadrži mode originala — doc.save stvara fajl s default umaskom
+                    os.chmod(tmp, os.stat(out).st_mode & 0o7777)
+                except OSError:
+                    pass
+                os.replace(tmp, out)
+            finally:
+                try:
+                    os.unlink(tmp)  # ostatak samo ako je save/replace pukao
+                except OSError:
+                    pass
         else:
             doc.save(out)
             doc.close()
@@ -228,18 +264,37 @@ def ocr_pdf(spine, cfg, path: str, transport=None, force: bool = False) -> dict:
     path = resolve_scoped_path(cfg, path)
     if not force and has_text_layer(path):
         return {"skipped": True, "out": path, "pages": 0, "engines": {}}
+    if pdf_is_signed(path):
+        return {"skipped": True, "reason": "signed", "out": path, "pages": 0, "engines": {}}
     pairs = [ocr_page_best(png, cfg, transport=transport) for png in rasterize(path)]
     page_texts = [t for t, _e in pairs]
     engines: dict[str, int] = {}
     for _t, e in pairs:
         engines[e] = engines.get(e, 0) + 1
-    write_text_layer(path, page_texts, out_path=path)  # pretraživi sloj U ISTI PDF
     full_text = "\n\n".join(t for t in page_texts if t)
     if not full_text.strip():
+        # ništa pročitano — NE prepisuj original (prazan sloj = besmislen rewrite)
         return {"skipped": False, "pages": len(page_texts), "out": path,
                 "ocr_empty": True, "engines": engines}
+    # indeks PRIJE prepisivanja PDF-a: padne li ingest, original ostaje netaknut
+    # i retry radi; padne li upis sloja, dokument je već u indeksu (sha-dedup
+    # čini ponovni ingest no-opom).
     ingest_text(spine, full_text, title=os.path.basename(path), path=path)
+    write_text_layer(path, page_texts, out_path=path)  # pretraživi sloj U ISTI PDF
     return {"skipped": False, "pages": len(page_texts), "out": path, "engines": engines}
+
+
+def _walk_pdfs(base: str):
+    """PDF-ovi ispod base; simlink koji resolvea izvan base se preskače
+    (audit ne smije čitati, a bulk ne smije pisati izvan tražene mape)."""
+    for root, _d, files in os.walk(base):
+        for f in files:
+            if not f.lower().endswith(".pdf"):
+                continue
+            fp = os.path.join(root, f)
+            if os.path.islink(fp) or not security.path_under(os.path.realpath(fp), base):
+                continue
+            yield fp
 
 
 def audit_folder(cfg, base: str) -> dict:
@@ -247,35 +302,34 @@ def audit_folder(cfg, base: str) -> dict:
     base = resolve_scoped_path(cfg, base)
     n_pdf = n_no = 0
     sample = []
-    for root, _d, files in os.walk(base):
-        for f in files:
-            if not f.lower().endswith(".pdf"):
-                continue
-            n_pdf += 1
-            fp = os.path.join(root, f)
-            try:
-                if not has_text_layer(fp):
-                    n_no += 1
-                    if len(sample) < 20:
-                        sample.append(fp)
-            except Exception:
-                pass
+    for fp in _walk_pdfs(base):
+        n_pdf += 1
+        try:
+            if not has_text_layer(fp):
+                n_no += 1
+                if len(sample) < 20:
+                    sample.append(fp)
+        except Exception:
+            pass
     return {"n_pdf": n_pdf, "n_pdf_no_text": n_no, "sample": sample}
 
 
 def bulk_ocr(spine, cfg, folder: str, transport=None) -> dict:
-    result = {"processed": 0, "skipped": 0, "engines": {}, "errors": []}
-    for root, _, files in os.walk(folder):
-        for fname in files:
-            if not fname.lower().endswith(".pdf"):
-                continue
-            fpath = os.path.join(root, fname)
-            try:
-                res = ocr_pdf(spine, cfg, fpath, transport=transport)
-            except Exception as e:
-                result["errors"].append(f"{fpath}: {e}")
-                continue
-            result["skipped" if res["skipped"] else "processed"] += 1
-            for eng, n in (res.get("engines") or {}).items():
-                result["engines"][eng] = result["engines"].get(eng, 0) + n
+    folder = resolve_scoped_path(cfg, folder)
+    result = {"processed": 0, "skipped": 0, "signed": 0, "ocr_empty": 0,
+              "engines": {}, "errors": []}
+    for fpath in _walk_pdfs(folder):
+        try:
+            res = ocr_pdf(spine, cfg, fpath, transport=transport)
+        except Exception as e:
+            result["errors"].append(f"{fpath}: {e}")
+            continue
+        if res["skipped"]:
+            result["signed" if res.get("reason") == "signed" else "skipped"] += 1
+        elif res.get("ocr_empty"):
+            result["ocr_empty"] += 1  # ništa pročitano — nije "obrađen"
+        else:
+            result["processed"] += 1
+        for eng, n in (res.get("engines") or {}).items():
+            result["engines"][eng] = result["engines"].get(eng, 0) + n
     return result

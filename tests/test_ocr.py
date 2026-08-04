@@ -197,3 +197,26 @@ def test_ocr_pdf_skips_pdf_with_text_layer(spine, cfg, tmp_path):
     result = ocr.ocr_pdf(spine, cfg, str(p), transport=blow_up)
 
     assert result == {"skipped": True, "out": str(p), "pages": 0, "engines": {}}
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_ocr_pdf_skips_signed_pdf_untouched(spine, cfg, tmp_path, monkeypatch):
+    p = tmp_path / "signed.pdf"
+    _make_blank_pdf(str(p))
+    before = p.read_bytes()
+    monkeypatch.setattr(ocr, "pdf_is_signed", lambda path: True)
+    result = ocr.ocr_pdf(spine, cfg, str(p), transport=lambda u, h, b: (_ for _ in ()).throw(
+        AssertionError("potpisani PDF se ne smije OCR-ati")))
+    assert result["skipped"] is True and result["reason"] == "signed"
+    assert p.read_bytes() == before
+
+
+@pytest.mark.skipif(fitz is None, reason="fitz not installed")
+def test_ocr_pdf_empty_result_does_not_rewrite(spine, cfg, tmp_path):
+    p = tmp_path / "blank2.pdf"
+    _make_blank_pdf(str(p))
+    before = p.read_bytes()
+    # bez ocr_url i bez tesseract teksta -> "" -> original mora ostati netaknut
+    result = ocr.ocr_pdf(spine, cfg, str(p))
+    assert result["ocr_empty"] is True
+    assert p.read_bytes() == before
