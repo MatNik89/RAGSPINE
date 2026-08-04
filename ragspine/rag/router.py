@@ -16,6 +16,7 @@ LANES = (
     "ocr",
     "learn",
     "knjizenje",
+    "arhitektura",
     "no_retrieval",
     "reject",
     "chat",
@@ -79,6 +80,12 @@ RULES: list[tuple[re.Pattern, str]] = [
     _rule(r"\bkonto\b", "knjizenje"),
     _rule(r"kontiranje", "knjizenje"),
     _rule(r"temeljnic", "knjizenje"),
+
+    # --- arhitektura: dogovor o strukturi mapa (pregled + spremanje dogovora) ---
+    _rule(r"dogovor\s+(map|uredsk)", "arhitektura"),
+    _rule(r"arhitektur\w*\s+map", "arhitektura"),
+    _rule(r"struktur\w*\s+map", "arhitektura"),
+    _rule(r"map[ae]\s+po\s+klijentu", "arhitektura"),
 
     # --- graph: relationships between entities ---
     _rule(r"povezan", "graph"),

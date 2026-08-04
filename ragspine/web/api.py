@@ -216,6 +216,11 @@ class ObligationTypeBody(BaseModel):
     description: str = ""
 
 
+class ArchTemplateBody(BaseModel):
+    office: list[str] | None = None
+    client_subdirs: list[str] | None = None
+
+
 class ExtractBody(BaseModel):
     doc_id: int
     doc_type: str
@@ -985,19 +990,38 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
+    # Arhitektura mapa (D2): dogovor o strukturi ureda = admin/owner posao.
+    # Preview lista SVE klijente s diska (KLIJENTI mapa) pa nije za
+    # restringirane radnike.
     @app.get("/folder-architecture")
     def folder_architecture_preview(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
-        prop = fa.propose(spine, cfg)
-        # restringirani radnik ne smije vidjeti tuđe klijente ni njihove putanje
-        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-        if vis is not None:
-            prop["clients"] = [c for c in prop["clients"] if c["client_id"] in vis]
-            prop["n_missing"] = (sum(1 for e in prop["must_have"] if not e["exists"])
-                                 + sum(1 for c in prop["clients"] if not c["folder_exists"])
-                                 + sum(1 for c in prop["clients"]
-                                       for e in c["subdirs"] if not e["exists"]))
-        return prop
+        _require_admin(actor)
+        return fa.propose(spine, cfg)
+
+    @app.get("/folder-architecture/learned")
+    def folder_architecture_learned(actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import folder_architecture as fa
+        _require_admin(actor)
+        return fa.learn_structure(spine, cfg)
+
+    @app.get("/folder-architecture/template")
+    def folder_architecture_template_get(actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import folder_architecture as fa
+        _require_admin(actor)
+        return fa.get_template(spine)
+
+    @app.post("/folder-architecture/template")
+    def folder_architecture_template_set(body: ArchTemplateBody,
+                                         actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import folder_architecture as fa
+        _require_admin(actor)
+        try:
+            return fa.set_template(spine, office=body.office,
+                                   client_subdirs=body.client_subdirs,
+                                   user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.post("/folder-architecture/apply")
     def folder_architecture_apply(actor: Actor = Depends(require_actor_web)):

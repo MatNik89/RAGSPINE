@@ -22,20 +22,33 @@ def _slug(name: str) -> str:
     return s or "klijent"
 
 
-# jedina istina za ime mape klijenata — folder_architecture je reusa (case-
-# sensitive NAS bi inače dobio dva stabla klijenti/ i KLIJENTI/)
+# fallback ime mape klijenata kad NIJE registrirana stvarna (npr. KLIJENTI na
+# NAS-u) kroz Mrežne mape s role='klijenti'. Registrirana mapa uvijek pobjeđuje
+# — korisnikova postojeća struktura je izvor istine, ne naša konstanta.
 KLIJENTI_DIR = "klijenti"
 
 
-def _client_root(cfg, client_id, name: str) -> str:
-    """Absolute path for a client's NAS folder: {root}/klijenti/{id}_{slug}.
-    SECURITY: realpath+commonpath guard — the result must resolve inside
-    nas_root (or data_dir when nas_root is unset), never escape it."""
-    base = cfg.nas_root or cfg.data_dir
-    root = os.path.realpath(base)
+def klijenti_root(spine, cfg) -> str | None:
+    """Stvarna mapa klijenata: registrirana mapa role='klijenti'; fallback
+    {root}/klijenti ako postoji na disku; inače None."""
+    r = spine.read().execute(
+        "SELECT path FROM folders WHERE role='klijenti' AND enabled=1 "
+        "ORDER BY id LIMIT 1").fetchone()
+    if r:
+        return os.path.realpath(r["path"])
+    fb = os.path.join(os.path.realpath(cfg.nas_root or cfg.data_dir), KLIJENTI_DIR)
+    return os.path.realpath(fb) if os.path.isdir(fb) else None
+
+
+def _client_root(spine, cfg, client_id, name: str) -> str:
+    """Absolute path for a client's NAS folder: {klijenti_root}/{id}_{slug}.
+    SECURITY: realpath+commonpath guard — the result must resolve inside the
+    klijenti base, never escape it."""
+    base = klijenti_root(spine, cfg) or os.path.realpath(
+        os.path.join(cfg.nas_root or cfg.data_dir, KLIJENTI_DIR))
     folder = f"{client_id}_{_slug(name)}"
-    dest = os.path.realpath(os.path.join(root, KLIJENTI_DIR, folder))
-    if not security.path_under(dest, root):
+    dest = os.path.realpath(os.path.join(base, folder))
+    if not security.path_under(dest, base):
         raise ValueError(f"path traversal blocked: {name!r} escapes root")
     return dest
 
@@ -70,9 +83,14 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
                  data.get("industry") or "", data.get("pdv_status") or "",
                  data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0, pdv_freq, regime),
             ).lastrowid
-            folder_path = _client_root(cfg, client_id, name)
-            # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")
-            nas_folder = os.path.relpath(folder_path, root).replace(os.sep, "/")
+            folder_path = _client_root(spine, cfg, client_id, name)
+            if security.path_under(folder_path, root):
+                # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")
+                nas_folder = os.path.relpath(folder_path, root).replace(os.sep, "/")
+            else:
+                # registrirana KLIJENTI mapa izvan nas_roota (mount) — apsolutni
+                # realpath, isti oblik kao client_discovery.commit
+                nas_folder = folder_path
             c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas_folder, client_id))
     except sqlite3.IntegrityError as e:
         raise ValueError("klijent s tim OIB-om već postoji") from e
@@ -90,7 +108,9 @@ def _client_dir(spine, cfg, client_id) -> str:
         raise ValueError(f"nepoznat klijent: {client_id}")
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     client_dir = os.path.realpath(os.path.join(root, row["nas_folder"] or ""))
-    if not security.path_under(client_dir, root):
+    kroot = klijenti_root(spine, cfg)
+    if not (security.path_under(client_dir, root)
+            or (kroot and security.path_under(client_dir, kroot))):
         raise ValueError("path traversal blocked")
     return client_dir
 
