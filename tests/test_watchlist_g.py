@@ -86,3 +86,24 @@ def test_api_keywords_upcoming_toggle_page(spine, cfg):
         r = c.get("/watchlist/export.xlsx", headers=h)
         assert r.status_code == 200
         assert "attachment" in r.headers["content-disposition"]
+
+
+def test_keywords_cap_and_nfd_matching(spine):
+    with pytest.raises(ValueError, match="max 100"):
+        watchlist.set_keywords(spine, [f"kw{i}" for i in range(150)])
+    # dekomponirani Unicode (c + combining caron) matcha kao č
+    watchlist.set_keywords(spine, ["račun"])
+    nfd = "izdan je nov račun za klijenta"
+    assert watchlist.match_keywords(spine, nfd) == ["račun"]
+
+
+@pytest.mark.skipif(openpyxl is None, reason="openpyxl not installed")
+def test_export_xlsx_neutralizes_formulas(spine, cfg):
+    import io
+    sid = watchlist.add_source(spine, "http://primjer.hr/x", category="=1+1")
+    with spine.write() as c:
+        c.execute("INSERT INTO upcoming_changes(source_id,description,effective_date) "
+                  "VALUES(?,?,?)", (sid, '=HYPERLINK("http://zlo.hr","klik")', "2026-09-01"))
+    wb = openpyxl.load_workbook(io.BytesIO(watchlist.export_xlsx(spine)))
+    cell = wb["Nadolazeće promjene"].cell(2, 2)
+    assert cell.data_type != "f" and cell.value.startswith("'=")

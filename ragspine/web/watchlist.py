@@ -31,6 +31,11 @@ _DIACRITICS = str.maketrans("čćžšđ", "cczsd")
 
 
 def _normalize(text: str) -> str:
+    # NFKD + strip combining marks: dekomponirani Unicode ("c" + U+030C) mora
+    # matchati isto kao prekomponirani "č"
+    import unicodedata
+    text = "".join(ch for ch in unicodedata.normalize("NFKD", text)
+                   if not unicodedata.combining(ch))
     return text.lower().translate(_DIACRITICS)
 
 _RATE_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
@@ -356,6 +361,8 @@ def set_keywords(spine, words, user: str = "?") -> list[str]:
             continue
         seen.add(key)
         out.append(w)
+        if len(out) > 100:
+            raise ValueError("previše ključnih riječi (max 100)")
     spine.set_override("watchlist", "keywords", json.dumps(out, ensure_ascii=False))
     spine.audit(user, "watch_keywords", json.dumps(out, ensure_ascii=False))
     return out
@@ -367,6 +374,14 @@ def match_keywords(spine, text: str) -> list[str]:
 
 
 # --- G: Excel izvoz praćenja (openpyxl je optional [full] ovisnost) -----------
+
+def _cell(v):
+    """Anti formula-injection: vrijednost s praćenih stranica koja počinje
+    s = + - @ bi u Excelu postala IZVRŠNA formula — prefiks ' je neutralizira."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@"):
+        return "'" + v
+    return v
+
 
 def export_xlsx(spine) -> bytes:
     from ragspine.core import optional as _optional
@@ -385,18 +400,19 @@ def export_xlsx(spine) -> bytes:
             """SELECT u.effective_date, u.description, s.url
                FROM upcoming_changes u LEFT JOIN watch_sources s ON s.id=u.source_id
                ORDER BY u.effective_date""").fetchall():
-        ws.append([r["effective_date"], r["description"], r["url"]])
+        ws.append([_cell(r["effective_date"]), _cell(r["description"]), _cell(r["url"])])
 
     ws2 = wb.create_sheet("Rokovi")
     ws2.append(["Rok", "Vrsta", "Opis"])
     for r in kalendar.upcoming(spine, days=60):
-        ws2.append([r["due"], r["kind"], r["description"]])
+        ws2.append([_cell(r["due"]), _cell(r["kind"]), _cell(r["description"])])
 
     ws3 = wb.create_sheet("Izvori")
     ws3.append(["URL", "Kategorija", "Vrsta", "Aktivan"])
     for r in spine.read().execute(
             "SELECT url, category, kind, active FROM watch_sources ORDER BY url").fetchall():
-        ws3.append([r["url"], r["category"], r["kind"], "da" if r["active"] else "ne"])
+        ws3.append([_cell(r["url"]), _cell(r["category"]), _cell(r["kind"]),
+                    "da" if r["active"] else "ne"])
 
     buf = io.BytesIO()
     wb.save(buf)
