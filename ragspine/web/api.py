@@ -399,13 +399,48 @@ _DUMMY_PW_HASH = hash_password("nexus-dummy-pw-for-timing-only")
 
 
 def create_app(spine, cfg) -> FastAPI:
-    app = FastAPI()
+    # /docs + /redoc + /openapi.json ugašeni: Swagger UI vuče JS/CSS s CDN-a (pada
+    # pod strogim CSP-om), a interaktivni API explorer je bespotrebna neautenti-
+    # cirana enumeracija površine na produkcijskom LAN-u.
+    app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
     tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
     limiter = RateLimiter()
     _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba
+
+    # Sigurnosna zaglavlja (defense-in-depth): clickjacking, MIME-sniff, referrer
+    # leak, base-tag hijack. CSP dopušta 'unsafe-inline' jer je UI inline-script,
+    # ali bez 'unsafe-eval' (nema eval/Function) i bez vanjskih izvora (LAN/offline).
+    _CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+            "connect-src 'self'; object-src 'none'; base-uri 'none'; "
+            "frame-ancestors 'none'; form-action 'self'")
+
+    _MAX_BODY = 64 * 1024 * 1024  # 64MB: iznad 25MB base64 uploada (~34MB), ispod DoS-a
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):
+        # pre-decode gate: Starlette bufferira cijelo tijelo prije handlera, pa
+        # 1GB JSON = 1.75GB RAM prije 400 — odbij po Content-Lengthu odmah.
+        # ponytail: hvata samo zahtjeve s Content-Lengthom; chunked/streaming bez
+        # njega prolazi — pravi hard-limit je na reverse-proxyju (deploy doc), ovo
+        # je jeftin prvi filter za tipičan JSON-bomb.
+        clen = request.headers.get("content-length")
+        if clen and clen.isdigit() and int(clen) > _MAX_BODY:
+            return JSONResponse({"detail": "tijelo zahtjeva preveliko", "max_bytes": _MAX_BODY},
+                                status_code=413)
+        resp = await call_next(request)
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["X-Frame-Options"] = "DENY"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        resp.headers["Content-Security-Policy"] = _CSP
+        resp.headers["Server"] = "RAGSPINE"
+        if cfg.https_only:
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return resp
+
     app.include_router(static_mod.router)
 
     @app.get("/health")
@@ -1004,11 +1039,11 @@ def create_app(spine, cfg) -> FastAPI:
         return dokumenti_page()
 
     @app.get("/notifications.json")
-    def notifications_json(user: str = Depends(require_user_web)):
+    def notifications_json(actor: Actor = Depends(require_actor_web)):
         rows = spine.read().execute(
             "SELECT id, kind, body, client_id, seen, at FROM notifications ORDER BY at DESC LIMIT 50"
         ).fetchall()
-        return [dict(r) for r in rows]
+        return _visible_rows(actor, [dict(r) for r in rows])
 
     @app.post("/notifications/{notif_id}/seen")
     def notifications_mark_seen(notif_id: int, user: str = Depends(require_user_web)):
@@ -1076,8 +1111,15 @@ def create_app(spine, cfg) -> FastAPI:
         return {"key": key}
 
     @app.post("/extract")
-    def extract_run(body: ExtractBody, user: str = Depends(require_user_web)):
+    def extract_run(body: ExtractBody, actor: Actor = Depends(require_actor_web)):
         from ragspine.docs import extraction as extraction_mod
+        # radnik ne smije ekstraktati tuđi dokument ni pripisati ga tuđem klijentu
+        drow = spine.read().execute("SELECT client_id FROM documents WHERE id=?",
+                                    (body.doc_id,)).fetchone()
+        if drow is not None and drow["client_id"] is not None:
+            _guard_client(actor, drow["client_id"])
+        if body.client_id is not None:
+            _guard_client(actor, body.client_id)
         # LLM je fallback — bez konfiguriranog providera ekstrakcija ide regex-only
         try:
             llm = LLMClient(model_settings.apply(spine, cfg))
@@ -1085,7 +1127,7 @@ def create_app(spine, cfg) -> FastAPI:
             llm = None
         try:
             return extraction_mod.extract(spine, cfg, body.doc_id, body.doc_type,
-                                          llm=llm, client_id=body.client_id, user=user)
+                                          llm=llm, client_id=body.client_id, user=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -1284,11 +1326,13 @@ def create_app(spine, cfg) -> FastAPI:
         return [dict(r) for r in kalendar.upcoming(spine, days)]
 
     @app.get("/expiry")
-    def expiry_expiring(days: int = 60, user: str = Depends(require_user_web)):
-        return [dict(r) for r in expiry_mod.expiring(spine, days)]
+    def expiry_expiring(days: int = 60, actor: Actor = Depends(require_actor_web)):
+        return _visible_rows(actor, [dict(r) for r in expiry_mod.expiring(spine, days)])
 
     @app.post("/expiry")
-    def expiry_add(body: ExpiryBody, user: str = Depends(require_user_web)):
+    def expiry_add(body: ExpiryBody, actor: Actor = Depends(require_actor_web)):
+        if body.client_id is not None:
+            _guard_client(actor, body.client_id)
         item_id = expiry_mod.add(spine, body.client_id, body.kind, body.label, body.expires)
         return {"id": item_id}
 
@@ -1305,12 +1349,20 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/notes")
     def notes_search(client_id: int | None = None, q: str | None = None,
-                      user: str = Depends(require_user_web)):
-        return [dict(r) for r in notes.search(spine, term=q, client_id=client_id)]
+                      actor: Actor = Depends(require_actor_web)):
+        if client_id is not None:
+            _guard_client(actor, client_id)
+        rows = [dict(r) for r in notes.search(spine, term=q, client_id=client_id)]
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is not None:  # restringirani radnik ne vidi bilješke tuđih klijenata
+            rows = [r for r in rows if r.get("client_id") in vis]
+        return rows
 
     @app.post("/notes")
-    def notes_add(body: NoteBody, user: str = Depends(require_user_web)):
-        note_id = notes.add(spine, body.client_id, user, body.body)
+    def notes_add(body: NoteBody, actor: Actor = Depends(require_actor_web)):
+        if body.client_id is not None:
+            _guard_client(actor, body.client_id)
+        note_id = notes.add(spine, body.client_id, actor.username, body.body)
         return {"id": note_id}
 
     @app.get("/memory/hot")
@@ -1330,12 +1382,14 @@ def create_app(spine, cfg) -> FastAPI:
         return {"key": key, "value": value}
 
     @app.post("/messaging/send")
-    def messaging_send(body: MessagingSendBody, user: str = Depends(require_user_web)):
+    def messaging_send(body: MessagingSendBody, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, body.client_id)  # radnik ne šalje poruke tuđim klijentima
         return messaging.send_to_client(spine, cfg, body.client_id, body.subject, body.body,
                                          dry_run=body.dry_run)
 
     @app.post("/messaging/campaign")
-    def messaging_campaign(body: MessagingCampaignBody, user: str = Depends(require_user_web)):
+    def messaging_campaign(body: MessagingCampaignBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # masovni izlaz prema svim klijentima = admin posao
         kw = {"days": body.days}
         if body.kind is not None:
             kw["kind"] = body.kind
@@ -1348,8 +1402,9 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, str(e)) from e
 
     @app.get("/messaging/log")
-    def messaging_log(client_id: int | None = None, user: str = Depends(require_user_web)):
+    def messaging_log(client_id: int | None = None, actor: Actor = Depends(require_actor_web)):
         if client_id is not None:
+            _guard_client(actor, client_id)
             rows = spine.read().execute(
                 "SELECT * FROM message_log WHERE client_id=? ORDER BY at DESC LIMIT 50", (client_id,)
             ).fetchall()
@@ -1357,11 +1412,23 @@ def create_app(spine, cfg) -> FastAPI:
             rows = spine.read().execute(
                 "SELECT * FROM message_log ORDER BY at DESC LIMIT 50"
             ).fetchall()
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is not None:  # restringirani radnik ne vidi log tuđih klijenata
+            out = [r for r in out if r.get("client_id") in vis]
+        return out
 
     def _guard_client(actor: Actor, client_id: int) -> None:
         if not client_visibility.can_see(spine, actor.user_id, client_id, actor.role):
             raise HTTPException(403, "nemate pristup ovom klijentu")
+
+    def _visible_rows(actor: Actor, rows: list) -> list:
+        """Odbaci retke skrivenih klijenata (client_id IS NULL = uredski, ostaje
+        svima). Zajednički filtar za agregatne read-liste (expiry, notifications)."""
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is None:
+            return rows
+        return [r for r in rows if r.get("client_id") is None or r.get("client_id") in vis]
 
     @app.post("/clients/assist")
     def client_assist(body: ClientAssistBody, actor: Actor = Depends(require_actor_web)):
@@ -1395,16 +1462,18 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": result["id"], "nas_folder": result["nas_folder"]}
 
     @app.get("/clients/discover")
-    def clients_discover(folder_id: int, user: str = Depends(require_user_web)):
+    def clients_discover(folder_id: int, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import client_discovery
+        _require_admin(actor)  # enumeracija/kreiranje klijenata iz NAS mape = admin
         try:
             return client_discovery.discover(spine, cfg, folder_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.post("/clients/discover/commit")
-    def clients_discover_commit(body: DiscoverCommitBody, user: str = Depends(require_user_web)):
+    def clients_discover_commit(body: DiscoverCommitBody, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import client_discovery
+        _require_admin(actor)
         try:
             return client_discovery.commit(spine, cfg, body.folder_id, body.items)
         except ValueError as e:
@@ -1482,7 +1551,9 @@ def create_app(spine, cfg) -> FastAPI:
         return cjenik.price_list(spine)
 
     @app.post("/cjenik/izracun")
-    def cjenik_izracun(body: CjenikIzracunBody, user: str = Depends(require_user_web)):
+    def cjenik_izracun(body: CjenikIzracunBody, actor: Actor = Depends(require_actor_web)):
+        if body.client_id is not None:
+            _guard_client(actor, body.client_id)
         try:
             return cjenik.izracunaj_cijenu(spine, body.client_id, employees=body.employees,
                                             extras=body.extras)
@@ -1490,7 +1561,8 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/cjenik/usporedba/{client_id}")
-    def cjenik_usporedba(client_id: int, user: str = Depends(require_user_web)):
+    def cjenik_usporedba(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
         try:
             return cjenik.usporedi_s_trzistem(spine, client_id)
         except ValueError as e:
@@ -1583,7 +1655,9 @@ def create_app(spine, cfg) -> FastAPI:
         return list(doc_generator.TEMPLATES)
 
     @app.post("/doc/generate")
-    def doc_generate(body: DocGenerateBody, user: str = Depends(require_user_web)):
+    def doc_generate(body: DocGenerateBody, actor: Actor = Depends(require_actor_web)):
+        if body.client_id is not None:
+            _guard_client(actor, body.client_id)
         try:
             result = doc_generator.generate_from_client(
                 spine, body.doc_type, body.client_id, extra=body.extra)

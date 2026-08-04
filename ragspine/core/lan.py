@@ -18,13 +18,32 @@ class LanBlocked(Exception):
     pass
 
 
+_AWS_IPV6_IMDS = None  # lijeno inicijaliziran (import unutar funkcije)
+
+
 def _is_lan_addr(addr: str) -> bool:
     import ipaddress
+    global _AWS_IPV6_IMDS
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
-    return ip.is_private or ip.is_loopback or ip.is_link_local
+    # IPv4-mapped IPv6 (::ffff:169.254.169.254) normaliziraj na ugniježđeni IPv4
+    # pa ista pravila vrijede — inače bi metadata adresa prošla kroz IPv6 granu.
+    mapped = getattr(ip, "ipv4_mapped", None)
+    if mapped is not None:
+        ip = mapped
+    # NIKAD: unspecified (0.0.0.0/::), link-local (169.254/fe80 → cloud metadata),
+    # multicast. Loopback je OK (device-add je admin-only, treba za testove).
+    if ip.is_unspecified or ip.is_link_local or ip.is_multicast:
+        return False
+    if _AWS_IPV6_IMDS is None:
+        _AWS_IPV6_IMDS = ipaddress.IPv6Address("fd00:ec2::254")
+    if ip == _AWS_IPV6_IMDS:  # AWS IPv6 IMDS je ULA (is_private) — eksplicitno odbij
+        return False
+    if ip.is_loopback:
+        return True
+    return ip.is_private and not ip.is_reserved
 
 
 def assert_lan_host(host: str, port: int) -> str:

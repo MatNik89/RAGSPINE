@@ -35,6 +35,11 @@ class Config:
         e = os.environ.get
         data_dir = os.path.expanduser(e("RAGSPINE_DATA_DIR", "~/.ragspine"))
         Path(data_dir).mkdir(parents=True, exist_ok=True)
+        # data_dir drži DB (PII), secret i modele — 0700 (no-op na Windowsu)
+        try:
+            os.chmod(data_dir, 0o700)
+        except OSError:
+            pass
         secret = e("RAGSPINE_JWT_SECRET", "")
         if not secret:
             sf = Path(data_dir) / "secret"

@@ -243,9 +243,10 @@ def test_verify_expansion_respects_org(spine, cfg, monkeypatch):
     calls = []
     real_search = verify.retrieval.search
 
-    def spy(sp, q, k=8, freshness=True, org_id=None):
+    def spy(sp, q, k=8, freshness=True, org_id=None, visible_client_ids=None):
         calls.append(org_id)
-        return real_search(sp, q, k=k, freshness=freshness, org_id=org_id)
+        return real_search(sp, q, k=k, freshness=freshness, org_id=org_id,
+                           visible_client_ids=visible_client_ids)
 
     monkeypatch.setattr(verify.retrieval, "search", spy)
     ingest.ingest_text(spine, "Rok za JOPPD je 15. u mjesecu, prema pravilniku.",

@@ -1,7 +1,7 @@
 """Chat orchestrator: wires router -> cache -> kb -> lane handlers -> retrieval/LLM/citations."""
 import json
 
-from ragspine.business import monthly
+from ragspine.business import client_visibility, monthly
 from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.knowledge import features, kb, memory_layers, skills, wiki
 from ragspine.rag import (
@@ -132,7 +132,12 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # bez izvršenja bi lagao, pa ni read ni write keša za tu lane
     skip_cache = has_history or resolved_client is not None or lane == "arhitektura"
 
-    if not skip_cache:
+    # restringirani radnik ne smije dobiti keširani odgovor koji je (za nekoga s
+    # širom vidljivošću) mogao biti sastavljen iz dokumenata skrivenog klijenta.
+    visible = (client_visibility.visible_ids(spine, actor.user_id, actor.role)
+               if actor is not None else None)
+
+    if not skip_cache and visible is None:
         cached_answer = cache.get(spine, query, org_id=org_id)
         if cached_answer is not None:
             return _package(cached_answer, "chat", 1.0, [], True)
@@ -141,7 +146,10 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # reason as the cache skip above — a kb hit keyed on plain query text may
     # have been saved for a different (or no) client and would silently drop
     # the napomena/"client" key on repeat.
-    kb_answer = kb.lookup(spine, query, org_id=org_id) if resolved_client is None else None
+    # kb unos je mogao biti spremljen iz dokumenta skrivenog klijenta — ne
+    # serviraj ga restringiranom radniku (isto kao keš iznad).
+    kb_answer = (kb.lookup(spine, query, org_id=org_id)
+                 if resolved_client is None and visible is None else None)
     if kb_answer is not None:
         return _package(kb_answer, "chat", 0.9, [], False)
 
@@ -158,7 +166,10 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
-    hits = retrieval.search(spine, query, k=selfrag.k_for(query), org_id=org_id)
+    # restringirani radnik ne smije kroz RAG izvući dokumente skrivenog klijenta
+    # (uredski client_id IS NULL dokumenti ostaju svima) — Codex nalaz HIGH.
+    hits = retrieval.search(spine, query, k=selfrag.k_for(query), org_id=org_id,
+                            visible_client_ids=visible)
 
     if not selfrag.check_relevance(llm, query, hits):
         web_handler = LANE_HANDLERS.get("web")
@@ -175,7 +186,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # Faza 3: višeprolazna provjera prije odgovora (retrieve→nacrt→citati→proširi).
     try:
         best = verify.run(spine, query, hits, llm, prior_turns, extra=extra_context,
-                          org_id=org_id)
+                          org_id=org_id, visible_client_ids=visible)
     except (LLMUnavailable, LLMError):
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
@@ -213,13 +224,16 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         confidence = best["confidence"]
         sources = [{"n": n, "title": bhits[n - 1].title, "doc_id": bhits[n - 1].doc_id}
                    for n in report.cited if 1 <= n <= len(bhits)]
-        try:
-            related = authority.related_documents(spine, bhits)
-            if related:
-                titles = ", ".join(r["title"] for r in related)
-                final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
-        except Exception:
-            pass
+        # citation-graph ekspanzija može dosegnuti dokumente skrivenog klijenta i
+        # procuriti im naslov — preskoči za restringiranog radnika.
+        if visible is None:
+            try:
+                related = authority.related_documents(spine, bhits)
+                if related:
+                    titles = ", ".join(r["title"] for r in related)
+                    final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
+            except Exception:
+                pass
         if napomena_block:
             final_text = f"{final_text}\n\n{napomena_block}"
         final_text = f"{final_text}\n\nTočnost: {pct}% · {verify.explain(best)}"

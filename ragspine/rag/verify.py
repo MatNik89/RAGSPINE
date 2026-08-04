@@ -30,7 +30,7 @@ def _merge(a, b):
 
 def run(spine, query: str, hits, llm, prior_turns=None,
         threshold: float = THRESHOLD, max_passes: int = MAX_PASSES, extra: str = "",
-        org_id=None) -> dict:
+        org_id=None, visible_client_ids=None) -> dict:
     """Vrati najbolji kandidat: {text, report, confidence, cited_hits, hits, passes, threshold}.
     llm.complete može podići LLMError/LLMUnavailable — pušta se pozivatelju."""
     best = None
@@ -64,7 +64,8 @@ def run(spine, query: str, hits, llm, prior_turns=None,
         prev_conf = conf
         # org_id MORA pratiti i ekspanziju — bez njega bi 2.+ prolaz pobjegao
         # iz tenant filtra i umiješao tuđe dokumente u kontekst
-        more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4, org_id=org_id)
+        more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4, org_id=org_id,
+                                visible_client_ids=visible_client_ids)
         merged = _merge(hits, more)
         if len(merged) == len(hits):  # ništa novo — nema smisla ponavljati isti nacrt
             break

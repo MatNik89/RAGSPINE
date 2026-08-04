@@ -28,7 +28,8 @@ def _fts_query(q: str) -> str:
     return " OR ".join(f'"{t}"' for t in tokens)
 
 
-def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None) -> list[Hit]:
+def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None,
+           visible_client_ids: set | None = None) -> list[Hit]:
     fts_q = _fts_query(query)
     if not fts_q:
         return []
@@ -68,10 +69,18 @@ def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None) -
         # tvrda tenant-izolacija: dokument bez podudarnog org_id nikad ne izlazi
         org_sql = " AND d.org_id = ?"
         params.append(org_id)
+    vis_sql = ""
+    if visible_client_ids is not None:
+        # restringirani radnik: uredski (client_id IS NULL) dokumenti su svima
+        # vidljivi, ali klijentski dokument izlazi samo ako je klijent vidljiv.
+        # Prazan skup → izlaze samo uredski dokumenti.
+        ph = ",".join("?" * len(visible_client_ids))
+        vis_sql = f" AND (d.client_id IS NULL{f' OR d.client_id IN ({ph})' if ph else ''})"
+        params.extend(visible_client_ids)
     rows = conn.execute(
         f"""SELECT c.id AS chunk_id, c.doc_id, c.title, c.text, d.doc_type
             FROM chunks c JOIN documents d ON d.id = c.doc_id
-            WHERE c.id IN ({placeholders}){freshness_sql}{org_sql}""",
+            WHERE c.id IN ({placeholders}){freshness_sql}{org_sql}{vis_sql}""",
         params,
     ).fetchall()
 

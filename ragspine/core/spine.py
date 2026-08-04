@@ -1,4 +1,4 @@
-import sqlite3, threading
+import os, sqlite3, threading
 from contextlib import contextmanager
 
 SCHEMA = """
@@ -197,6 +197,13 @@ class Spine:
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
+        # DB drži sav klijentski PII + pbkdf2 hasheve lozinki — 0600 da drugi
+        # lokalni korisnici hosta ne mogu čitati (chmod no-op na Windowsu).
+        for p in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
 
     def _conn(self) -> sqlite3.Connection:
         c = getattr(self._local, "conn", None)
