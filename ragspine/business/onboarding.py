@@ -87,14 +87,26 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
             regime = data.get("regime") or ""
             if regime not in ("", "dobit", "dohodak", "pausal"):
                 regime = ""
+            legal_form = data.get("legal_form") or ""
+            if legal_form not in ("", "obrt", "poduzece"):
+                raise ValueError(f"pravni oblik mora biti obrt|poduzece, ne {legal_form!r}")
+            if legal_form == "poduzece" and regime in ("dohodak", "pausal"):
+                raise ValueError("poduzeće ne može biti na dohotku/paušalu — obračun je dobit")
             client_id = c.execute(
                 """INSERT INTO clients(name,oib,email,phone,owner,industry,pdv_status,
-                       pausal_eur,has_employees,pdv_freq,regime)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                       pausal_eur,has_employees,pdv_freq,regime,legal_form)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (name, oib, data.get("email") or "", data.get("phone") or "", owner,
                  data.get("industry") or "", data.get("pdv_status") or "",
-                 data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0, pdv_freq, regime),
+                 data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0,
+                 pdv_freq, regime, legal_form),
             ).lastrowid
+            # praćene vrste dokumenata (C2 registar) — dogovoreno u wizardu
+            for key in dict.fromkeys(data.get("doc_types") or []):
+                if not isinstance(key, str) or not key.strip():
+                    continue
+                c.execute("INSERT OR IGNORE INTO client_doc_types(client_id, doc_type_key) "
+                          "VALUES(?,?)", (client_id, key.strip()))
             folder_path = _client_root(spine, cfg, client_id, name)
             if security.path_under(folder_path, root):
                 # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")

@@ -38,7 +38,7 @@ def test_klijenti_page_authed(spine, cfg):
     r = c.get("/ui/klijenti", headers=_auth(tok))
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
-    assert "Dodaj klijenta" in r.text
+    assert "Dodaj novog klijenta" in r.text
     assert "/clients" in r.text
     assert "@font-face" in r.text
 

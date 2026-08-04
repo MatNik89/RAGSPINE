@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, client_id INTEGER, auth
   body TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS doc_types(key TEXT PRIMARY KEY, label TEXT,
   fields_json TEXT DEFAULT '[]', active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100);
+CREATE TABLE IF NOT EXISTS client_doc_types(client_id INTEGER, doc_type_key TEXT,
+  PRIMARY KEY(client_id, doc_type_key));
 CREATE TABLE IF NOT EXISTS devices(id INTEGER PRIMARY KEY, kind TEXT, name TEXT,
   url TEXT, added_by TEXT, added_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS doc_extracts(doc_id INTEGER PRIMARY KEY, doc_type_key TEXT,
@@ -174,6 +176,7 @@ class Spine:
                 "has_employees": "INTEGER DEFAULT 0",
                 "pdv_freq": "TEXT DEFAULT 'monthly'",
                 "regime": "TEXT DEFAULT ''",
+                "legal_form": "TEXT DEFAULT ''",
             })
             _ensure_columns(c, "documents", {
                 "file_sha": "TEXT",

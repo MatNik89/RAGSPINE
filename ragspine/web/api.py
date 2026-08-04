@@ -182,6 +182,18 @@ class ClientCreateBody(BaseModel):
     has_employees: int = 0
     pdv_freq: str = "monthly"
     regime: str = ""
+    legal_form: str = ""
+    doc_types: list[str] = []
+
+
+class ClientAssistBody(BaseModel):
+    name: str = ""
+    oib: str = ""
+    legal_form: str = ""
+    regime: str = ""
+    pdv_status: str = ""
+    has_employees: int = 0
+    pausal_eur: float = 0
 
 
 class ClientDocumentBody(BaseModel):
@@ -681,6 +693,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from ragspine.web.templates_uvoz import uvoz_page
         return uvoz_page()
+
+    @app.get("/ui/novi-klijent", response_class=HTMLResponse)
+    def ui_novi_klijent(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_wizard import wizard_page
+        return wizard_page()
 
     @app.get("/ui/klijent/{client_id}", response_class=HTMLResponse)
     def ui_klijent(request: Request, client_id: int):
@@ -1288,6 +1309,22 @@ def create_app(spine, cfg) -> FastAPI:
     def _guard_client(actor: Actor, client_id: int) -> None:
         if not client_visibility.can_see(spine, actor.user_id, client_id, actor.role):
             raise HTTPException(403, "nemate pristup ovom klijentu")
+
+    @app.post("/clients/assist")
+    def client_assist(body: ClientAssistBody, actor: Actor = Depends(require_actor_web)):
+        from ragspine.business import client_assist
+        try:
+            llm = LLMClient(model_settings.apply(spine, cfg))
+        except Exception:
+            llm = None
+        return client_assist.assist(spine, cfg, body.model_dump(), llm=llm)
+
+    @app.get("/clients/{client_id}/doc-types")
+    def client_doc_types_get(client_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_client(actor, client_id)
+        return [r["doc_type_key"] for r in spine.read().execute(
+            "SELECT doc_type_key FROM client_doc_types WHERE client_id=? ORDER BY doc_type_key",
+            (client_id,)).fetchall()]
 
     @app.post("/clients")
     def client_create(body: ClientCreateBody, actor: Actor = Depends(require_actor_web)):

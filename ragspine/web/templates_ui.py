@@ -897,7 +897,7 @@ def klijenti_page() -> str:
 <p class="meta">Svi klijenti ureda — otvori karton za pun pregled.</p>
 <div style="display:flex;gap:.5rem;align-items:center;margin:1rem 0;flex-wrap:wrap">
   <input type="text" id="search" placeholder="Pretraži po imenu ili OIB-u...">
-  <button type="button" class="btn" id="toggle-add">Dodaj klijenta</button>
+  <a class="btn" href="/ui/novi-klijent">Dodaj novog klijenta</a><button type="button" class="btn btn-ghost" id="toggle-add">Brzi unos</button>
 </div>
 <form id="add-form" class="stack" style="display:none;margin-bottom:1.5rem">
   <label for="f-name">Naziv</label>
