@@ -98,3 +98,48 @@ def test_autosort_unknown_client_notifies(spine, cfg, tmp_path):
         "SELECT * FROM notifications WHERE kind='eracun_unmatched'"
     ).fetchone()
     assert row is not None
+
+
+# --- XXE / billion-laughs (entity-expansion DoS) ---
+
+_BILLION_LAUGHS = b"""<?xml version="1.0"?>
+<!DOCTYPE lolz [
+ <!ENTITY lol "lol">
+ <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+ <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+]>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2">&lol3;</Invoice>"""
+
+_XXE_EXTERNAL = b"""<?xml version="1.0"?>
+<!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]>
+<Invoice>&x;</Invoice>"""
+
+
+def test_parse_ubl_rejects_billion_laughs():
+    with pytest.raises(ValueError):
+        eracun.parse_ubl(_BILLION_LAUGHS)
+
+
+def test_parse_ubl_rejects_external_entity_xxe():
+    with pytest.raises(ValueError):
+        eracun.parse_ubl(_XXE_EXTERNAL)
+
+
+def test_autosort_does_not_overwrite_existing(spine, cfg, tmp_path):
+    """Dva e-računa s istim imenom priloga → drugi se ne smije pregaziti."""
+    cfg.nas_root = str(tmp_path / "nas")
+    _add_client(spine, "11111111119", "klijenti/firma-a")
+    src = tmp_path / "src"
+    src.mkdir(parents=True)
+
+    p1 = src / "racun.xml"
+    p1.write_bytes(FIXTURE.read_bytes())
+    dest1 = eracun.autosort(spine, cfg, str(p1))
+
+    p2 = src / "racun.xml"
+    p2.write_bytes(FIXTURE.read_bytes())
+    dest2 = eracun.autosort(spine, cfg, str(p2))
+
+    assert dest1 != dest2                       # nije pregazio
+    assert Path(dest1).exists() and Path(dest2).exists()
+    assert Path(dest2).name == "racun_2.xml"

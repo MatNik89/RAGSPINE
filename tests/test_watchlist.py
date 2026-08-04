@@ -47,3 +47,17 @@ def test_check_all_isolates_source_failure(spine, cfg):
 
     changes = w.check_all(spine, cfg, fetch=fetch)
     assert len(changes) == 1 and changes[0].source_id == sid2
+
+
+def test_parse_rss_rejects_billion_laughs():
+    bomb = (b'<?xml version="1.0"?><!DOCTYPE r ['
+            b'<!ENTITY a "aa"><!ENTITY b "&a;&a;&a;&a;&a;">]>'
+            b'<rss><channel><item><title>&b;</title></item></channel></rss>')
+    assert w.parse_rss(bomb) == []
+
+
+def test_parse_rss_plain_still_works():
+    feed = (b'<rss><channel><item><title>Vijest</title>'
+            b'<link>http://x/1</link></item></channel></rss>')
+    items = w.parse_rss(feed)
+    assert len(items) == 1 and items[0]["title"] == "Vijest"

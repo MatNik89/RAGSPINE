@@ -3,7 +3,7 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 
-from ragspine.core import security
+from ragspine.core import security, xmlsafe
 from ragspine.docs.ingest import ingest_text
 
 NS = {
@@ -38,7 +38,7 @@ def _float(s):
 
 def parse_ubl(xml_bytes: bytes) -> dict:
     try:
-        root = ET.fromstring(xml_bytes)
+        root = xmlsafe.fromstring(xml_bytes)
     except ET.ParseError as e:
         raise ValueError(f"malformed UBL XML: {e}") from e
 
@@ -116,9 +116,21 @@ def autosort(spine, cfg, xml_path: str, pdf_path: str | None = None) -> str | No
     dest_dir = _client_dir(spine, cfg, client["id"])
     os.makedirs(dest_dir, exist_ok=True)
 
-    dest_xml = os.path.join(dest_dir, os.path.basename(xml_path))
+    # collision guard: e-račun s imenom priloga koje već postoji u mapi ne smije
+    # tiho pregaziti postojeći (napadač šalje prilog "racun.xml" da uništi ranije
+    # zavedeni) — uniquify kao onboarding.add_document (stem_2.ext, ...).
+    dest_xml = _uniquify(dest_dir, os.path.basename(xml_path))
     shutil.move(xml_path, dest_xml)
     if pdf_path:
-        shutil.move(pdf_path, os.path.join(dest_dir, os.path.basename(pdf_path)))
+        shutil.move(pdf_path, _uniquify(dest_dir, os.path.basename(pdf_path)))
 
     return dest_xml
+
+
+def _uniquify(dest_dir: str, name: str) -> str:
+    stem, ext = os.path.splitext(name)
+    n = 1
+    while os.path.exists(os.path.join(dest_dir, name)):
+        n += 1
+        name = f"{stem}_{n}{ext}"
+    return os.path.join(dest_dir, name)

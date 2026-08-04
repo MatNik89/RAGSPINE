@@ -4,9 +4,12 @@ import hashlib, html, json, re, sqlite3
 from dataclasses import dataclass
 from xml.etree import ElementTree
 
+from ragspine.core import xmlsafe
 from ragspine.core.net import safe_fetch
 from ragspine.docs.ingest import ingest_text
 from ragspine.web.learn import HR_GRADOVI as CITIES
+
+_PRIREZ_MAX_PCT = 30.0  # HR povijesni max ~18% (Zagreb); glava iznad = bogus/napad
 
 INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "ugostiteljstvo": ["ugostitelj", "restoran", "kafic", "hrana", "pice", "turisticka pristojba"],
@@ -166,6 +169,13 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
 
     diff = law_diff(state["last_content"] or "", text)
     for city, rate in extract_rates(text).items():
+        # zdravorazumska granica: prirez u HR je 0–~18%; zlonamjeran/MITM-an izvor
+        # ne smije live postaviti npr. 999% u kalkulator. Izvan granica → preskoči.
+        try:
+            if not 0 <= float(rate) <= _PRIREZ_MAX_PCT:
+                continue
+        except ValueError:
+            continue
         spine.set_override("kalkulator", f"prirez.{city}", rate, source_row["url"])
     dates = extract_effective_dates(text)
     cat = (source_row["category"] or "").strip()
@@ -245,8 +255,8 @@ def parse_rss(xml_bytes: bytes) -> list[dict]:
     """Parse an RSS 2.0 feed (<channel><item>...) into title/link/description/
     date dicts. Malformed XML or missing channel/item structure -> []."""
     try:
-        root = ElementTree.fromstring(xml_bytes)
-    except ElementTree.ParseError:
+        root = xmlsafe.fromstring(xml_bytes)
+    except (ElementTree.ParseError, xmlsafe.XmlBlocked):
         return []
     items = []
     for item in root.iter("item"):
@@ -375,10 +385,14 @@ def match_keywords(spine, text: str) -> list[str]:
 
 # --- G: Excel izvoz praćenja (openpyxl je optional [full] ovisnost) -----------
 
+_FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
 def _cell(v):
     """Anti formula-injection: vrijednost s praćenih stranica koja počinje
-    s = + - @ bi u Excelu postala IZVRŠNA formula — prefiks ' je neutralizira."""
-    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@"):
+    s = + - @ (ili vodećim TAB/CR/LF — OWASP CSV-injection) bi mogla postati
+    IZVRŠNA formula — prefiks ' je neutralizira."""
+    if isinstance(v, str) and v[:1] in _FORMULA_LEAD:
         return "'" + v
     return v
 
