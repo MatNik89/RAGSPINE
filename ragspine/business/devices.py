@@ -7,7 +7,7 @@ import datetime
 import os
 import urllib.parse
 
-from ragspine.core import lan, optional
+from ragspine.core import lan, optional, security
 
 KINDS = ("scanner", "printer")
 
@@ -61,7 +61,6 @@ def scanner_folder(spine, cfg) -> str:
     """Odredište skenova: registrirana mapa role='skener' (re-validirana kao
     klijenti_root — isdir, ne-simlink, unutar mountova); fallback
     {data_dir}/scans (stvara se)."""
-    from ragspine.core import security
     r = spine.read().execute(
         "SELECT path FROM folders WHERE role='skener' AND enabled=1 "
         "ORDER BY id LIMIT 1").fetchone()
@@ -73,8 +72,12 @@ def scanner_folder(spine, cfg) -> str:
                 and any(b and security.path_under(rp, b) for b in roots)):
             return rp
         raise ValueError(f"skener-mapa nedostupna ili izvan korijena: {r['path']!r}")
-    fb = os.path.join(os.path.realpath(cfg.data_dir), "scans")
+    base = os.path.realpath(cfg.data_dir)
+    fb = os.path.join(base, "scans")
     os.makedirs(fb, exist_ok=True)
+    # postojeći symlink/junction 'scans' bi preusmjerio skenove van data_dira
+    if os.path.islink(fb) or not security.path_under(os.path.realpath(fb), base):
+        raise ValueError("scans mapa je preusmjerena izvan data_dir — odbijam pisati")
     return fb
 
 
@@ -106,12 +109,17 @@ def scan(spine, cfg, device_id: int, user: str = "?") -> dict:
     docs = lan.escl_scan(dev["url"])
     pdf, pages = _docs_to_pdf(docs)
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = os.path.join(dest_dir, f"sken-{stamp}.pdf")
-    n = 1
-    while os.path.exists(path):
-        n += 1
-        path = os.path.join(dest_dir, f"sken-{stamp}_{n}.pdf")
-    with open(path, "wb") as f:
+    # O_EXCL rezervira ime atomično — dva istovremena skena si ne gaze PDF
+    n = 0
+    while True:
+        suffix = "" if n == 0 else f"_{n + 1}"
+        path = os.path.join(dest_dir, f"sken-{stamp}{suffix}.pdf")
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            break
+        except FileExistsError:
+            n += 1
+    with os.fdopen(fd, "wb") as f:
         f.write(pdf)
     with spine.write() as c:
         c.execute("INSERT INTO notifications(kind, body) VALUES('scan_done', ?)",
@@ -134,4 +142,5 @@ def print_doc(spine, cfg, device_id: int, doc_id: int, user: str = "?") -> dict:
     fmt = "application/pdf" if path.lower().endswith(".pdf") else "application/octet-stream"
     lan.ipp_print(dev["url"], data, doc_format=fmt, job_name=row["title"] or "RAGSPINE")
     spine.audit(user, "device_print", f"device:{device_id}", path)
-    return {"printed": True, "device": dev["name"], "title": row["title"]}
+    # iskreno: IPP je PRIHVATIO posao; fizički završetak ne potvrđujemo (v1)
+    return {"submitted": True, "device": dev["name"], "title": row["title"]}

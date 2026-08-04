@@ -190,7 +190,7 @@ def test_print_doc_sends_document(spine, cfg, tmp_path, device_server):
                            (str(pdf),)).lastrowid
     d = devices.add_device(spine, "printer", "Pisač", f"{device_server}/ipp/print")
     res = devices.print_doc(spine, cfg, d["id"], doc_id, user="ana")
-    assert res["printed"] is True
+    assert res["submitted"] is True
     assert _DeviceHandler.ipp_requests and _DeviceHandler.ipp_requests[0].endswith(
         pdf.read_bytes())
 
@@ -241,3 +241,60 @@ def test_api_devices_admin_gate_and_scan(spine, cfg, device_server):
     assert c.delete(f"/devices/{dev_id}", headers=ho).status_code == 200
     r = c.get("/ui/uredjaji", headers=ho)
     assert r.status_code == 200 and "Uređaji" in r.text
+
+
+def test_escl_partial_scan_rejected(device_server, monkeypatch):
+    # deadline istekne prije terminal 404 -> djelomičan rezultat se ODBACUJE
+    _DeviceHandler.pages = [b"%PDF-x"] * 3
+    real = lan.lan_fetch
+    def slow(url, **kw):
+        if url.endswith("/NextDocument") and _DeviceHandler.served >= 1:
+            import time
+            time.sleep(0.3)
+            return 503, {}, b""
+        return real(url, **kw)
+    monkeypatch.setattr(lan, "lan_fetch", slow)
+    with pytest.raises(RuntimeError, match="nije dovršen"):
+        lan.escl_scan(f"{device_server}/eSCL", timeout=1)
+
+
+def test_escl_cross_origin_location_rejected(device_server, monkeypatch):
+    real = lan.lan_fetch
+    def evil(url, **kw):
+        st, h, b = real(url, **kw)
+        if url.endswith("/ScanJobs"):
+            h = dict(h); h["location"] = "http://192.168.1.99/eSCL/ScanJobs/job1"
+        return st, h, b
+    monkeypatch.setattr(lan, "lan_fetch", evil)
+    with pytest.raises(RuntimeError, match="drugi origin"):
+        lan.escl_scan(f"{device_server}/eSCL")
+
+
+def test_print_guarded_by_client_visibility(spine, cfg, tmp_path, device_server):
+    from fastapi.testclient import TestClient
+    from ragspine.web.api import create_app
+    from ragspine.web.deps import add_user
+
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw")
+    owner = c.post("/auth/login", json={"username": "gazda", "password": "pw"}).json()["token"]
+    add_user(spine, "boris", "pw")
+    worker = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
+    ho = {"Authorization": f"Bearer {owner}"}
+    hw = {"Authorization": f"Bearer {worker}"}
+
+    with spine.write() as conn:
+        cid = conn.execute("INSERT INTO clients(name) VALUES('Tajni')").lastrowid
+    pdf = tmp_path / "t.pdf"
+    pdf.write_bytes(b"%PDF-tajno")
+    with spine.write() as conn:
+        doc_id = conn.execute(
+            "INSERT INTO documents(title, path, client_id) VALUES('T', ?, ?)",
+            (str(pdf), cid)).lastrowid
+    bid = spine.read().execute("SELECT id FROM users WHERE username='boris'").fetchone()["id"]
+    c.post(f"/workers/{bid}/visibility", json={"sees_all": False, "client_ids": []}, headers=ho)
+
+    d = c.post("/devices", headers=ho, json={
+        "kind": "printer", "name": "P", "url": f"{device_server}/ipp/print"}).json()
+    r = c.post(f"/devices/{d['id']}/print", headers=hw, json={"doc_id": doc_id})
+    assert r.status_code == 403

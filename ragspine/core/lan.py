@@ -27,15 +27,20 @@ def _is_lan_addr(addr: str) -> bool:
     return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
-def assert_lan_host(host: str, port: int) -> None:
-    """Sve resolvane adrese moraju biti LAN — javna adresa = LanBlocked."""
+def assert_lan_host(host: str, port: int) -> str:
+    """Sve resolvane adrese moraju biti LAN — javna adresa = LanBlocked.
+    Vraća prvu provjerenu adresu: pozivatelj se spaja NA NJU (ne re-resolva),
+    čime je DNS-rebinding između provjere i spajanja mrtav."""
     try:
-        addrs = socket.getaddrinfo(host, port)
+        addrs = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise LanBlocked(f"resolve failed: {e}") from e
+    if not addrs:
+        raise LanBlocked(f"resolve prazan: {host}")
     for _f, _t, _p, _c, sockaddr in addrs:
         if not _is_lan_addr(sockaddr[0]):
             raise LanBlocked(f"nije LAN adresa: {sockaddr[0]} ({host})")
+    return addrs[0][4][0]
 
 
 def lan_fetch(url: str, method: str = "GET", body: bytes | None = None,
@@ -50,19 +55,22 @@ def lan_fetch(url: str, method: str = "GET", body: bytes | None = None,
     if not host:
         raise LanBlocked("no hostname")
     port = p.port or (443 if p.scheme == "https" else 80)
-    assert_lan_host(host, port)
+    # spajamo se na PROVJERENU adresu, Host header nosi originalno ime —
+    # HTTPConnection(host) bi ponovno resolvao i otvorio rebinding prozor
+    ip = assert_lan_host(host, port)
     if p.scheme == "https":
         # LAN uređaji dolaze sa self-signed certifikatima — verifikacija javnim
         # CA-ovima ovdje nema smisla; identitet čuva LAN-only adresa + registar.
-        conn = http.client.HTTPSConnection(host, port, timeout=timeout,
+        conn = http.client.HTTPSConnection(ip, port, timeout=timeout,
                                            context=ssl._create_unverified_context())
     else:
-        conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        conn = http.client.HTTPConnection(ip, port, timeout=timeout)
     path = p.path or "/"
     if p.query:
         path += "?" + p.query
+    hdrs = {"Host": p.netloc, **(headers or {})}
     try:
-        conn.request(method, path, body=body, headers=headers or {})
+        conn.request(method, path, body=body, headers=hdrs)
         resp = conn.getresponse()
         data = resp.read(max_bytes + 1)
         if len(data) > max_bytes:
@@ -132,7 +140,7 @@ def _parse_records(data: bytes) -> list[dict]:
                 _pr, _w, port = struct.unpack(">HHH", rdata[:6])
                 rec["port"] = port
                 rec["target"], _ = _read_name(data, off + 6)
-            elif rtype == 1:  # A
+            elif rtype == 1 and rdlen == 4:  # A (kriva duljina = zlonamjeran paket)
                 rec["addr"] = socket.inet_ntoa(rdata)
             elif rtype == 16:  # TXT
                 txt, i = {}, 0
@@ -146,8 +154,8 @@ def _parse_records(data: bytes) -> list[dict]:
             off += rdlen
             out.append(rec)
         return out
-    except (struct.error, IndexError):
-        return []
+    except (struct.error, IndexError, OSError):
+        return []  # jedan pokvaren paket ne smije srušiti cijeli sweep
 
 
 def _assemble(records: list[dict]) -> list[dict]:
@@ -199,7 +207,7 @@ def discover(timeout: float = 2.5) -> list[dict]:
         try:
             sock.sendto(_query_packet(services), (_MDNS_GRP, _MDNS_PORT))
             end = time.monotonic() + timeout
-            while time.monotonic() < end:
+            while time.monotonic() < end and len(records) < 2000:  # anti-flood cap
                 try:
                     data, _src = sock.recvfrom(9000)
                     records.extend(_parse_records(data))
@@ -225,32 +233,52 @@ _SCAN_SETTINGS = """<?xml version="1.0" encoding="UTF-8"?>
 </scan:ScanSettings>"""
 
 
+_MAX_SCAN_BYTES = 200_000_000
+_MAX_SCAN_DOCS = 500
+
+
 def escl_scan(base_url: str, timeout: int = 120) -> list[tuple[bytes, str]]:
     """Pokreni sken i pokupi SVE dokumente: [(bytes, content_type)].
     404 na NextDocument = kraj (eSCL spec). Diže LanBlocked/RuntimeError."""
     base = base_url.rstrip("/")
+    bp = urllib.parse.urlsplit(base)
     status, headers, body = lan_fetch(
         f"{base}/ScanJobs", method="POST", body=_SCAN_SETTINGS.encode(),
         headers={"Content-Type": "text/xml"}, timeout=timeout)
     if status not in (200, 201) or not headers.get("location"):
         raise RuntimeError(f"skener odbio posao (HTTP {status})")
-    job = headers["location"].rstrip("/")
-    if job.startswith("/"):
-        p = urllib.parse.urlsplit(base)
-        job = f"{p.scheme}://{p.netloc}{job}"
+    job = urllib.parse.urljoin(base + "/", headers["location"]).rstrip("/")
+    jp = urllib.parse.urlsplit(job)
+    # Location mora ostati na ISTOM uređaju — skener ne smije preusmjeriti
+    # GET/DELETE na drugi interni servis (aplikacijski redirect = SSRF)
+    if (jp.scheme, jp.hostname, jp.port or bp.port) != (bp.scheme, bp.hostname, bp.port):
+        raise RuntimeError(f"skener preusmjerio posao na drugi origin: {job!r}")
     docs: list[tuple[bytes, str]] = []
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        status, h, data = lan_fetch(f"{job}/NextDocument", timeout=timeout)
-        if status == 404:
-            break  # nema više dokumenata — posao gotov
-        if status == 503:
-            time.sleep(1.0)  # stranica još nije spremna
-            continue
-        if status != 200:
-            raise RuntimeError(f"sken prekinut (HTTP {status})")
-        docs.append((data, h.get("content-type", "application/pdf")))
-    lan_fetch(job, method="DELETE", timeout=10)  # best-effort čišćenje
+    total = 0
+    finished = False
+    try:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status, h, data = lan_fetch(f"{job}/NextDocument", timeout=timeout)
+            if status == 404:
+                finished = True  # nema više dokumenata — posao gotov
+                break
+            if status == 503:
+                time.sleep(1.0)  # stranica još nije spremna
+                continue
+            if status != 200:
+                raise RuntimeError(f"sken prekinut (HTTP {status})")
+            total += len(data)
+            if total > _MAX_SCAN_BYTES or len(docs) >= _MAX_SCAN_DOCS:
+                raise RuntimeError("sken prevelik (limit stranica/veličine)")
+            docs.append((data, h.get("content-type", "application/pdf")))
+    finally:
+        try:
+            lan_fetch(job, method="DELETE", timeout=10)  # best-effort čišćenje
+        except Exception:
+            pass  # cleanup ne smije pojesti rezultat ni primarnu grešku
+    if not finished:
+        raise RuntimeError("sken nije dovršen u roku — djelomičan rezultat odbačen")
     if not docs:
         raise RuntimeError("skener nije vratio nijedan dokument")
     return docs
@@ -267,7 +295,8 @@ def ipp_print(url: str, document: bytes, doc_format: str = "application/pdf",
               job_name: str = "RAGSPINE") -> None:
     """Pošalji dokument na IPP pisač (Print-Job, IPP/1.1). Diže RuntimeError
     na ne-uspješan IPP status."""
-    ipp_uri = re.sub(r"^https?://", "ipp://", url)
+    # RFC 7472: http -> ipp, https -> ipps
+    ipp_uri = re.sub(r"^http://", "ipp://", re.sub(r"^https://", "ipps://", url))
     req = (b"\x01\x01"            # IPP/1.1
            + b"\x00\x02"          # Print-Job
            + b"\x00\x00\x00\x01"  # request-id

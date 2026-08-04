@@ -1018,7 +1018,7 @@ def create_app(spine, cfg) -> FastAPI:
     # Uređaji (E): registar mijenja admin; sken/print koristi svaki radnik
     # (uz odabir uređaja pri akciji).
     @app.get("/devices")
-    def devices_list(kind: str | None = None, user: str = Depends(require_user_web)):
+    def devices_list(kind: str | None = None, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import devices as devices_mod
         return devices_mod.list_devices(spine, kind=kind)
 
@@ -1050,22 +1050,29 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": device_id, "removed": True}
 
     @app.post("/devices/{device_id}/scan")
-    def devices_scan(device_id: int, user: str = Depends(require_user_web)):
+    def devices_scan(device_id: int, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import devices as devices_mod
         from ragspine.core import lan
         try:
-            return devices_mod.scan(spine, cfg, device_id, user=user)
+            return devices_mod.scan(spine, cfg, device_id, user=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except (lan.LanBlocked, RuntimeError) as e:
             raise HTTPException(502, str(e)) from e
 
     @app.post("/devices/{device_id}/print")
-    def devices_print(device_id: int, body: PrintBody, user: str = Depends(require_user_web)):
+    def devices_print(device_id: int, body: PrintBody, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import devices as devices_mod
         from ragspine.core import lan
+        row = spine.read().execute("SELECT client_id FROM documents WHERE id=?",
+                                   (body.doc_id,)).fetchone()
+        if row is None:
+            raise HTTPException(400, "nepoznat dokument")
+        if row["client_id"] is not None:
+            _guard_client(actor, row["client_id"])  # radnik ne printa tuđe klijente
         try:
-            return devices_mod.print_doc(spine, cfg, device_id, body.doc_id, user=user)
+            return devices_mod.print_doc(spine, cfg, device_id, body.doc_id,
+                                         user=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except (lan.LanBlocked, RuntimeError) as e:
