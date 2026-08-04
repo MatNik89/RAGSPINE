@@ -216,6 +216,12 @@ class ObligationTypeBody(BaseModel):
     description: str = ""
 
 
+class ExtractBody(BaseModel):
+    doc_id: int
+    doc_type: str
+    client_id: int | None = None
+
+
 class DocTypeFieldBody(BaseModel):
     key: str
     label: str = ""
@@ -955,6 +961,20 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"key": key}
+
+    @app.post("/extract")
+    def extract_run(body: ExtractBody, user: str = Depends(require_user_web)):
+        from ragspine.docs import extraction as extraction_mod
+        # LLM je fallback — bez konfiguriranog providera ekstrakcija ide regex-only
+        try:
+            llm = LLMClient(model_settings.apply(spine, cfg))
+        except Exception:
+            llm = None
+        try:
+            return extraction_mod.extract(spine, cfg, body.doc_id, body.doc_type,
+                                          llm=llm, client_id=body.client_id, user=user)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
 
     @app.get("/doc-types/export")
     def doc_types_export(user: str = Depends(require_user_web)):

@@ -87,6 +87,9 @@ CREATE TABLE IF NOT EXISTS notes(id INTEGER PRIMARY KEY, client_id INTEGER, auth
   body TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS doc_types(key TEXT PRIMARY KEY, label TEXT,
   fields_json TEXT DEFAULT '[]', active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100);
+CREATE TABLE IF NOT EXISTS doc_extracts(doc_id INTEGER PRIMARY KEY, doc_type_key TEXT,
+  client_id INTEGER, fields_json TEXT, engines_json TEXT,
+  at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action TEXT,
   entity TEXT, detail TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS hash_chain(id INTEGER PRIMARY KEY, event TEXT, prev_hash TEXT,

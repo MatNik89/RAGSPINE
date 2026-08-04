@@ -63,3 +63,18 @@ def test_doc_types_field_coercion_and_types(spine, cfg):
     r = c.post("/doc-types", headers=h, json={
         "key": "y", "fields": [{"key": 7, "kind": "text"}]})
     assert r.status_code in (400, 422)
+
+
+def test_extract_endpoint(spine, cfg):
+    from ragspine.docs.ingest import ingest_text
+    c, h = _client(spine, cfg)
+    doc_id = ingest_text(spine, "Broj: 12345\nDatum isteka: 01.02.2027\n" * 10,
+                         title="osobna.pdf")
+    r = c.post("/extract", headers=h,
+               json={"doc_id": doc_id, "doc_type": "osobna_iskaznica"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["fields"]["broj"] == "12345"
+    assert data["fields"]["datum_isteka"] == "2027-02-01"
+    r = c.post("/extract", headers=h, json={"doc_id": 9999, "doc_type": "osobna_iskaznica"})
+    assert r.status_code == 400
