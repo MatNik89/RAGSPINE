@@ -46,14 +46,36 @@ def test_extract_llm_fills_only_missing_and_validates_dates():
     llm = _FakeLLM('```json\n{"mjesto_izdavanja": "Split", "datum_isteka": "31.12.2027", '
                    '"broj": null}\n```')
     missing = [f for f in _OI_FIELDS if f["key"] in ("mjesto_izdavanja", "datum_isteka", "broj")]
-    vals = extraction.extract_llm(llm, "tekst", missing)
+    text = "izdano Split dana ... vrijedi 31.12.2027"
+    vals = extraction.extract_llm(llm, text, missing)
     assert vals == {"mjesto_izdavanja": "Split", "datum_isteka": "2027-12-31"}
+
+
+def test_extract_llm_ungrounded_values_rejected():
+    # prompt-injection obrana: vrijednost koje NEMA u tekstu se odbacuje
+    llm = _FakeLLM('{"mjesto_izdavanja": "Lažni Grad", "datum_isteka": "31.12.2027"}')
+    missing = [f for f in _OI_FIELDS if f["key"] in ("mjesto_izdavanja", "datum_isteka")]
+    vals = extraction.extract_llm(llm, "u tekstu nema tih vrijednosti, samo 15.01.2026", missing)
+    assert vals == {}
 
 
 def test_extract_llm_garbage_and_none_degrade():
     assert extraction.extract_llm(None, "t", _OI_FIELDS) == {}
     assert extraction.extract_llm(_FakeLLM("nije json"), "t", _OI_FIELDS) == {}
     assert extraction.extract_llm(_FakeLLM('["lista"]'), "t", _OI_FIELDS) == {}
+
+
+def test_impossible_dates_rejected():
+    vals = extraction.extract_regex("Datum isteka: 31.02.2027\nDatum izdavanja: 29.02.2026",
+                                    _OI_FIELDS)
+    assert "datum_isteka" not in vals and "datum_izdavanja" not in vals
+
+
+def test_label_collisions_do_not_misfire():
+    # "Kontrolni broj" ne smije pogoditi polje "broj" (labela = početak retka)
+    assert extraction.extract_regex("Kontrolni broj: 123", _OI_FIELDS) == {}
+    # "Broj računa: 42" ne smije dati broj="računa: 42" (obavezan delimiter)
+    assert extraction.extract_regex("Broj računa: 42", _OI_FIELDS) == {}
 
 
 def _mk_doc(spine, client_id=None):
@@ -81,7 +103,7 @@ def test_extract_e2e_regex_only_creates_expiry(spine, cfg):
 
 
 def test_extract_llm_fallback_merges(spine, cfg):
-    doc_id = ingest_text(spine, "Broj: 99887766\nnema ostalih podataka " * 20,
+    doc_id = ingest_text(spine, "Broj: 99887766\nizdano Rijeka, vrijedi 05.01.2027 " * 20,
                          title="djelomicna.pdf")
     llm = _FakeLLM('{"datum_izdavanja": null, "mjesto_izdavanja": "Rijeka", '
                    '"datum_isteka": "2027-01-05"}')
@@ -126,3 +148,12 @@ def test_extracted_expiry_reaches_dashboard_with_warn(spine, cfg):
     rows = dashboard.home_data(spine)["expiring"]
     mine = [r for r in rows if r["client_id"] == cid]
     assert mine and mine[0]["state"] == "warn" and mine[0]["days_left"] == 5
+
+
+def test_forget_removes_doc_extracts(spine, cfg):
+    from ragspine.docs import forget
+    doc_id = _mk_doc(spine)
+    extraction.extract(spine, cfg, doc_id, "osobna_iskaznica")
+    res = forget.forget(spine, "115362299")
+    assert res["doc_extracts"] == 1
+    assert spine.read().execute("SELECT COUNT(*) AS n FROM doc_extracts").fetchone()["n"] == 0

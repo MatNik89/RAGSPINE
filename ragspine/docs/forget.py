@@ -52,6 +52,15 @@ def forget(spine, term: str, dry: bool = False) -> dict:
         result["chunks"] = c.execute(
             f"SELECT COUNT(*) FROM chunks WHERE doc_id IN (SELECT id FROM documents WHERE {_DOC_WHERE})",
             (pattern,) * 3).fetchone()[0]
+        # doc_extracts nosi ekstrahirani PII (broj osobne...) — briše se i po
+        # pripadnosti dokumentu i po sadržaju fields_json (GDPR forget)
+        _extract_where = (f"doc_id IN (SELECT id FROM documents WHERE {_DOC_WHERE}) "
+                          "OR fields_json LIKE ? ESCAPE '\\'")
+        result["doc_extracts"] = c.execute(
+            f"SELECT COUNT(*) FROM doc_extracts WHERE {_extract_where}",
+            (pattern,) * 4).fetchone()[0]
+        if not dry:
+            c.execute(f"DELETE FROM doc_extracts WHERE {_extract_where}", (pattern,) * 4)
         if not dry:
             # chunks before documents: keeps chunks_fts trigger-consistent and
             # avoids orphaning chunks under a still-matching-but-not-yet-

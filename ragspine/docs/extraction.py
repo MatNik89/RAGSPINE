@@ -2,6 +2,7 @@
 polja koja regex nije našao. Polja definira doc_types registar (C2); expiry
 polje s valjanim datumom ide u expiry_items (rok-alert na dashboardu)."""
 
+import datetime
 import json
 import logging
 import re
@@ -20,11 +21,13 @@ def _iso_date(m: re.Match) -> str | None:
             d, mo, y = int(m.group(6)), int(m.group(5)), int(m.group(4))
         else:
             d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        if not (1 <= d <= 31 and 1 <= mo <= 12):
-            return None
-        return f"{y:04d}-{mo:02d}-{d:02d}"
+        return datetime.date(y, mo, d).isoformat()  # odbija 31.02., 29.02. ne-prijestupne...
     except (ValueError, TypeError):
         return None
+
+
+def _text_dates(text: str) -> set[str]:
+    return {iso for m in _DATE.finditer(text or "") if (iso := _iso_date(m))}
 
 
 def _label_variants(field: dict) -> list[str]:
@@ -38,7 +41,10 @@ def extract_regex(text: str, fields: list[dict]) -> dict:
     out = {}
     for f in fields:
         for label in _label_variants(f):
-            pat = re.compile(rf"(?im)^.*?{re.escape(label)}\s*[:.]?\s*(.+)$")
+            # labela mora biti POČETAK retka + eksplicitni delimiter — inače
+            # "Kontrolni broj: 1" pogodi polje "broj", a "Broj računa: 42"
+            # vrati "računa: 42" (Codex nalaz, kolizije labela)
+            pat = re.compile(rf"(?im)^\s*{re.escape(label)}\s*[:.]\s*(.+)$")
             m = pat.search(text or "")
             if not m:
                 continue
@@ -79,6 +85,13 @@ def extract_llm(llm, text: str, fields: list[dict]) -> dict:
         return {}
     if not isinstance(data, dict):
         return {}
+    # grounding: LLM vrijednost se prihvaća SAMO ako postoji u tekstu dokumenta
+    # (datum: ISO mora biti među datumima iz teksta; tekst: substring, case-fold)
+    # — dokument ne može prompt-injectati izmišljene vrijednosti u registar.
+    # ponytail: substring grounding pada na hrvatskoj fleksiji ("Rijeka" vs
+    # "u Rijeci") — polja osobnih dokumenata su doslovne vrijednosti pa je OK;
+    # upgrade path: fuzzy/lemma usporedba.
+    dates_in_text = _text_dates(text)
     out = {}
     for f in fields:
         v = data.get(f["key"])
@@ -88,9 +101,9 @@ def extract_llm(llm, text: str, fields: list[dict]) -> dict:
         if f["kind"] == "date":
             dm = _DATE.search(v)
             iso = _iso_date(dm) if dm else None
-            if iso:
+            if iso and iso in dates_in_text:
                 out[f["key"]] = iso
-        else:
+        elif v.lower() in (text or "").lower():
             out[f["key"]] = v
     return out
 

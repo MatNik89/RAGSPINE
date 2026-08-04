@@ -8,12 +8,17 @@ Cilj: iz teksta dokumenta (OCR/ingest) automatski pročitati polja definirana u
 
 1. `extract(spine, cfg, doc_id, doc_type_key, llm, client_id)`:
    tekst dokumenta = chunks JOIN po `doc_id` (ORDER BY seq).
-2. **Regex prolaz** po svakom polju: traži labelu (ili key) uz vrijednost u
-   istom retku; `date` polja hvataju hrvatski format (`15. 8. 2026.`,
-   `15.08.2026`) i ISO — normalizira se u `YYYY-MM-DD`.
+2. **Regex prolaz** po svakom polju: labela (ili key) mora biti POČETAK retka
+   s eksplicitnim delimiterom (`:` ili `.`) — sprječava kolizije ("Kontrolni
+   broj" ≠ polje "broj"). `date` polja hvataju hrvatski format (`15. 8. 2026.`,
+   `15.08.2026`) i ISO; kalendarska validacija (`31.02.` se odbija) →
+   `YYYY-MM-DD`.
 3. **LLM prolaz** samo za polja koja regex NIJE našao (jedan poziv, JSON out,
    `null` za nepoznato). LLM nedostupan/greška → degradacija na regex-only,
-   nikad pad. Regex nalaz se NE prepisuje LLM-om.
+   nikad pad. Regex nalaz se NE prepisuje LLM-om. **Grounding**: LLM
+   vrijednost se prihvaća samo ako postoji u tekstu dokumenta (datum među
+   datumima teksta, tekst kao substring) — dokument ne može prompt-injectati
+   izmišljene vrijednosti.
 4. Rezultat u `doc_extracts` (zadnja ekstrakcija po dokumentu, upsert).
 5. `expiry` polje s valjanim datumom + poznat `client_id` → upsert u
    `expiry_items` (kind = doc_type_key, label = "Naziv vrste: Naziv polja");
