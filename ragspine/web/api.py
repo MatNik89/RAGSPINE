@@ -986,14 +986,24 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, str(e)) from e
 
     @app.get("/folder-architecture")
-    def folder_architecture_preview(user: str = Depends(require_user_web)):
+    def folder_architecture_preview(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
-        return fa.propose(spine, cfg)
+        prop = fa.propose(spine, cfg)
+        # restringirani radnik ne smije vidjeti tuđe klijente ni njihove putanje
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        if vis is not None:
+            prop["clients"] = [c for c in prop["clients"] if c["client_id"] in vis]
+            prop["n_missing"] = (sum(1 for e in prop["must_have"] if not e["exists"])
+                                 + sum(1 for c in prop["clients"] if not c["folder_exists"])
+                                 + sum(1 for c in prop["clients"]
+                                       for e in c["subdirs"] if not e["exists"]))
+        return prop
 
     @app.post("/folder-architecture/apply")
-    def folder_architecture_apply(user: str = Depends(require_user_web)):
+    def folder_architecture_apply(actor: Actor = Depends(require_actor_web)):
         from ragspine.business import folder_architecture as fa
-        return fa.apply(spine, cfg, user=user)
+        _require_admin(actor)  # kreira mape za SVE klijente — samo admin/owner
+        return fa.apply(spine, cfg, user=actor.username)
 
     @app.get("/doc-types/export")
     def doc_types_export(user: str = Depends(require_user_web)):

@@ -5,10 +5,13 @@
 
 import os
 
+from ragspine.business.onboarding import KLIJENTI_DIR
 from ragspine.core import security
 
 # ponytail: fiksne liste — upgrade path: editable template u Postavkama (G).
-MUST_HAVE = ("KLIJENTI", "PROPISI", "SCANNER", "ARHIVA")
+# KLIJENTI_DIR (malim slovima) dijeli se s onboardingom — case-sensitive NAS
+# bi s 'KLIJENTI' dobio DRUGO stablo pored postojećeg 'klijenti'.
+MUST_HAVE = (KLIJENTI_DIR, "PROPISI", "SCANNER", "ARHIVA")
 CLIENT_SUBDIRS = ("Osobni dokumenti", "Ugovori", "Izvodi", "Računi", "Porezna")
 
 
@@ -47,18 +50,25 @@ def propose(spine, cfg) -> dict:
 
 
 def apply(spine, cfg, user: str = "?") -> dict:
-    """Kreiraj nedostajuće mape iz prijedloga. Idempotentno; vraća što je stvoreno."""
+    """Kreiraj nedostajuće mape iz prijedloga. Idempotentno; vraća što je stvoreno.
+    n_created odgovara n_missing iz preview-a (i baza klijenta se broji)."""
     prop = propose(spine, cfg)
     created = []
-    for e in prop["must_have"]:
-        if not e["exists"]:
-            os.makedirs(e["path"], exist_ok=True)
-            created.append(e["path"])
-    for c in prop["clients"]:
-        for e in c["subdirs"]:
+    try:
+        for e in prop["must_have"]:
             if not e["exists"]:
-                os.makedirs(e["path"], exist_ok=True)  # stvara i client mapu ako fali
+                os.makedirs(e["path"], exist_ok=True)
                 created.append(e["path"])
-    if created:
-        spine.audit(user, "folder_architecture_apply", f"created:{len(created)}")
+        for c in prop["clients"]:
+            if not c["folder_exists"]:
+                os.makedirs(c["folder"], exist_ok=True)
+                created.append(c["folder"])
+            for e in c["subdirs"]:
+                if not e["exists"]:
+                    os.makedirs(e["path"], exist_ok=True)
+                    created.append(e["path"])
+    finally:
+        # i djelomično stvoreno (pad na kasnijoj mapi) mora u audit
+        if created:
+            spine.audit(user, "folder_architecture_apply", f"created:{len(created)}")
     return {"created": created, "n_created": len(created)}

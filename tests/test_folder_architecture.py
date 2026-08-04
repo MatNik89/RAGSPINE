@@ -58,3 +58,31 @@ def test_api_preview_and_apply(spine, cfg):
     assert c.get("/folder-architecture", headers=h).json()["n_missing"] == 0
     r = c.get("/ui/arhitektura", headers=h)
     assert r.status_code == 200 and "Arhitektura mapa" in r.text
+
+
+def test_preview_filtered_and_apply_admin_only(spine, cfg):
+    from fastapi.testclient import TestClient
+    from ragspine.web.api import create_app
+    from ragspine.web.deps import add_user
+
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw")
+    owner = c.post("/auth/login", json={"username": "gazda", "password": "pw"}).json()["token"]
+    add_user(spine, "boris", "pw")
+    worker = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
+    ho = {"Authorization": f"Bearer {owner}"}
+    hw = {"Authorization": f"Bearer {worker}"}
+
+    a = onboarding.create_client(spine, cfg, {"name": "Alfa"}, owner="gazda")
+    onboarding.create_client(spine, cfg, {"name": "Beta"}, owner="gazda")
+    bid = spine.read().execute("SELECT id FROM users WHERE username='boris'").fetchone()["id"]
+    r = c.post(f"/workers/{bid}/visibility",
+               json={"sees_all": False, "client_ids": [a["id"]]}, headers=ho)
+    assert r.status_code == 200
+
+    # restringirani radnik: samo Alfa u preview-u, n_missing preračunat
+    prop = c.get("/folder-architecture", headers=hw).json()
+    assert [x["name"] for x in prop["clients"]] == ["Alfa"]
+    # apply nije za članove — samo admin/owner
+    assert c.post("/folder-architecture/apply", headers=hw).status_code == 403
+    assert c.post("/folder-architecture/apply", headers=ho).status_code == 200

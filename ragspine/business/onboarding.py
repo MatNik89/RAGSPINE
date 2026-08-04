@@ -22,6 +22,11 @@ def _slug(name: str) -> str:
     return s or "klijent"
 
 
+# jedina istina za ime mape klijenata — folder_architecture je reusa (case-
+# sensitive NAS bi inače dobio dva stabla klijenti/ i KLIJENTI/)
+KLIJENTI_DIR = "klijenti"
+
+
 def _client_root(cfg, client_id, name: str) -> str:
     """Absolute path for a client's NAS folder: {root}/klijenti/{id}_{slug}.
     SECURITY: realpath+commonpath guard — the result must resolve inside
@@ -29,7 +34,7 @@ def _client_root(cfg, client_id, name: str) -> str:
     base = cfg.nas_root or cfg.data_dir
     root = os.path.realpath(base)
     folder = f"{client_id}_{_slug(name)}"
-    dest = os.path.realpath(os.path.join(root, "klijenti", folder))
+    dest = os.path.realpath(os.path.join(root, KLIJENTI_DIR, folder))
     if not security.path_under(dest, root):
         raise ValueError(f"path traversal blocked: {name!r} escapes root")
     return dest
