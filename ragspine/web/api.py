@@ -1313,11 +1313,14 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/clients/assist")
     def client_assist(body: ClientAssistBody, actor: Actor = Depends(require_actor_web)):
         from ragspine.business import client_assist
+        # server-side throttle — klijentski debounce se da zaobići, LLM košta
+        if not limiter.allow(f"assist:{actor.user_id}", limit=20, window_s=60.0):
+            raise HTTPException(429, "previše assist zahtjeva — uspori tipkanje")
         try:
             llm = LLMClient(model_settings.apply(spine, cfg))
         except Exception:
             llm = None
-        return client_assist.assist(spine, cfg, body.model_dump(), llm=llm)
+        return client_assist.assist(spine, cfg, body.model_dump(), llm=llm, actor=actor)
 
     @app.get("/clients/{client_id}/doc-types")
     def client_doc_types_get(client_id: int, actor: Actor = Depends(require_actor_web)):

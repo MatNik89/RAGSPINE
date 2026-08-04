@@ -69,15 +69,13 @@ SEED: list[dict] = [
     {"key": "zatezna_kamata", "label": "Zakonska stopa zateznih kamata", "value": "7.5",
      "unit": "%", "category": "financije", "source": "Zakon o financijskom poslovanju i predstečajnoj nagodbi",
      "keywords": "zatezna kamata stopa zakonska"},
-    {"key": "pausal_razred_1", "label": "Paušalni obrt — 1. razred (do)", "value": "40000",
-     "unit": "EUR/god", "category": "obrt", "source": "Pravilnik o paušalnom oporezivanju obrta",
-     "keywords": "pausal obrt razred prihod prag"},
-    {"key": "pausal_razred_2", "label": "Paušalni obrt — 2. razred (do)", "value": "60000",
-     "unit": "EUR/god", "category": "obrt", "source": "Pravilnik o paušalnom oporezivanju obrta",
-     "keywords": "pausal obrt razred prihod prag"},
-    {"key": "pausal_razred_3", "label": "Paušalni obrt — 3. razred (do)", "value": "80000",
-     "unit": "EUR/god", "category": "obrt", "source": "Pravilnik o paušalnom oporezivanju obrta",
-     "keywords": "pausal obrt razred prihod prag"},
+    {"key": "pausal_prag", "label": "Paušalni obrt — gornji prag prihoda", "value": "60000",
+     "unit": "EUR/god", "category": "obrt",
+     "source": "Pravilnik o paušalnom oporezivanju (NN 1/2024, 16/2025)",
+     "keywords": "pausal obrt prag prihod gornja granica"},
+    # ranija tri "pausal_razred_*" ključa maknuta: 80000 nije postojeći razred
+    # (pravilnik završava na 60000), a granice svih sedam razreda ovdje NE
+    # hardkodiramo — samo siguran gornji prag; detalji idu iz propisa (RAG).
     {"key": "joppd_rok", "label": "Rok predaje JOPPD obrasca", "value": "isplata + 1 radni dan",
      "unit": "rok", "category": "rokovi", "source": "Pravilnik o poreznom postupku",
      "keywords": "joppd rok predaje obrazac"},
@@ -93,6 +91,9 @@ SEED: list[dict] = [
 def seed(spine) -> int:
     n = 0
     with spine.write() as c:
+        # netočni ključevi iz starijeg seeda — počisti i na već postavljenim bazama
+        c.execute("DELETE FROM quickref WHERE key IN "
+                  "('pausal_razred_1','pausal_razred_2','pausal_razred_3')")
         for item in SEED:
             cur = c.execute(
                 """INSERT OR IGNORE INTO quickref(key,label,value,unit,category,source,keywords)

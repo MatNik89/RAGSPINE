@@ -7,7 +7,8 @@ def test_seeds_all_counts(spine):
     counts = seeds.all(spine, 2026)
     assert counts["kontni_plan"] >= 40
     assert counts["watch"] >= 4
-    assert counts["quickref"] == 24
+    from ragspine.business import quickref
+    assert counts["quickref"] == len(quickref.SEED)
     assert counts["kalendar"] > 20
     assert counts["dnevnice"] == len(RATES)
 

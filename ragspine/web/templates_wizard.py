@@ -47,15 +47,17 @@ function ul(id, items, cls){
 }
 
 var assistTimer = null;
+var assistSeq = 0;
 function scheduleAssist(){
   if(assistTimer) clearTimeout(assistTimer);
   assistTimer = setTimeout(runAssist, 600);
 }
 
 async function runAssist(){
+  var seq = ++assistSeq;  // spori stari odgovor ne smije pregaziti noviji
   var res = await fetch('/clients/assist', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(draft())});
-  if(!res.ok) return;
+  if(!res.ok || seq !== assistSeq) return;
   var a = await res.json();
   ul('as-warn', a.warnings, 'bad');
   ul('as-sugg', a.suggestions);

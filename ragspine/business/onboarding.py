@@ -78,6 +78,17 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
     # concurrent add_document for this client_id would resolve to nas_root
     # itself (defeats per-client folder isolation). Disk folder is created
     # only after that transaction commits.
+    # validacija PRIJE transakcije: doc_registry.list_types seeda kroz vlastiti
+    # spine.write() — poziv unutar našeg write-locka bio bi deadlock
+    wanted_doc_types = [k.strip() for k in dict.fromkeys(data.get("doc_types") or [])
+                        if isinstance(k, str) and k.strip()]
+    if wanted_doc_types:
+        from ragspine.business import doc_registry
+        known = {t["key"] for t in doc_registry.list_types(spine)}
+        for key in wanted_doc_types:
+            if key not in known:
+                raise ValueError(f"nepoznata vrsta dokumenta: {key!r} (Postavke → Vrste dokumenata)")
+
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     try:
         with spine.write() as c:
@@ -101,12 +112,10 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
                  data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0,
                  pdv_freq, regime, legal_form),
             ).lastrowid
-            # praćene vrste dokumenata (C2 registar) — dogovoreno u wizardu
-            for key in dict.fromkeys(data.get("doc_types") or []):
-                if not isinstance(key, str) or not key.strip():
-                    continue
+            # praćene vrste dokumenata (C2 registar) — validirane gore
+            for key in wanted_doc_types:
                 c.execute("INSERT OR IGNORE INTO client_doc_types(client_id, doc_type_key) "
-                          "VALUES(?,?)", (client_id, key.strip()))
+                          "VALUES(?,?)", (client_id, key))
             folder_path = _client_root(spine, cfg, client_id, name)
             if security.path_under(folder_path, root):
                 # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")

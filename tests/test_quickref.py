@@ -1,9 +1,9 @@
 from ragspine.business import quickref
 
 
-def test_seed_inserts_24_then_zero(spine):
+def test_seed_inserts_all_then_zero(spine):
     n = quickref.seed(spine)
-    assert n == 24
+    assert n == len(quickref.SEED)
     assert quickref.seed(spine) == 0
 
 
