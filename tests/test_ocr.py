@@ -166,6 +166,7 @@ def test_ocr_endpoint_allows_path_inside_root(spine, cfg, tmp_path):
 def test_ocr_pdf_ocrs_blank_pdf_and_ingests(spine, cfg, tmp_path):
     p = tmp_path / "scan.pdf"
     _make_blank_pdf(str(p))
+    cfg.ocr_url = "http://fake/ocr"  # dispatcher zove VLM fallback samo ako je ocr_url zadan
 
     result = ocr.ocr_pdf(spine, cfg, str(p), transport=lambda u, h, b: {
         "choices": [{"message": {"content": "OCR tekst"}}]
@@ -173,7 +174,7 @@ def test_ocr_pdf_ocrs_blank_pdf_and_ingests(spine, cfg, tmp_path):
 
     assert result["skipped"] is False
     assert result["pages"] == 1
-    assert result["out"] == str(tmp_path / "scan_ocr.pdf")
+    assert result["out"] == str(p)
 
     doc = fitz.open(result["out"])
     try:
@@ -195,4 +196,4 @@ def test_ocr_pdf_skips_pdf_with_text_layer(spine, cfg, tmp_path):
 
     result = ocr.ocr_pdf(spine, cfg, str(p), transport=blow_up)
 
-    assert result == {"skipped": True, "out": str(p), "pages": 0}
+    assert result == {"skipped": True, "out": str(p), "pages": 0, "engines": {}}
