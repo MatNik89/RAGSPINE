@@ -19,7 +19,7 @@ def _token(c, spine):
 
 def test_file_sha_stable(tmp_path):
     p = tmp_path / "a.txt"
-    p.write_text("sadrzaj dokumenta")
+    p.write_text("sadrzaj dokumenta", encoding="utf-8")
     assert vault._file_sha(str(p)) == vault._file_sha(str(p))
     assert vault._file_sha(str(p)) == vault._file_sha(str(p))  # deterministic, not just cached
 
@@ -28,7 +28,7 @@ def test_scan_move_preserves_chunks(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     src = root / "ugovor.txt"
-    src.write_text("Ovo je tekst ugovora s dovoljno sadrzaja za chunk.")
+    src.write_text("Ovo je tekst ugovora s dovoljno sadrzaja za chunk.", encoding="utf-8")
 
     doc_id = ingest.ingest_file(spine, str(src))
     assert doc_id is not None
@@ -60,7 +60,7 @@ def test_scan_renamed_same_dir(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     src = root / "a.txt"
-    src.write_text("neki tekst za preimenovanje datoteke")
+    src.write_text("neki tekst za preimenovanje datoteke", encoding="utf-8")
     doc_id = ingest.ingest_file(spine, str(src))
     new_path = root / "b.txt"
     os.rename(src, new_path)
@@ -76,7 +76,7 @@ def test_scan_renamed_same_dir(spine, tmp_path):
 def test_scan_new_file_ingested(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
-    (root / "novi.txt").write_text("posve novi dokument koji jos nije u bazi")
+    (root / "novi.txt").write_text("posve novi dokument koji jos nije u bazi", encoding="utf-8")
 
     result = vault.scan_directory(spine, str(root))
 
@@ -102,10 +102,10 @@ def test_scan_changed_content_same_path(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     p = root / "doc.txt"
-    p.write_text("originalni sadrzaj dokumenta prije izmjene")
+    p.write_text("originalni sadrzaj dokumenta prije izmjene", encoding="utf-8")
     doc_id = ingest.ingest_file(spine, str(p))
 
-    p.write_text("potpuno drugaciji sadrzaj nakon izmjene datoteke")
+    p.write_text("potpuno drugaciji sadrzaj nakon izmjene datoteke", encoding="utf-8")
     result = vault.scan_directory(spine, str(root))
 
     assert result["changed"] == 1
@@ -121,10 +121,10 @@ def test_scan_changed_marks_old_row_stale_only_new_active(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     p = root / "doc.txt"
-    p.write_text("originalni sadrzaj dokumenta prije izmjene")
+    p.write_text("originalni sadrzaj dokumenta prije izmjene", encoding="utf-8")
     old_id = ingest.ingest_file(spine, str(p))
 
-    p.write_text("posve drugaciji novi sadrzaj nakon izmjene datoteke")
+    p.write_text("posve drugaciji novi sadrzaj nakon izmjene datoteke", encoding="utf-8")
     result = vault.scan_directory(spine, str(root))
     assert result["changed"] == 1
 
@@ -145,7 +145,7 @@ def test_scan_backfills_legacy_file_sha_then_detects_move(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     p = root / "legacy.txt"
-    p.write_text("legacy dokument ingestiran prije nego je file_sha stupac postojao")
+    p.write_text("legacy dokument ingestiran prije nego je file_sha stupac postojao", encoding="utf-8")
 
     with spine.write() as c:
         doc_id = c.execute(
@@ -180,7 +180,7 @@ def test_scan_deleted_soft_deletes_not_hard(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     p = root / "nestat-ce.txt"
-    p.write_text("dokument koji ce nestati s diska")
+    p.write_text("dokument koji ce nestati s diska", encoding="utf-8")
     doc_id = ingest.ingest_file(spine, str(p))
 
     p.unlink()
@@ -196,7 +196,7 @@ def test_vault_status_counts(spine, tmp_path):
     root = tmp_path / "vault"
     root.mkdir()
     p = root / "x.txt"
-    p.write_text("dokument za status provjeru")
+    p.write_text("dokument za status provjeru", encoding="utf-8")
     ingest.ingest_file(spine, str(p))
     p.unlink()
     vault.scan_directory(spine, str(root))
@@ -224,7 +224,7 @@ def test_vault_scan_api_blocks_path_outside_root(spine, cfg, tmp_path):
 def test_vault_scan_api_within_data_dir(spine, cfg):
     root = os.path.join(cfg.data_dir, "vault")
     os.makedirs(root, exist_ok=True)
-    with open(os.path.join(root, "d.txt"), "w") as f:
+    with open(os.path.join(root, "d.txt"), "w", encoding="utf-8") as f:
         f.write("dokument unutar dopustenog data_dir korijena")
 
     c = _client(spine, cfg)

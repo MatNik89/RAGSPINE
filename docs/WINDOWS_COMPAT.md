@@ -31,3 +31,17 @@ bilo kakvog Windows deploya** (produkcijski PC ureda može biti Windows + SMB NA
 
 Cookie-Secure test (`test_api_auth`) je već popravljen (https base_url) i nije
 Windows-specifičan nego starlette 1.3+ ponašanje.
+
+## Status 2026-08-04 — RIJEŠENO (C1b)
+
+Sve 4 rupe fixane, Windows + macOS vraćeni u CI matricu:
+
+1. cp1252 → `encoding="utf-8"` na svim tekstualnim `open`/`read_text`/`write_text`
+   (source + testovi); `run_isolated` dekodira stdout kao UTF-8 (tesseract).
+2. path sep → `nas_folder` se u bazu sprema s `/` (portabilan identifikator);
+   mape-UI label split na `/` i `\`; ostatak već koristi `os.path.join`/`os.sep`.
+3. drive-mismatch → `security.path_under()` helper (commonpath + fail-closed
+   ValueError guard) na svih 9 guard-mjesta (ocr, vault, eracun, static,
+   sop_images, onboarding, folders).
+4. subprocess kill → `start_new_session`/`preexec_fn` POSIX-only; Windows timeout
+   ubija cijelo stablo kroz `taskkill /PID x /T /F` (unuci inače drže pipe).

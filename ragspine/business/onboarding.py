@@ -30,7 +30,7 @@ def _client_root(cfg, client_id, name: str) -> str:
     root = os.path.realpath(base)
     folder = f"{client_id}_{_slug(name)}"
     dest = os.path.realpath(os.path.join(root, "klijenti", folder))
-    if os.path.commonpath([dest, root]) != root:
+    if not security.path_under(dest, root):
         raise ValueError(f"path traversal blocked: {name!r} escapes root")
     return dest
 
@@ -66,7 +66,8 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
                  data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0, pdv_freq, regime),
             ).lastrowid
             folder_path = _client_root(cfg, client_id, name)
-            nas_folder = os.path.relpath(folder_path, root)
+            # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")
+            nas_folder = os.path.relpath(folder_path, root).replace(os.sep, "/")
             c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas_folder, client_id))
     except sqlite3.IntegrityError as e:
         raise ValueError("klijent s tim OIB-om već postoji") from e
@@ -84,7 +85,7 @@ def _client_dir(spine, cfg, client_id) -> str:
         raise ValueError(f"nepoznat klijent: {client_id}")
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     client_dir = os.path.realpath(os.path.join(root, row["nas_folder"] or ""))
-    if os.path.commonpath([client_dir, root]) != root:
+    if not security.path_under(client_dir, root):
         raise ValueError("path traversal blocked")
     return client_dir
 
@@ -108,7 +109,7 @@ def add_document(spine, cfg, client_id, filename, data: bytes, owner: str = "") 
         safe_name = f"{stem}_{n}{ext}"
 
     dest = os.path.realpath(os.path.join(client_dir, safe_name))
-    if os.path.commonpath([dest, client_dir]) != client_dir:
+    if not security.path_under(dest, client_dir):
         raise ValueError("path traversal blocked")
 
     with open(dest, "wb") as f:

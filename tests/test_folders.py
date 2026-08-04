@@ -43,7 +43,7 @@ def test_browse_roots_when_no_path(tmp_path):
 
 def test_browse_lists_subdirs(tmp_path):
     root = tmp_path / "nas"; (root / "Zakoni").mkdir(parents=True); (root / "Klijenti").mkdir()
-    (root / "readme.txt").write_text("x")  # datoteka se ne prikazuje
+    (root / "readme.txt").write_text("x", encoding="utf-8")  # datoteka se ne prikazuje
     cfg = _cfg_with_roots(tmp_path, [str(root)])
     out = folders.browse(cfg, str(root))
     assert out["dirs"] == ["Klijenti", "Zakoni"]  # sortirano, bez datoteke

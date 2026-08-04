@@ -40,7 +40,7 @@ async function loadBrowse(path){
       p.textContent=' (nema podmapa)'; list.appendChild(p); }
   }
   $('assign').style.display = d.path ? 'block' : 'none';
-  if(d.path){ $('f-label').value = d.path.split('/').pop() || d.path; }
+  if(d.path){ $('f-label').value = d.path.split(/[\\\\/]/).pop() || d.path; }
 }
 
 async function loadRegistered(){

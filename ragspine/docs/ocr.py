@@ -9,7 +9,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-from ragspine.core import optional
+from ragspine.core import optional, security
 from ragspine.docs.ingest import ingest_text
 
 _log = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ def resolve_scoped_path(cfg, path: str) -> str:
     roots.append(os.path.realpath(cfg.nas_root or cfg.data_dir))
     resolved = os.path.realpath(path)
     for root in roots:
-        if root and os.path.commonpath([resolved, root]) == root:
+        if root and security.path_under(resolved, root):
             return resolved
     raise ValueError(f"put izvan dozvoljenih korijena: {path!r}")
 

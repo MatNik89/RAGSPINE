@@ -3,6 +3,8 @@ of re-ingesting duplicates or losing the doc<->chunks link on a NAS reorg."""
 import os
 from pathlib import Path
 
+from ragspine.core import security
+
 from ragspine.docs import ingest as ingest_mod
 from ragspine.docs.ingest import _file_sha  # re-exported: vault.py's identity-hash helper
 
@@ -17,7 +19,7 @@ def resolve_scope(cfg, root: str) -> str:
         if not base:
             continue
         b = os.path.realpath(base)
-        if os.path.commonpath([target, b]) == b:
+        if security.path_under(target, b):
             return target
     raise ValueError(f"path traversal blocked: {root!r} outside nas_root/data_dir")
 
@@ -32,7 +34,7 @@ def _walk_scan(root: str) -> dict[str, str]:
                 continue
             fpath = os.path.join(dirpath, fname)
             rp = os.path.realpath(fpath)
-            if os.path.commonpath([rp, root]) != root:
+            if not security.path_under(rp, root):
                 continue
             try:
                 scanned[fpath] = _file_sha(fpath)
@@ -127,7 +129,7 @@ def scan_directory(spine, root: str, ingest_new: bool = True) -> dict:
         if r["id"] in matched_ids or r["stale"]:
             continue
         path = r["path"]
-        if not path or os.path.commonpath([os.path.realpath(path), root]) != root:
+        if not path or not security.path_under(os.path.realpath(path), root):
             continue  # outside this scan's scope — leave alone
         if os.path.exists(path) or r["file_sha"] in scanned_shas:
             continue

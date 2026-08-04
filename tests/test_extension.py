@@ -7,7 +7,7 @@ EXT = Path(__file__).resolve().parent.parent / "extension"
 
 
 def _manifest():
-    return json.loads((EXT / "manifest.json").read_text())
+    return json.loads((EXT / "manifest.json").read_text(encoding="utf-8"))
 
 
 def test_manifest_mv3_shape():
@@ -29,11 +29,11 @@ def test_referenced_files_exist_and_nonempty():
 
 
 def test_popup_html_references_popup_js():
-    assert "popup.js" in (EXT / "popup.html").read_text()
+    assert "popup.js" in (EXT / "popup.html").read_text(encoding="utf-8")
 
 
 def test_background_js_has_action_contract():
-    src = (EXT / "background.js").read_text()
+    src = (EXT / "background.js").read_text(encoding="utf-8")
     for action in ("navigate", "click", "type", "scroll", "screenshot", "read"):
         assert f'"{action}"' in src or f"'{action}'" in src, f"missing action {action}"
     assert "Authorization" in src and "Bearer" in src

@@ -27,9 +27,9 @@ def _propisi_tree(root):
     (p / "Zakoni").mkdir(parents=True)
     (p / "Pravilnici").mkdir(parents=True)
     (p / "Zakoni" / "zakon-o-pdv.txt").write_text(
-        "Zakon o porezu na dodanu vrijednost. Članak 1. Stopa PDV-a je 25 posto.")
+        "Zakon o porezu na dodanu vrijednost. Članak 1. Stopa PDV-a je 25 posto.", encoding="utf-8")
     (p / "Pravilnici" / "pravilnik-pdv.txt").write_text(
-        "Pravilnik o PDV-u. Detaljno o primjeni stope i oslobođenjima.")
+        "Pravilnik o PDV-u. Detaljno o primjeni stope i oslobođenjima.", encoding="utf-8")
     return str(p)
 
 
@@ -79,7 +79,7 @@ def test_sync_changed_file_supersedes_old(spine, tmp_path):
     folder_sync.sync_all(spine, cfg)
     # izmijeni zakon (nova stopa) -> nova aktivna verzija, stara superseded
     fp = os.path.join(propisi, "Zakoni", "zakon-o-pdv.txt")
-    with open(fp, "w") as f:
+    with open(fp, "w", encoding="utf-8") as f:
         f.write("Zakon o porezu na dodanu vrijednost. Članak 1. Stopa PDV-a je 24 posto (izmjena).")
     r = folder_sync.sync_all(spine, cfg)
     assert r["ingested"] == 1 and r["superseded"] == 1
@@ -101,9 +101,9 @@ def test_sync_skips_symlink_escape(spine, tmp_path):
     # datoteka-simlink unutar registrirane mape koja vodi VAN korijena se ne smije ingestati
     root = tmp_path / "nas"; propisi = root / "Propisi"; propisi.mkdir(parents=True)
     secret = tmp_path / "tajno"; secret.mkdir()
-    (secret / "lozinke.txt").write_text("TAJNI PODACI izvan NAS-a")
+    (secret / "lozinke.txt").write_text("TAJNI PODACI izvan NAS-a", encoding="utf-8")
     os.symlink(str(secret / "lozinke.txt"), str(propisi / "procitaj-me.txt"))
-    (propisi / "javno.txt").write_text("Javni propis dostupan svima.")
+    (propisi / "javno.txt").write_text("Javni propis dostupan svima.", encoding="utf-8")
     cfg = _cfg(tmp_path, [str(root)])
     folders.register(spine, cfg, str(propisi), "propisi", "P", "ana")
     r = folder_sync.sync_all(spine, cfg)
@@ -116,7 +116,7 @@ def test_sync_skips_symlink_escape(spine, tmp_path):
 
 def test_sync_root_removed_from_mount_roots_is_skipped(spine, tmp_path):
     root = tmp_path / "nas"; (root / "Propisi").mkdir(parents=True)
-    (root / "Propisi" / "x.txt").write_text("nešto")
+    (root / "Propisi" / "x.txt").write_text("nešto", encoding="utf-8")
     cfg = _cfg(tmp_path, [str(root)])
     folders.register(spine, cfg, str(root / "Propisi"), "propisi", "P", "ana")
     cfg2 = _cfg(tmp_path, [str(tmp_path / "drugi")])  # root više nije dozvoljen

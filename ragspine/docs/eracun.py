@@ -3,6 +3,7 @@ import os
 import shutil
 import xml.etree.ElementTree as ET
 
+from ragspine.core import security
 from ragspine.docs.ingest import ingest_text
 
 NS = {
@@ -87,7 +88,7 @@ def store(spine, parsed: dict, raw_path: str = "") -> int:
 def _resolve_dest(cfg, nas_folder: str) -> str:
     root = os.path.realpath(cfg.nas_root)
     dest = os.path.realpath(os.path.join(root, nas_folder))
-    if os.path.commonpath([dest, root]) != root:
+    if not security.path_under(dest, root):
         raise ValueError(f"path traversal blocked: {nas_folder!r} escapes nas_root")
     return dest
 

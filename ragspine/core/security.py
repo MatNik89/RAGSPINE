@@ -1,8 +1,17 @@
-import base64, hashlib, hmac, json, re, secrets, time
+import base64, hashlib, hmac, json, os, re, secrets, time
 
 
 class AuthError(Exception):
     pass
+
+
+def path_under(path: str, root: str) -> bool:
+    """True ako path leži na/ispod roota (oba već realpath-ani kod pozivatelja).
+    Fail-closed: Windows drive-mismatch (commonpath ValueError) = izvan roota."""
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
 
 
 def _b64(data: bytes) -> str:

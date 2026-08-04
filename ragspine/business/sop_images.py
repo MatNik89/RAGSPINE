@@ -4,6 +4,7 @@
 import mimetypes
 import os
 
+from ragspine.core import security
 from ragspine.docs import ocr as ocr_mod
 
 _ALLOWED_EXT = {".png", ".jpg", ".jpeg", ".webp"}
@@ -71,7 +72,7 @@ def image_bytes(spine, cfg, image_id: int):
         return None
     images_dir = os.path.realpath(_images_dir(cfg))
     resolved = os.path.realpath(row["path"])
-    if os.path.commonpath([resolved, images_dir]) != images_dir or not os.path.isfile(resolved):
+    if not security.path_under(resolved, images_dir) or not os.path.isfile(resolved):
         return None
     mime = mimetypes.guess_type(resolved)[0] or "application/octet-stream"
     with open(resolved, "rb") as f:

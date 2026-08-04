@@ -31,13 +31,13 @@ def detect_provider(base_url: str) -> str:
 
 def load_oauth_token() -> tuple[str, str] | None:
     try:
-        data = json.loads(Path("~/.claude/.credentials.json").expanduser().read_text())
+        data = json.loads(Path("~/.claude/.credentials.json").expanduser().read_text(encoding="utf-8"))
         token = data["claudeAiOauth"]["accessToken"]
         return ("anthropic-oauth", token)
     except (OSError, ValueError, KeyError, TypeError):
         pass
     try:
-        data = json.loads(Path("~/.codex/auth.json").expanduser().read_text())
+        data = json.loads(Path("~/.codex/auth.json").expanduser().read_text(encoding="utf-8"))
         token = data["tokens"]["access_token"]
         return ("openai-oauth", token)
     except (OSError, ValueError, KeyError, TypeError):

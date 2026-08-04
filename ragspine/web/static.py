@@ -8,6 +8,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response
 
+from ragspine.core import security
+
 STATIC_DIR = (Path(__file__).parent / "static").resolve()
 
 _MEDIA_TYPES = {
@@ -29,7 +31,7 @@ def serve_static(path: str):
     if media_type is None:
         return _NOT_FOUND
     target = (STATIC_DIR / path).resolve()
-    if os.path.commonpath([STATIC_DIR, target]) != str(STATIC_DIR):
+    if not security.path_under(str(target), str(STATIC_DIR)):
         return _NOT_FOUND
     if not target.is_file():
         return _NOT_FOUND
