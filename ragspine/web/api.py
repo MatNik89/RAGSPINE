@@ -699,6 +699,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         return postavke_page()
 
+    @app.get("/ui/arhitektura", response_class=HTMLResponse)
+    def ui_arhitektura(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_arhitektura import arhitektura_page
+        return arhitektura_page()
+
     @app.get("/ui/dok-tipovi", response_class=HTMLResponse)
     def ui_dok_tipovi(request: Request):
         try:
@@ -975,6 +984,16 @@ def create_app(spine, cfg) -> FastAPI:
                                           llm=llm, client_id=body.client_id, user=user)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
+
+    @app.get("/folder-architecture")
+    def folder_architecture_preview(user: str = Depends(require_user_web)):
+        from ragspine.business import folder_architecture as fa
+        return fa.propose(spine, cfg)
+
+    @app.post("/folder-architecture/apply")
+    def folder_architecture_apply(user: str = Depends(require_user_web)):
+        from ragspine.business import folder_architecture as fa
+        return fa.apply(spine, cfg, user=user)
 
     @app.get("/doc-types/export")
     def doc_types_export(user: str = Depends(require_user_web)):
