@@ -12,9 +12,17 @@ Prati redom.
 
 ## 1. Instalacija
 
-```bash
-pip install -e ".[full]"      # puna funkcionalnost (OCR, embeddings, xlsx, mail)
+Kloniraj repo pa pokreni skriptu za svoj OS (venv + install + model + operater):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1      # Windows
 ```
+```bash
+./install.sh                                                # Linux / macOS
+```
+
+Ručno: `python -m venv .venv && . .venv/bin/activate && pip install -e ".[full]"`.
+Skripta kreira operatera; ako ideš ručno, korak 3 niže.
 
 ## 2. Tajne i okolina
 

@@ -7,34 +7,49 @@ referentne brojke), OCR za skenirane dokumente i Chrome extension bridge za
 poluautomatizaciju webova bez API-ja. **RAGSPINE nije ERP** — ne knjiži, ne
 generira račune i ne šalje JOPPD.
 
-## Instalacija
+## Početni setup (jedan blok po OS-u)
 
-Python 3.11+.
+Python 3.11+. Kloniraj repo pa pokreni skriptu za svoj OS — napravi venv,
+instalira sve, povuče embedding model, kreira operatera i ispiše URL.
+Idempotentno (ponovno pokretanje ne razbija install).
 
-```bash
-pip install -e .
+**Windows** (PowerShell, iz korijena repoa):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-Instalira samo jezgru (`fastapi`, `uvicorn`, `pydantic`) — sve radi, ali s
-degradiranom funkcionalnošću (vidi tablicu niže). Za punu funkcionalnost:
+**Linux / macOS**:
 
 ```bash
-pip install -e ".[full]"
+./install.sh
 ```
 
-Dodaje `pymupdf`, `fastembed`, `sqlite-vec`, `python-docx`, `openpyxl`,
-`apprise`.
+Preskoči embedding model (RAG radi degradirano): `RAGSPINE_SKIP_MODEL=1`.
+Ime operatera kao argument: `./install.sh ana` / `.\install.ps1 ana`.
 
-## Brzi početak
+Nakon setupa:
 
 ```bash
-python -m ragspine setup                          # baza + sjemenke + hw/provider detekcija
-RAGSPINE_PASS=lozinka python -m ragspine auth add ana   # prvi korisnik
-python -m ragspine serve                          # 127.0.0.1:8400
+ragspine serve      # → http://127.0.0.1:8400/login
+ragspine doctor     # provjera spremnosti (korisnici, LLM, NAS, dozvole…)
 ```
 
-Zatim otvori `http://127.0.0.1:8400/login` u browseru, ili dohvati token
-programatski:
+Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS, GDPR):
+**[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
+
+### Ručna instalacija (bez skripte)
+
+```bash
+python -m venv .venv && . .venv/bin/activate     # Win: .venv\Scripts\Activate.ps1
+pip install -e ".[full]"                          # ".": samo jezgra (degradirano)
+ragspine setup                                    # baza + sjemenke + detekcija
+ragspine auth add ana                             # prvi korisnik (owner)
+ragspine serve
+```
+
+`[full]` dodaje `pymupdf`, `fastembed`, `sqlite-vec`, `python-docx`,
+`openpyxl`, `apprise`. Token programatski:
 
 ```bash
 curl -X POST http://127.0.0.1:8400/auth/login \

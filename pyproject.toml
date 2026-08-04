@@ -8,6 +8,9 @@ version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "python-multipart>=0.0.9"]
 
+[project.scripts]
+ragspine = "ragspine.__main__:main"
+
 [project.optional-dependencies]
 full = ["pymupdf", "fastembed", "sqlite-vec", "python-docx", "openpyxl", "apprise"]
 

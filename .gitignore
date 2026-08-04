@@ -4,3 +4,6 @@ __pycache__/
 .pytest_cache/
 .superpowers/
 .sdd/
+
+# lokalni venv (install.sh/ps1)
+.venv/
