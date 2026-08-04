@@ -152,7 +152,11 @@ def test_forget_does_not_unlink_outside_root_or_symlink(spine, cfg, tmp_path):
     cfg.nas_root = str(root)
     # symlink unutar roota koji cilja izvan → ne smije obrisati metu
     link = root / "Ivan-link.pdf"
-    link.symlink_to(outside)
+    try:
+        link.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        import pytest
+        pytest.skip("symlink nije podržan (Windows bez privilegije)")
     with spine.write() as c:
         c.execute("INSERT INTO documents(title,path,doc_type) VALUES(?,?,?)",
                   ("Ivan", str(link), "osobna"))
