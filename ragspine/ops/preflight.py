@@ -141,9 +141,8 @@ def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> 
     """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
     import socket
     try:
-        socket.setdefaulttimeout(timeout)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
-        return True
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
     except OSError:
         return False
 
@@ -157,11 +156,12 @@ def _ip_mode() -> str:
     try:
         from ragspine.core.subproc import run_isolated
         rc, out, _ = run_isolated(["netsh", "interface", "ip", "show", "config"], timeout=5)
-        low = out.lower()
-        if "dhcp enabled:" in low and "dhcp enabled:                         yes" in low:
-            return "dhcp"
-        if "dhcp enabled" in low:
-            return "static"
+        for line in out.lower().splitlines():
+            normalized = " ".join(line.split())
+            if "dhcp enabled: yes" in normalized:
+                return "dhcp"
+            if "dhcp enabled: no" in normalized:
+                return "static"
     except Exception:
         pass
     return "unknown"
