@@ -99,6 +99,11 @@ class FolderNoteBody(BaseModel):
     body: str
 
 
+class ForgetBody(BaseModel):
+    term: str = Field(min_length=1, max_length=200)
+    confirm: str | None = None
+
+
 class SetupOwnerBody(BaseModel):
     # min 8 = osnovna jačina; max 128 = štiti PBKDF2 od golemog inputa (Codex)
     username: str = Field(min_length=1, max_length=64)
@@ -879,6 +884,27 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
         return FileResponse(path, media_type="application/octet-stream",
                             filename=os.path.basename(path))
+
+    @app.post("/forget/preview")
+    def forget_preview(body: ForgetBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.docs.forget import forget
+        if not body.term.strip():
+            raise HTTPException(400, "pojam je obavezan")
+        return forget(spine, body.term.strip(), dry=True, cfg=cfg)
+
+    @app.post("/forget/apply")
+    def forget_apply(body: ForgetBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.docs.forget import forget
+        term = body.term.strip()
+        if not term:
+            raise HTTPException(400, "pojam je obavezan")
+        if body.confirm != term:
+            raise HTTPException(400, "potvrda se ne poklapa s pojmom")
+        result = forget(spine, term, dry=False, cfg=cfg)
+        spine.audit(actor.username, "gdpr_forget_ui", f"rows={sum(result.values())}")
+        return result
 
     @app.get("/ui/racunalo", response_class=HTMLResponse)
     def ui_racunalo(request: Request):

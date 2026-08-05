@@ -35,8 +35,35 @@ async function makeNow(){
   load();
 }
 
+async function forgetPreview(){
+  var term = $('fterm').value.trim();
+  if(!term){ return; }
+  var res = await fetch('/forget/preview', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({term:term})});
+  var j = await res.json().catch(function(){return {};});
+  if(!res.ok){ $('fmsg').textContent = j.detail || 'Greška.'; return; }
+  var total = 0; var parts = [];
+  Object.keys(j).forEach(function(k){ if(j[k]){ total += j[k]; parts.push(k+': '+j[k]); } });
+  $('fmsg').textContent = 'Pronađeno za brisanje (' + total + '): ' + (parts.join(', ') || 'ništa');
+  $('fconfirm-box').style.display = total ? 'block' : 'none';
+}
+
+async function forgetApply(){
+  var term = $('fterm').value.trim(), confirm = $('fconfirm').value.trim();
+  var res = await fetch('/forget/apply', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({term:term, confirm:confirm})});
+  var j = await res.json().catch(function(){return {};});
+  if(res.ok){
+    var total = Object.keys(j).reduce(function(a,k){ return a + (j[k]||0); }, 0);
+    $('fmsg').textContent = '✓ Obrisano trajno (' + total + ' zapisa).';
+    $('fconfirm-box').style.display='none'; $('fterm').value=''; $('fconfirm').value='';
+  } else { $('fmsg').textContent = j.detail || 'Greška — provjeri potvrdu.'; }
+}
+
 document.addEventListener('DOMContentLoaded', function(){
   $('mk').addEventListener('click', makeNow);
+  $('fprev').addEventListener('click', forgetPreview);
+  $('fdel').addEventListener('click', forgetApply);
   load();
 });
 """
@@ -71,6 +98,22 @@ _BODY = """
   <pre>ragspine restore &lt;putanja-do-kopije&gt;.db</pre>
   <p class="muted">Trenutna baza se prije vraćanja spremi kao <code>ragspine.db.prerestore</code>.</p>
 </div>
+
+<div class="card" style="border-color:#fecaca">
+  <h2>Zaboravi klijenta (GDPR)</h2>
+  <p class="muted">Trajno briše sve zapise i datoteke koji sadrže upisani pojam
+    (ime, OIB…): dokumente, ekstrakcije, bilješke, e-račune, poruke, keš, skenove.
+    <b>Nepovratno.</b> Prvo pregledaj što će nestati, pa potvrdi.</p>
+  <input id="fterm" placeholder="ime / OIB klijenta za brisanje">
+  <button class="btn" id="fprev">Pregledaj</button>
+  <p id="fmsg" class="muted"></p>
+  <div id="fconfirm-box" style="display:none">
+    <p class="muted">Za potvrdu ponovno upiši <b>točan pojam</b> pa klikni Obriši:</p>
+    <input id="fconfirm" placeholder="ponovi pojam za potvrdu">
+    <button class="btn" id="fdel" style="background:#dc2626;color:#fff;border-color:#dc2626">Obriši trajno</button>
+  </div>
+</div>
+<style>input{ padding:8px; margin:6px 6px 8px 0; border:1px solid #d1d5db; border-radius:8px; }</style>
 <script>__SCRIPT__</script>
 """
 
