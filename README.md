@@ -35,7 +35,7 @@ ragspine serve      # → http://127.0.0.1:8400/login
 ragspine doctor     # provjera spremnosti (korisnici, LLM, NAS, dozvole…)
 ```
 
-Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS, GDPR):
+Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS):
 **[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
 
 ### Ručna instalacija (bez skripte)
@@ -122,7 +122,7 @@ obliku. U Open WebUI dodaj novi OpenAI-connection:
 - **E-račun** — UBL 2.1 parser + auto-sort po OIB-u u NAS folder klijenta.
 - **OCR** — Unlimited-OCR klijent, PyMuPDF raster + nevidljivi text layer
   natrag u PDF (skenirani dokument ostaje pretraživ, izgled se ne mijenja).
-- **GDPR forget** — sweep svih tablica po pojmu + WAL TRUNCATE + verifikacija.
+- **Bez brisanja klijentskih podataka** — namjerno; knjigovodstvena dokumentacija ima zakonsku retenciju (podaci se ne brišu na zahtjev).
 - **Browser extension** — MV3 bridge (polling command queue) za akcije na
   webovima bez javnog API-ja, umjesto punog CDP agenta.
 
@@ -149,7 +149,6 @@ obliku. U Open WebUI dodaj novi OpenAI-connection:
 | `doctor` | preflight (Python, disk, RAM, NTP, LUKS, Ollama, OCR, opcionalne ovisnosti) |
 | `health` | brzi status baze i servisa |
 | `ingest [path] [--imap]` | uvoz dokumenata iz foldera ili IMAP priloga |
-| `forget <term> [--dry]` | GDPR brisanje po pojmu (`--dry` samo broji, ne briše) |
 | `eval` | pokreni golden-set upita, provjera router lane + retrieval hit |
 | `stats` | interakcije po laneu, cache, top upiti |
 | `reminders [add <text> <due>]` | podsjetnici |
@@ -177,8 +176,8 @@ Postavljanje u uredu: **[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
 - **Sigurnosna zaglavlja** (CSP, X-Frame-Options DENY, nosniff, no-referrer) na
   svim odgovorima; `/docs`/`/openapi.json` isključeni; pred-decode limit tijela.
 - **DB + tajna 0600, data_dir 0700**; PII redakcija prije LLM-a kad je uključena.
-- GDPR forget briše DB retke **i izvorne datoteke** (skenovi/e-računi) pod
-  dozvoljenim korijenima + SHA-256 hash-chain audit (append-only, verifikabilan).
+- **Brisanje klijentskih podataka nije dostupno** (zakonska retencija); promjene
+  su praćene SHA-256 hash-chain auditom (append-only, verifikabilan).
 - v1 je zamišljen za LAN/plaintext: cookie `Secure` + HSTS uz `RAGSPINE_HTTPS_ONLY=1`.
 
 ## Arhitektura

@@ -101,14 +101,9 @@ disk-enkripcija za PII at-rest), `nas` (registrirana KLIJENTI mapa), `ollama`/
 - Sigurnosna zaglavlja (CSP, X-Frame-Options DENY, nosniff, no-referrer) šalju se
   automatski na svim odgovorima.
 
-## 9. GDPR brisanje
+## 9. Brisanje podataka
 
-```bash
-ragspine forget "Ime Prezime" --dry     # pregled: koliko redaka i datoteka bi nestalo
-ragspine forget "Ime Prezime"           # briše DB retke (uklj. transkripte, keš,
-                                         # embeddinge) I izvorne datoteke skenova/
-                                         # e-računa pod dozvoljenim korijenima
-```
-
-Datoteka koju drži drugi (nepodudarni) klijentski red se **ne** briše; symlinkovi
-i putovi izvan korijena se preskaču.
+RAGSPINE **namjerno nema funkciju brisanja klijentskih podataka**. Knjigovodstvena
+dokumentacija podliježe zakonskoj retenciji (Zakon o računovodstvu / porezni
+propisi — čuvanje godinama), pa se podaci klijenata **ne smiju brisati** na
+zahtjev. GDPR pravo na zaborav ne poništava zakonsku obvezu čuvanja.

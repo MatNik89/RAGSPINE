@@ -166,18 +166,6 @@ def _cmd_stats(args) -> int:
     return 0
 
 
-def _cmd_forget(args) -> int:
-    from ragspine.config import get_config
-    from ragspine.core.spine import init_spine
-    from ragspine.docs.forget import forget
-
-    cfg = get_config()
-    spine = init_spine(cfg.db_path)
-    result = forget(spine, args.term, dry=args.dry, cfg=cfg)
-    print(result)
-    return 0
-
-
 def _cmd_backup(args) -> int:
     from ragspine.config import get_config
     from ragspine.ops import backup
@@ -313,11 +301,6 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("path", nargs="?")
     p_ingest.add_argument("--imap", action="store_true")
     p_ingest.set_defaults(func=_cmd_ingest)
-
-    p_forget = sub.add_parser("forget")
-    p_forget.add_argument("term")
-    p_forget.add_argument("--dry", action="store_true")
-    p_forget.set_defaults(func=_cmd_forget)
 
     sub.add_parser("backup").set_defaults(func=_cmd_backup)
     p_restore = sub.add_parser("restore")
