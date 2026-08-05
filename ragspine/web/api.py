@@ -832,6 +832,22 @@ def create_app(spine, cfg) -> FastAPI:
         from ragspine.web.templates_devices import devices_page
         return devices_page()
 
+    @app.get("/ui/racunalo", response_class=HTMLResponse)
+    def ui_racunalo(request: Request):
+        # stanje sustava + software inventory = admin (ne svaki radnik)
+        try:
+            _require_admin(require_actor_web(request))
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_preflight import preflight_page
+        return preflight_page()
+
+    @app.get("/preflight")
+    def preflight_summary(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.ops import preflight
+        return preflight.summary(cfg)
+
     @app.get("/ui/arhitektura", response_class=HTMLResponse)
     def ui_arhitektura(request: Request):
         try:
