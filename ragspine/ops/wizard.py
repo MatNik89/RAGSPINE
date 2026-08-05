@@ -90,4 +90,9 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    out("P1 gotov: preduvjeti + operater. Stranice 3-6 slijede u P2-P4.")
+    # P1 pokriva stranice 1-2; wizard je time gotov koliko je danas implementiran
+    # pa smije ugasiti setup-gate (inače web UI ostaje zaključan na /ui/setup).
+    # Pomicati dalje kako stranice 3-6 stižu u P2-P4 (mark_complete tek nakon zadnje).
+    wizard_state.mark_complete(spine)
+    out("P1 gotov: preduvjeti + operater. Setup je dovršen — web sučelje je dostupno.")
+    out("Stranice 3-6 (dodatna podešavanja) slijede u P2-P4 i bit će naknadno dostupne.")

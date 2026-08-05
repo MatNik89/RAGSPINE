@@ -91,3 +91,16 @@ def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
     assert any("interaktivni terminal" in l for l in lines)
     assert ws.get_stage(spine) == 1     # preduvjeti (svi ok) prošli, operater prekinut EOF-om
     assert ws.is_complete(spine) is False
+
+
+def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
+    """P1 wizard end-to-end (preduvjeti OK + operater kreiran) mora postaviti
+    setup_complete — inače gatekeeper (firstrun.needs_setup) trajno zaključava
+    web sučelje na /ui/setup i za instalacije koje su upravo dovršile wizard."""
+    ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
+    monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
+    lines = []
+    wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
+    assert ws.get_stage(spine) == 2
+    assert ws.is_complete(spine) is True
+    assert firstrun.needs_setup(spine) is False

@@ -169,6 +169,30 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
 
 
+def _migrate_setup_complete_for_upgrades(conn: sqlite3.Connection) -> None:
+    """Nadogradnja postojećih instalacija prije setup-wizarda (feat/setup-wizard-design):
+    ako baza već ima barem jednog korisnika a setup_complete flag nije postavljen,
+    wizard nikad nije pokrenut na ovoj bazi (stariji deploy, prije uvođenja wizarda)
+    — bez ovoga bi navigacijski gateway (firstrun.needs_setup) trajno preusmjeravao
+    na /ui/setup jer ništa u produkcijskom kodu prije ovoga nije postavljalo taj flag.
+    Prazna baza (bez korisnika) se NE dira — svježa instalacija i dalje ide kroz
+    wizard/onboarding kao i prije. Direktan SQL (ne wizard_state.mark_complete /
+    spine.set_override) jer je ovo pozvano iz __init__ dok je write()-lock već
+    držan pa bi ponovni ulaz u self.write() blokirao (lock nije reentrant)."""
+    has_user = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+    if not has_user:
+        return
+    row = conn.execute(
+        "SELECT value FROM config_overrides WHERE module='setup' AND key='complete'"
+    ).fetchone()
+    if row is not None and row["value"] == "true":
+        return
+    conn.execute(
+        """INSERT INTO config_overrides(module,key,value,source_url,updated_at)
+           VALUES('setup','complete','true','',datetime('now'))
+           ON CONFLICT(module,key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at""")
+
+
 class Spine:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -205,6 +229,7 @@ class Spine:
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
+            _migrate_setup_complete_for_upgrades(c)
         # DB drži sav klijentski PII + pbkdf2 hasheve lozinki — 0600 da drugi
         # lokalni korisnici hosta ne mogu čitati (chmod no-op na Windowsu).
         for p in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):
