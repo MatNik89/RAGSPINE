@@ -99,6 +99,21 @@ class FolderNoteBody(BaseModel):
     body: str
 
 
+class ConnectorTestBody(BaseModel):
+    kind: str = Field(min_length=1, max_length=40)
+    config: dict = Field(default_factory=dict)
+
+
+class ConnectorCreateBody(BaseModel):
+    kind: str = Field(min_length=1, max_length=40)
+    name: str = Field(min_length=1, max_length=100)
+    config: dict = Field(default_factory=dict)
+
+
+class ConnectorStatusBody(BaseModel):
+    status: str = Field(min_length=1, max_length=20)
+
+
 class SetupOwnerBody(BaseModel):
     # min 8 = osnovna jačina; max 128 = štiti PBKDF2 od golemog inputa (Codex)
     username: str = Field(min_length=1, max_length=64)
@@ -416,6 +431,8 @@ def create_app(spine, cfg) -> FastAPI:
     tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
     limiter = RateLimiter()
     _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba
+    from ragspine.business.connector_adapters import register_builtin
+    register_builtin()  # registrira mail/telegram/whatsapp tipove (idempotentno)
 
     # Sigurnosna zaglavlja (defense-in-depth): clickjacking, MIME-sniff, referrer
     # leak, base-tag hijack. CSP dopušta 'unsafe-inline' jer je UI inline-script,
@@ -844,6 +861,62 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from ragspine.web.templates_devices import devices_page
         return devices_page()
+
+    @app.get("/ui/kanali", response_class=HTMLResponse)
+    def ui_kanali(request: Request):
+        try:
+            _require_admin(require_actor_web(request))
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_connectors import connectors_page
+        return connectors_page()
+
+    @app.get("/connector-types")
+    def connector_types(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        return cx.list_types()
+
+    @app.get("/connectors")
+    def connectors_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        return cx.list_connectors(spine)
+
+    @app.post("/connectors/test")
+    def connectors_test(body: ConnectorTestBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        try:
+            return cx.test_draft(body.kind, body.config)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/connectors")
+    def connectors_create(body: ConnectorCreateBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        try:
+            return cx.create(spine, body.kind, body.name, body.config, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/connectors/{cid}/status")
+    def connectors_status(cid: int, body: ConnectorStatusBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        try:
+            cx.set_status(spine, cid, body.status, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": cid, "status": body.status}
+
+    @app.delete("/connectors/{cid}")
+    def connectors_delete(cid: int, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business import connectors as cx
+        cx.delete(spine, cid, user=actor.username)
+        return {"id": cid, "removed": True}
 
     @app.get("/ui/backup", response_class=HTMLResponse)
     def ui_backup(request: Request):
