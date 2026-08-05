@@ -459,7 +459,7 @@ def create_app(spine, cfg) -> FastAPI:
         # na wizard (/ui/setup). Uzor Open WebUI (has_users()==False).
         from ragspine.web import firstrun
         if request.method == "GET" and firstrun._redirect_target(request.url.path) \
-                and firstrun.needs_onboarding(spine):
+                and firstrun.needs_setup(spine):
             return RedirectResponse("/ui/setup", status_code=303)
         resp = await call_next(request)
         resp.headers["X-Content-Type-Options"] = "nosniff"

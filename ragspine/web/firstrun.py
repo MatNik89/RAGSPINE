@@ -11,6 +11,13 @@ def needs_onboarding(spine) -> bool:
     return spine.read().execute("SELECT 1 FROM users LIMIT 1").fetchone() is None
 
 
+def needs_setup(spine) -> bool:
+    """Setup nije gotov dok wizard ne postavi setup_complete. Vezano na flag,
+    NE na postojanje korisnika (admin se kreira usred wizarda — Codex/hermes)."""
+    from ragspine.ops import wizard_state
+    return not wizard_state.is_complete(spine)
+
+
 def _redirect_target(path: str) -> bool:
     """Je li ovo navigacijska (HTML) ruta koju treba preusmjeriti na wizard.
     Točan match ili prefiks s '/' (Codex: goli startswith dopušta /ui/setupX)."""

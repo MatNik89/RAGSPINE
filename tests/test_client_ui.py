@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from ragspine.business import checklist, expiry as expiry_mod, obveze
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
+from ragspine.ops import wizard_state as ws
 
 
 def _client(spine, cfg):
@@ -13,6 +14,7 @@ def _client(spine, cfg):
 
 def _token(c, spine):
     add_user(spine, "ana", "tajna")
+    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
     return c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
 
 
@@ -44,7 +46,8 @@ def test_klijenti_page_authed(spine, cfg):
 
 
 def test_klijenti_page_no_auth_redirects(spine, cfg):
-    add_user(spine, "_o", "pw")  # onboarding gotov → neautoriziran ide na /login, ne /ui/setup
+    add_user(spine, "_o", "pw")
+    ws.mark_complete(spine)  # onboarding gotov → neautoriziran ide na /login, ne /ui/setup
     c = _client(spine, cfg)
     r = c.get("/ui/klijenti", follow_redirects=False)
     assert r.status_code == 303
@@ -66,6 +69,7 @@ def test_klijent_page_authed(spine, cfg):
 
 def test_klijent_page_no_auth_redirects(spine, cfg):
     add_user(spine, "_o", "pw")
+    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
     c = _client(spine, cfg)
     r = c.get("/ui/klijent/1", follow_redirects=False)
     assert r.status_code == 303

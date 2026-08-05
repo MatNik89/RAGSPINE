@@ -1,9 +1,11 @@
 """First-run wizard: gatekeeper + kreiranje operatera."""
 from fastapi.testclient import TestClient
 
+from ragspine.core.spine import init_spine
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
 from ragspine.web import firstrun
+from ragspine.ops import wizard_state as ws
 
 
 def _client(spine, cfg):
@@ -37,7 +39,11 @@ def test_setup_owner_creates_first_user_then_locks(spine, cfg):
     # drugi poziv odbijen (postavljanje gotovo)
     r2 = c.post("/setup/owner", json={"username": "boris", "password": "DrugaLoz2!"})
     assert r2.status_code == 409
-    # nakon kreiranja, gatekeeper više ne preusmjerava; a preflight traži prijavu
+    # gatekeeper i dalje drži na wizardu dok wizard ne označi setup_complete
+    # (kreiranje ownera je samo jedan korak usred wizarda, ne kraj)
+    assert c.get("/obveze").headers["location"] == "/ui/setup"
+    ws.mark_complete(spine)
+    # tek nakon setup_complete gatekeeper pušta dalje; preflight traži prijavu
     assert c.get("/obveze").status_code in (200, 303)  # 303 na /login (require), ne /ui/setup
     loc = c.get("/obveze").headers.get("location", "")
     assert "/ui/setup" not in loc
@@ -93,3 +99,12 @@ def test_preflight_reduced_when_onboarding(spine, cfg):
     assert d["state"]["os"] is None and d["state"]["gpu"] is None
     dd = next(r for r in d["requirements"] if r["key"] == "data_dir")
     assert "/" not in dd["detalj"]  # nema pune putanje
+
+
+def test_needs_setup_true_even_with_user_until_complete(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    add_user(s, "admin", "lozinka12", role="admin")
+    # korisnik postoji, ali setup nije označen gotovim
+    assert firstrun.needs_setup(s) is True
+    ws.mark_complete(s)
+    assert firstrun.needs_setup(s) is False

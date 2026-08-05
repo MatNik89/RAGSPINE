@@ -64,9 +64,12 @@ def test_api_keywords_upcoming_toggle_page(spine, cfg):
     from ragspine.web.api import create_app
     from ragspine.web.deps import add_user
 
+    from ragspine.ops import wizard_state as ws
+
     c = TestClient(create_app(spine, cfg))
     assert c.get("/watchlist/keywords").status_code in (401, 403)
     add_user(spine, "ana", "pw")
+    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     h = {"Authorization": f"Bearer {tok}"}
 
