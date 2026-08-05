@@ -1,6 +1,6 @@
 from ragspine.core.spine import init_spine
 from ragspine.core.security import verify_password
-from ragspine.ops import wizard
+from ragspine.ops import wizard, wizard_state as ws
 from ragspine.web import firstrun
 
 
@@ -74,3 +74,20 @@ def test_page_operater_skips_when_admin_exists(tmp_path):
 
     ok = wizard.page_operater(s, input_fn=_boom, out=lambda *_: None)
     assert ok is True
+
+
+def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
+    """Piped stdin / servis bez terminala (npr. `ragspine setup < /dev/null`)
+    ne smije dati traceback — samo kratku uputu; resume ostaje na zadnjem
+    dovršenom koraku. Preflight je mockan da ne udara na mrežu (Ollama/net)."""
+    ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
+    monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
+
+    def _eof(_=""):
+        raise EOFError()
+
+    lines = []
+    wizard.run(spine, cfg, input_fn=_eof, out=lines.append)  # ne smije propagirati EOFError
+    assert any("interaktivni terminal" in l for l in lines)
+    assert ws.get_stage(spine) == 1     # preduvjeti (svi ok) prošli, operater prekinut EOF-om
+    assert ws.is_complete(spine) is False

@@ -70,14 +70,24 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         return
     stage = wizard_state.get_stage(spine)
     out(f"RAGSPINE setup (nastavak od koraka {stage + 1}).")
-    if stage < 1:
-        if not page_preduvjeti(spine, cfg, input_fn=input_fn, out=out):
-            out("Setup prekinut na preduvjetima. Pokreni ponovno kad popraviš.")
-            return
-        wizard_state.set_stage(spine, 1)
-    if stage < 2:
-        if not page_operater(spine, input_fn=input_fn, out=out):
-            out("Setup prekinut na operateru.")
-            return
-        wizard_state.set_stage(spine, 2)
+    try:
+        if stage < 1:
+            if not page_preduvjeti(spine, cfg, input_fn=input_fn, out=out):
+                out("Setup prekinut na preduvjetima. Pokreni ponovno kad popraviš.")
+                return
+            wizard_state.set_stage(spine, 1)
+        if stage < 2:
+            if not page_operater(spine, input_fn=input_fn, out=out):
+                out("Setup prekinut na operateru.")
+                return
+            wizard_state.set_stage(spine, 2)
+    except (EOFError, KeyboardInterrupt):
+        # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
+        # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
+        # ovaj slučaj posebno pa CLI izlazi s 0. Upgrade path: vratiti bool/kod
+        # ako se pokaže da nešto ovisi o exit statusu.
+        out("")
+        out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
+            "stanje je spremljeno — nastavlja gdje je stao.")
+        return
     out("P1 gotov: preduvjeti + operater. Stranice 3-6 slijede u P2-P4.")

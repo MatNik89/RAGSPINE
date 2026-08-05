@@ -1,4 +1,16 @@
+import pytest
+
 from ragspine.ops import preflight as pf, wizard_state as ws
+
+
+@pytest.fixture(autouse=True)
+def _no_live_network(monkeypatch):
+    # requirements() bi inače stvarno zvao urlopen(:11434) i spajao se na
+    # 8.8.8.8:53 — sporo/nepouzdano na CI bez mreže (i firewalled okolinama).
+    # Testovi koji trebaju specifičnu vrijednost preklapaju ovo svojim
+    # monkeypatch.setattr (izvršava se poslije, pa pobjeđuje).
+    monkeypatch.setattr(pf, "ollama_ready", lambda url=None: (True, "servis radi"))
+    monkeypatch.setattr(pf, "internet_ok", lambda *a, **k: True)
 
 
 def test_internet_is_warn_not_fail(monkeypatch):
