@@ -149,11 +149,3 @@ def test_extracted_expiry_reaches_dashboard_with_warn(spine, cfg):
     mine = [r for r in rows if r["client_id"] == cid]
     assert mine and mine[0]["state"] == "warn" and mine[0]["days_left"] == 5
 
-
-def test_forget_removes_doc_extracts(spine, cfg):
-    from ragspine.docs import forget
-    doc_id = _mk_doc(spine)
-    extraction.extract(spine, cfg, doc_id, "osobna_iskaznica")
-    res = forget.forget(spine, "115362299")
-    assert res["doc_extracts"] == 1
-    assert spine.read().execute("SELECT COUNT(*) AS n FROM doc_extracts").fetchone()["n"] == 0

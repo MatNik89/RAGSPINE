@@ -193,7 +193,7 @@ ragspine/
               subproc, net (SSRF), optional (degradacija)
   rag/        embed, retrieval (RRF), router, composer, citations, cache,
               sql_lane, selfrag, graphrag, pipeline
-  docs/       ingest, ocr, eracun, imap_fetch, pdfforms, forget
+  docs/       ingest, ocr, eracun, imap_fetch, pdfforms
   business/   place (plaća), dnevnice, quickref, obveze, kalendar, expiry,
               checklist, notes, auditlog, dashboard, monthly
   knowledge/  kb, translate, features, patterns
