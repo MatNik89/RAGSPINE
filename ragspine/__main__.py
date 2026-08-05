@@ -112,10 +112,9 @@ def _cmd_daemon(args) -> int:
 def _cmd_setup(args) -> int:
     from ragspine.config import get_config
     from ragspine.core.spine import init_spine
-    from ragspine.ops import setup
 
     cfg = get_config()
-    init_spine(cfg.db_path)
+    spine = init_spine(cfg.db_path)
     if getattr(args, "download_models", False):
         from ragspine.rag import embed
         print(f"Povlačim embedding model: {cfg.embed_model} … (jednokratno, može potrajati)")
@@ -125,7 +124,10 @@ def _cmd_setup(args) -> int:
             return 0
         print(f"✗ Neuspjeh: {res['error']}")
         return 1
-    print(setup.run(cfg))
+    from ragspine.ops import wizard, wizard_state
+    if getattr(args, "reset", False):
+        wizard_state.reset(spine)
+    wizard.run(spine, cfg)
     return 0
 
 
@@ -282,6 +284,8 @@ def _build_parser() -> argparse.ArgumentParser:
     _setup = sub.add_parser("setup")
     _setup.add_argument("--download-models", action="store_true",
                         help="povuci embedding model (aktivira vektorsku pretragu)")
+    _setup.add_argument("--reset", action="store_true",
+                        help="obriši setup-stanje i kreni ispočetka")
     _setup.set_defaults(func=_cmd_setup)
     sub.add_parser("models").set_defaults(func=_cmd_models)
     sub.add_parser("daemon").set_defaults(func=_cmd_daemon)
