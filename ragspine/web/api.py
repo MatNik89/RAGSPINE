@@ -881,7 +881,7 @@ def create_app(spine, cfg) -> FastAPI:
     def connectors_list(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         from ragspine.business import connectors as cx
-        return cx.list_connectors(spine)
+        return cx.list_connectors(spine, org_id=actor.org_id)
 
     @app.post("/connectors/test")
     def connectors_test(body: ConnectorTestBody, actor: Actor = Depends(require_actor_web)):
@@ -897,7 +897,8 @@ def create_app(spine, cfg) -> FastAPI:
         _require_admin(actor)
         from ragspine.business import connectors as cx
         try:
-            return cx.create(spine, body.kind, body.name, body.config, user=actor.username)
+            return cx.create(spine, body.kind, body.name, body.config,
+                             cfg=cfg, org_id=actor.org_id, user=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
@@ -906,7 +907,7 @@ def create_app(spine, cfg) -> FastAPI:
         _require_admin(actor)
         from ragspine.business import connectors as cx
         try:
-            cx.set_status(spine, cid, body.status, user=actor.username)
+            cx.set_status(spine, cid, body.status, org_id=actor.org_id, user=actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         return {"id": cid, "status": body.status}
@@ -915,7 +916,7 @@ def create_app(spine, cfg) -> FastAPI:
     def connectors_delete(cid: int, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         from ragspine.business import connectors as cx
-        cx.delete(spine, cid, user=actor.username)
+        cx.delete(spine, cid, org_id=actor.org_id, user=actor.username)
         return {"id": cid, "removed": True}
 
     @app.get("/ui/backup", response_class=HTMLResponse)

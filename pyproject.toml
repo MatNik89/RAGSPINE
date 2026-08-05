@@ -12,7 +12,7 @@ dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "python-multip
 ragspine = "ragspine.__main__:main"
 
 [project.optional-dependencies]
-full = ["pymupdf", "fastembed", "sqlite-vec", "python-docx", "openpyxl", "apprise"]
+full = ["pymupdf", "fastembed", "sqlite-vec", "python-docx", "openpyxl", "apprise", "cryptography"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

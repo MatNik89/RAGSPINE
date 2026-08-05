@@ -46,9 +46,9 @@ def test_test_draft_isolates_adapter_error():
     assert r["status"] == "error" and "puklo" in r["detail"]
 
 
-def test_create_connected_saves_and_masks_secret(spine):
+def test_create_connected_saves_and_masks_secret(spine, cfg):
     cx.register(_fake_type())
-    res = cx.create(spine, "fake", "Moj kanal", {"token": "tajna123", "host": "h"}, user="ana")
+    res = cx.create(spine, "fake", "Moj kanal", {"token": "tajna123", "host": "h"}, cfg=cfg, user="ana")
     assert res["status"] == "connected"
     lst = cx.list_connectors(spine)
     assert len(lst) == 1 and lst[0]["name"] == "Moj kanal"
@@ -56,23 +56,23 @@ def test_create_connected_saves_and_masks_secret(spine):
     assert lst[0]["config"]["host"] == "h"
 
 
-def test_create_error_still_saved_with_status_error(spine):
+def test_create_error_still_saved_with_status_error(spine, cfg):
     cx.register(_fake_type(result=("error", "kriv token")))
-    res = cx.create(spine, "fake", "Loš", {"token": "x", "host": "h"})
+    res = cx.create(spine, "fake", "Loš", {"token": "x", "host": "h"}, cfg=cfg)
     assert res["status"] == "error"
     c = cx.list_connectors(spine)[0]
     assert c["status"] == "error" and c["last_error"] == "kriv token"
 
 
-def test_create_pending_for_oauth_qr(spine):
+def test_create_pending_for_oauth_qr(spine, cfg):
     cx.register(_fake_type(result=("pending", "skeniraj QR")))
-    res = cx.create(spine, "fake", "TG", {"token": "x", "host": "h"})
+    res = cx.create(spine, "fake", "TG", {"token": "x", "host": "h"}, cfg=cfg)
     assert res["status"] == "pending"  # ne prikazuje se kao spojen dok se ne autorizira
 
 
-def test_status_and_delete(spine):
+def test_status_and_delete(spine, cfg):
     cx.register(_fake_type())
-    cid = cx.create(spine, "fake", "K", {"token": "x", "host": "h"})["id"]
+    cid = cx.create(spine, "fake", "K", {"token": "x", "host": "h"}, cfg=cfg)["id"]
     cx.set_status(spine, cid, "disabled", user="ana")
     assert cx.get(spine, cid)["status"] == "disabled"
     cx.delete(spine, cid)
@@ -128,3 +128,37 @@ def test_connector_routes_worker_forbidden(spine, cfg):
     wh = {"Authorization": f"Bearer {wt}"}
     assert c.get("/connectors", headers=wh).status_code == 403
     assert c.post("/connectors", json={"kind": "mail_exchange", "name": "x", "config": {}}, headers=wh).status_code == 403
+
+
+def test_secret_encrypted_at_rest_and_decrypt_for_adapter(spine, cfg):
+    import json
+    cx.register(_fake_type())
+    cid = cx.create(spine, "fake", "K", {"token": "supertajna", "host": "h"}, cfg=cfg, org_id=1)["id"]
+    # u DB-u je token ŠIFRIRAN (enc:), ne plaintext
+    raw = spine.read().execute("SELECT config_json FROM connectors WHERE id=?", (cid,)).fetchone()[0]
+    stored = json.loads(raw)
+    assert stored["token"].startswith("enc:") and "supertajna" not in raw
+    # config_for_adapter dešifrira za server-side spajanje
+    kind, decrypted = cx.config_for_adapter(spine, cid, cfg, org_id=1)
+    assert decrypted["token"] == "supertajna" and decrypted["host"] == "h"
+
+
+def test_org_isolation(spine, cfg):
+    cx.register(_fake_type())
+    cx.create(spine, "fake", "orgA", {"token": "x", "host": "h"}, cfg=cfg, org_id=1)
+    cx.create(spine, "fake", "orgB", {"token": "y", "host": "h"}, cfg=cfg, org_id=2)
+    a = cx.list_connectors(spine, org_id=1)
+    assert len(a) == 1 and a[0]["name"] == "orgA"
+    # org 2 ne vidi org 1 konektor; ne može ga ni dohvatiti
+    b_id = cx.list_connectors(spine, org_id=2)[0]["id"]
+    assert cx.get(spine, b_id, org_id=1) is None
+
+
+def test_set_status_admin_only_disable(spine, cfg):
+    cx.register(_fake_type())
+    cid = cx.create(spine, "fake", "K", {"token": "x", "host": "h"}, cfg=cfg, org_id=1)["id"]
+    cx.set_status(spine, cid, "disabled", org_id=1)
+    assert cx.get(spine, cid, org_id=1)["status"] == "disabled"
+    # admin NE smije ručno postaviti 'connected' (to radi adapter)
+    with pytest.raises(ValueError):
+        cx.set_status(spine, cid, "connected", org_id=1)

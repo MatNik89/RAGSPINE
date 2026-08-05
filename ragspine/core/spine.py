@@ -148,9 +148,9 @@ CREATE TABLE IF NOT EXISTS sop_pages(id INTEGER PRIMARY KEY, title TEXT, client_
   updated_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS sop_images(id INTEGER PRIMARY KEY, sop_id INTEGER, filename TEXT,
   path TEXT, ocr_text TEXT, caption TEXT, at TEXT DEFAULT (datetime('now')));
-CREATE TABLE IF NOT EXISTS connectors(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
-  config_json TEXT DEFAULT '{}', status TEXT DEFAULT 'pending', last_ok TEXT, last_error TEXT,
-  created_by TEXT, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS connectors(id INTEGER PRIMARY KEY, org_id INTEGER, kind TEXT NOT NULL,
+  name TEXT NOT NULL, config_json TEXT DEFAULT '{}', status TEXT DEFAULT 'pending', last_ok TEXT,
+  last_error TEXT, created_by TEXT, created_at TEXT DEFAULT (datetime('now')));
 """
 
 def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
