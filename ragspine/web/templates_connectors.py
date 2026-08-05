@@ -80,6 +80,11 @@ document.addEventListener('DOMContentLoaded', function(){
   $('kind').addEventListener('change', function(){ renderFields(); $('form-msg').textContent=''; });
   $('test').addEventListener('click', testConn);
   $('save').addEventListener('click', saveConn);
+  $('pair').addEventListener('click', async function(){
+    var res = await fetch('/telegram/pairing', {method:'POST', credentials:'same-origin'});
+    var j = await res.json().catch(function(){return {};});
+    $('pair-out').textContent = res.ok ? ('Pošalji botu:  ' + j.command) : (j.detail || 'Greška.');
+  });
   loadTypes(); loadList();
 });
 """
@@ -92,7 +97,7 @@ _BODY = """
     border:1px solid #d1d5db; border-radius:8px; box-sizing:border-box; }
   label{ font-size:.9em; color:var(--muted); }
 </style>
-<h1>E-pošta</h1>
+<h1>E-pošta i Telegram</h1>
 <p class="muted">Poveži uredsku e-poštu (Microsoft 365 ili Exchange server). Nakon
   upisa podataka <b>Testiraj</b> pa <b>Spremi</b>.</p>
 
@@ -115,9 +120,17 @@ _BODY = """
     <tbody id="list"></tbody>
   </table>
 </div>
+<div class="card">
+  <h2>Telegram — uparivanje korisnika</h2>
+  <p class="muted">Nakon što dodaš „Telegram" konektor gore (bot token), generiraj
+    token uparivanja i pošalji ga botu porukom <code>/start &lt;token&gt;</code> —
+    time se tvoj Telegram veže na RAGSPINE (neuparen nema pristup).</p>
+  <button class="btn" id="pair">Generiraj token uparivanja</button>
+  <p id="pair-out" class="muted"></p>
+</div>
 <script>__SCRIPT__</script>
 """
 
 
 def connectors_page() -> str:
-    return page_shell("E-pošta", _BODY.replace("__SCRIPT__", _JS), active="postavke")
+    return page_shell("E-pošta i Telegram", _BODY.replace("__SCRIPT__", _JS), active="postavke")

@@ -919,6 +919,13 @@ def create_app(spine, cfg) -> FastAPI:
         cx.delete(spine, cid, org_id=actor.org_id, user=actor.username)
         return {"id": cid, "removed": True}
 
+    @app.post("/telegram/pairing")
+    def telegram_pairing(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.business.telegram_gateway import create_pairing_token
+        token = create_pairing_token(spine, actor.user_id, actor.org_id)
+        return {"token": token, "command": f"/start {token}"}
+
     @app.get("/ui/backup", response_class=HTMLResponse)
     def ui_backup(request: Request):
         try:
@@ -2008,4 +2015,33 @@ def create_app(spine, cfg) -> FastAPI:
     def browser_agent(body: BrowserAgentBody, user: str = Depends(require_user_web)):
         return agent_mod.run_task(cfg, body.task, body.url)
 
+    def _maybe_start_telegram():
+        """Ako je telegram_gateway konektor uključen, pokreni poll-thread. Bez
+        konfiguriranog konektora (npr. u testovima) ne pokreće ništa."""
+        import threading
+        from ragspine.business import connectors as cx
+        from ragspine.business import telegram_gateway as tgw
+        row = spine.read().execute(
+            "SELECT id FROM connectors WHERE kind='telegram_gateway' "
+            "AND status IN ('connected','pending') ORDER BY id LIMIT 1").fetchone()
+        if row is None:
+            return
+        got = cx.config_for_adapter(spine, row["id"], cfg)
+        token = (got[1].get("bot_token") if got else "") or ""
+        if not token:
+            return
+        stop = threading.Event()
+        app.state.tg_stop = stop
+        app.state.tg_thread = threading.Thread(
+            target=tgw.poll_loop, args=(spine, cfg, token, _answer, stop),
+            kwargs={"limiter": limiter}, daemon=True, name="telegram-gateway")
+        app.state.tg_thread.start()
+
+    @app.on_event("shutdown")
+    def _stop_telegram():
+        ev = getattr(app.state, "tg_stop", None)
+        if ev is not None:
+            ev.set()
+
+    _maybe_start_telegram()
     return app

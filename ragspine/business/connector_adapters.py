@@ -72,7 +72,26 @@ def _test_graph(cfg):
         return "error", _safe_err(e)
 
 
+# --- Telegram gateway (službeni Bot API — pristup RAGSPINE-u preko bota) ---
+def _test_telegram_gateway(cfg):
+    from ragspine.business.telegram_gateway import TelegramClient
+    token = (cfg.get("bot_token") or "").strip()
+    if not token:
+        return "error", "bot_token je obavezan (od @BotFather)"
+    try:
+        me = TelegramClient(token).get_me()
+        if me.get("ok"):
+            return "connected", f"bot @{me['result'].get('username', '?')}"
+        return "error", "token odbijen"
+    except Exception as e:
+        return "error", _safe_err(e)
+
+
 def register_builtin() -> None:
+    register(ConnectorType(
+        kind="telegram_gateway", label="Telegram (pristup RAGSPINE-u preko bota)", category="kanal",
+        fields=[Field("bot_token", "Bot token (od @BotFather)", type="password", secret=True)],
+        test=_test_telegram_gateway))
     register(ConnectorType(
         kind="mail_exchange", label="E-pošta — Exchange (server)", category="mail",
         fields=[Field("server", "Server (opcijski, autodiscover)", required=False),
