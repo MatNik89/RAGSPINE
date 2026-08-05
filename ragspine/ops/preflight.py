@@ -268,10 +268,26 @@ def _llmfit(cfg) -> dict | None:
         return None
 
 
-def summary(cfg=None) -> dict:
-    """Sve na jednom mjestu za Postavke ekran / wizard."""
+def _redact(st: dict, reqs: list) -> tuple[dict, list]:
+    """Za anonimni onboarding: makni točne putanje / OS string / naziv GPU-a koje
+    bi LAN promatrač mogao skupljati (Codex). Brojevi (RAM/disk/fit) ostaju."""
+    st = {**st, "os": None, "gpu": None}
+    out = []
+    for r in reqs:
+        rr = dict(r)
+        if r["key"] == "data_dir":
+            rr["detalj"] = "podatkovna mapa" if r["status"] == "ok" else "nije upisiva"
+        out.append(rr)
+    return st, out
+
+
+def summary(cfg=None, reduced: bool = False) -> dict:
+    """Sve na jednom mjestu za Postavke ekran / wizard. reduced=True za anonimni
+    onboarding (redigirane putanje/inventar)."""
     st = system_state(cfg)
     reqs = requirements(cfg)
+    if reduced:
+        st, reqs = _redact(st, reqs)
     from ragspine.ops import model_recommender
     try:
         # proslijedi NAŠ RAM (Codex: stari detect_hw vidi RAM=0 na Windowsu → tier tiny)

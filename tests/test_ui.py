@@ -37,6 +37,7 @@ def test_home_page_authed_shows_nav(spine, cfg):
 
 
 def test_home_page_no_auth_redirects_to_login(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/", follow_redirects=False)
     assert r.status_code == 303
@@ -54,6 +55,7 @@ def test_chat_page_authed(spine, cfg):
 
 
 def test_chat_page_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/ui/chat", follow_redirects=False)
     assert r.status_code == 303
@@ -72,6 +74,7 @@ def test_upute_page_authed_lists_pending_and_forms(spine, cfg):
 
 
 def test_upute_page_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/ui/upute", follow_redirects=False)
     assert r.status_code == 303

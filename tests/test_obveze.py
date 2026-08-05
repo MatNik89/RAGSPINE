@@ -85,6 +85,7 @@ def test_obveze_via_cookie_only(spine, cfg):
 
 
 def test_obveze_no_auth_redirects_to_login(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/obveze", follow_redirects=False)
     assert r.status_code == 303

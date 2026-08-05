@@ -56,6 +56,7 @@ def test_dashboard_page_authed_has_tiles_and_cards(spine, cfg):
 
 
 def test_dashboard_page_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/", follow_redirects=False)
     assert r.status_code == 303

@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ragspine.business import auditlog
 from ragspine.business import checklist
@@ -53,7 +53,7 @@ from ragspine.web import learn  # noqa: F401 — register learn lane handler
 from ragspine.web.ratelimit import RateLimiter
 from ragspine.web import watchlist
 from ragspine.web import websearch  # noqa: F401 — register web lane handler
-from ragspine.web.deps import (COOKIE_NAME, require_actor, require_actor_web, require_user,
+from ragspine.web.deps import (COOKIE_NAME, add_user, require_actor, require_actor_web, require_user,
                                require_user_web)
 from ragspine.web.templates_login import render_login
 from ragspine.web.templates_mape import mape_page
@@ -96,6 +96,12 @@ class WorkerVisibilityBody(BaseModel):
 class FolderNoteBody(BaseModel):
     folder_id: int | None = None
     body: str
+
+
+class SetupOwnerBody(BaseModel):
+    # min 8 = osnovna jačina; max 128 = štiti PBKDF2 od golemog inputa (Codex)
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
 
 
 class DiscoverCommitBody(BaseModel):
@@ -431,6 +437,12 @@ def create_app(spine, cfg) -> FastAPI:
         if clen and clen.isdigit() and int(clen) > _MAX_BODY:
             return JSONResponse({"detail": "tijelo zahtjeva preveliko", "max_bytes": _MAX_BODY},
                                 status_code=413)
+        # first-run gatekeeper: dok ne postoji nijedan korisnik, navigacija ide
+        # na wizard (/ui/setup). Uzor Open WebUI (has_users()==False).
+        from ragspine.web import firstrun
+        if request.method == "GET" and firstrun._redirect_target(request.url.path) \
+                and firstrun.needs_onboarding(spine):
+            return RedirectResponse("/ui/setup", status_code=303)
         resp = await call_next(request)
         resp.headers["X-Content-Type-Options"] = "nosniff"
         resp.headers["X-Frame-Options"] = "DENY"
@@ -843,10 +855,38 @@ def create_app(spine, cfg) -> FastAPI:
         return preflight_page()
 
     @app.get("/preflight")
-    def preflight_summary(actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)
+    def preflight_summary(request: Request):
+        from ragspine.web import firstrun
         from ragspine.ops import preflight
-        return preflight.summary(cfg)
+        if not firstrun.needs_onboarding(spine):
+            _require_admin(require_actor_web(request))  # nakon setupa: admin-only, puni prikaz
+            return preflight.summary(cfg)
+        # anonimni onboarding: rate-limit + reducirano (bez točnih putanja/OS/GPU
+        # detalja koje bi LAN promatrač skupljao) — Codex nalaz
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"preflight:{ip}", limit=20, window_s=60.0):
+            raise HTTPException(429, "previše zahtjeva — pričekajte minutu")
+        return preflight.summary(cfg, reduced=True)
+
+    @app.get("/ui/setup", response_class=HTMLResponse)
+    def ui_setup(request: Request):
+        from ragspine.web import firstrun
+        if not firstrun.needs_onboarding(spine):
+            return RedirectResponse("/login", status_code=303)  # setup gotov
+        from ragspine.web.templates_setup import setup_page
+        return setup_page()
+
+    @app.post("/setup/owner")
+    def setup_owner(body: SetupOwnerBody, request: Request):
+        from ragspine.web import firstrun
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"setup-owner:{ip}", limit=10, window_s=60.0):
+            raise HTTPException(429, "previše pokušaja — pričekajte minutu")
+        try:
+            firstrun.create_first_owner(spine, body.username.strip(), body.password)
+        except ValueError:
+            raise HTTPException(409, "operater već postoji — postavljanje je gotovo") from None
+        return {"ok": True, "username": body.username.strip()}
 
     @app.get("/ui/arhitektura", response_class=HTMLResponse)
     def ui_arhitektura(request: Request):

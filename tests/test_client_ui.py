@@ -44,6 +44,7 @@ def test_klijenti_page_authed(spine, cfg):
 
 
 def test_klijenti_page_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")  # onboarding gotov → neautoriziran ide na /login, ne /ui/setup
     c = _client(spine, cfg)
     r = c.get("/ui/klijenti", follow_redirects=False)
     assert r.status_code == 303
@@ -64,6 +65,7 @@ def test_klijent_page_authed(spine, cfg):
 
 
 def test_klijent_page_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/ui/klijent/1", follow_redirects=False)
     assert r.status_code == 303

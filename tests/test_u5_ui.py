@@ -194,6 +194,7 @@ def test_ui_obavijesti_authed(spine, cfg):
 
 
 def test_ui_obavijesti_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/ui/obavijesti", follow_redirects=False)
     assert r.status_code == 303
@@ -251,6 +252,7 @@ def test_ui_dokumenti_authed(spine, cfg):
 
 
 def test_ui_dokumenti_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
     c = _client(spine, cfg)
     r = c.get("/ui/dokumenti", follow_redirects=False)
     assert r.status_code == 303
