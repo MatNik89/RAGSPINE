@@ -644,6 +644,7 @@ q.addEventListener('keydown', function (e) {
 def postavke_page() -> str:
     cards = [
         ("Računalo i modeli", "/ui/racunalo", "Stanje računala, preduvjeti za pokretanje, i koji lokalni modeli stanu (po kvantizaciji/kompresiji)."),
+        ("Sigurnosne kopije", "/ui/backup", "Napravi i preuzmi kopiju baze; automatski dnevni backup; upute za vraćanje."),
         ("Model (LLM)", "/ui/model", "Odaberi preko čega RAGSPINE radi (Claude / ChatGPT / lokalni). Mozak vs gorivo."),
         ("Mrežne mape", "/ui/mape", "Poveži NAS / Windows mape i dodijeli im uloge (propisi, klijenti…)."),
         ("Arhitektura mapa", "/ui/arhitektura", "Predložena struktura (obavezne + po klijentu) — pregled pa kreiranje."),

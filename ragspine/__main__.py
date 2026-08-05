@@ -178,6 +178,31 @@ def _cmd_forget(args) -> int:
     return 0
 
 
+def _cmd_backup(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.ops import backup
+
+    cfg = get_config()
+    b = backup.create_backup(cfg)
+    n = backup.prune(cfg, keep=14)
+    print(f"✓ Kopija: {b['path']} ({b['size']} B)" + (f"; obrisano starih: {n}" if n else ""))
+    return 0
+
+
+def _cmd_restore(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.ops import backup
+
+    cfg = get_config()
+    try:
+        res = backup.restore_backup(cfg, args.path)
+    except ValueError as e:
+        print(f"GREŠKA: {e}")
+        return 1
+    print(f"✓ Vraćeno iz {res['restored_from']}. Prethodna baza: {cfg.db_path}.prerestore")
+    return 0
+
+
 def _cmd_watch(args) -> int:
     if getattr(args, "watch_cmd", None) != "run":
         return _stub(args)
@@ -293,6 +318,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_forget.add_argument("term")
     p_forget.add_argument("--dry", action="store_true")
     p_forget.set_defaults(func=_cmd_forget)
+
+    sub.add_parser("backup").set_defaults(func=_cmd_backup)
+    p_restore = sub.add_parser("restore")
+    p_restore.add_argument("path", help="putanja do .db kopije (server mora biti zaustavljen)")
+    p_restore.set_defaults(func=_cmd_restore)
 
     p_auth = sub.add_parser("auth")
     auth_sub = p_auth.add_subparsers(dest="auth_cmd")

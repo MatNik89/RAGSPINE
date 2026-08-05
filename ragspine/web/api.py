@@ -1,12 +1,13 @@
 import base64
 import binascii
 import dataclasses
+import os
 import re
 from datetime import date
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from ragspine.business import auditlog
@@ -843,6 +844,41 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from ragspine.web.templates_devices import devices_page
         return devices_page()
+
+    @app.get("/ui/backup", response_class=HTMLResponse)
+    def ui_backup(request: Request):
+        try:
+            _require_admin(require_actor_web(request))
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from ragspine.web.templates_backup import backup_page
+        return backup_page()
+
+    @app.get("/backup/list")
+    def backup_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.ops import backup
+        return backup.list_backups(cfg)
+
+    @app.post("/backup")
+    def backup_create(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.ops import backup
+        b = backup.create_backup(cfg)
+        backup.prune(cfg, keep=14)
+        spine.audit(actor.username, "backup_create", b["name"])
+        return b
+
+    @app.get("/backup/download/{name}")
+    def backup_download(name: str, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        from ragspine.ops import backup
+        try:
+            path = backup.resolve_backup(cfg, name)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return FileResponse(path, media_type="application/octet-stream",
+                            filename=os.path.basename(path))
 
     @app.get("/ui/racunalo", response_class=HTMLResponse)
     def ui_racunalo(request: Request):

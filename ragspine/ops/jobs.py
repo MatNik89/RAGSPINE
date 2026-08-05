@@ -83,6 +83,12 @@ def health_job(spine, cfg) -> None:
     health.check(spine, cfg)
 
 
+def backup_job(spine, cfg) -> None:
+    from ragspine.ops import backup
+    backup.create_backup(cfg)
+    backup.prune(cfg, keep=14)
+
+
 def reminders_dump_job(spine, cfg) -> None:
     result = reminders_dump.dump(spine, cfg)
     logger.info("reminders_dump_job: wrote %s (%d items)", result["path"], result["count"])
@@ -124,6 +130,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))
+    sched.register(Job(name="backup", fn=backup_job, interval_s=0, daily=True, at_hour=2))
     sched.register(
         Job(name="digest", fn=digest.digest_job, interval_s=0, daily=True, at_hour=sched.cfg.digest_hour)
     )
