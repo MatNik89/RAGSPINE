@@ -124,9 +124,12 @@ def _cmd_setup(args) -> int:
             return 0
         print(f"✗ Neuspjeh: {res['error']}")
         return 1
-    from ragspine.ops import wizard, wizard_state
+    from datetime import date
+
+    from ragspine.ops import seeds, wizard, wizard_state
     if getattr(args, "reset", False):
         wizard_state.reset(spine)
+    seeds.all(spine, date.today().year)  # baza (kontni plan, watch izvori...) — idempotentno, kao stari setup.run
     wizard.run(spine, cfg)
     return 0
 
