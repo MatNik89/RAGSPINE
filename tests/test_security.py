@@ -1,5 +1,20 @@
-import time, pytest
+import time, pytest, hashlib
 from ragspine.core import security as sec
+
+def test_new_hash_uses_600k_and_verifies():
+    h = sec.hash_password("tajna123")
+    assert h.startswith("pbkdf2$600000$")
+    assert sec.verify_password("tajna123", h) is True
+    assert sec.verify_password("krivo", h) is False
+
+
+def test_verifies_legacy_200k_format():
+    # stari format: <salt_hex>$<hash_hex>, 200k
+    salt = bytes(range(16))
+    d = hashlib.pbkdf2_hmac("sha256", "staro".encode(), salt, 200_000)
+    legacy = f"{salt.hex()}${d.hex()}"
+    assert sec.verify_password("staro", legacy) is True
+
 
 def test_jwt_roundtrip():
     t = sec.jwt_encode({"sub": "ana"}, "s3cret")

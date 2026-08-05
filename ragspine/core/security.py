@@ -47,19 +47,27 @@ def jwt_decode(token: str, secret: str) -> dict:
         raise AuthError(str(e)) from e
 
 
+_PBKDF2_ITERS = 600_000
+
+
 def hash_password(pw: str) -> str:
     salt = secrets.token_bytes(16)
-    h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, 200_000)
-    return f"{salt.hex()}${h.hex()}"
+    h = hashlib.pbkdf2_hmac("sha256", pw.encode(), salt, _PBKDF2_ITERS)
+    return f"pbkdf2${_PBKDF2_ITERS}${salt.hex()}${h.hex()}"
 
 
 def verify_password(pw: str, stored: str) -> bool:
     try:
-        salt_hex, hash_hex = stored.split("$")
-        h = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt_hex), 200_000)
+        if stored.startswith("pbkdf2$"):
+            _, iters_s, salt_hex, hash_hex = stored.split("$")
+            iters = int(iters_s)
+        else:
+            salt_hex, hash_hex = stored.split("$")   # legacy 200k
+            iters = 200_000
+        h = hashlib.pbkdf2_hmac("sha256", pw.encode(), bytes.fromhex(salt_hex), iters)
     except ValueError:
         return False
-    return hmac.compare_digest(h.hex(), hash_hex)
+    return secrets.compare_digest(h.hex(), hash_hex)
 
 
 def oib_valid(oib: str) -> bool:
