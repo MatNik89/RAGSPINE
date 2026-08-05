@@ -1,6 +1,7 @@
 from ragspine.core.spine import init_spine
 from ragspine.core.security import verify_password
 from ragspine.ops import wizard
+from ragspine.web import firstrun
 
 
 def _reader(*answers):
@@ -60,3 +61,16 @@ def test_page_operater_rejects_short_password(tmp_path):
         out=lambda *_: None)
     assert ok is True
     assert s.read().execute("SELECT 1 FROM users").fetchone() is not None
+
+
+def test_page_operater_skips_when_admin_exists(tmp_path):
+    """Resume ne smije mrtvo-vezati: ako admin već postoji (web put, ili pad
+    između create_first_owner i set_stage), stranica se preskače bez prompta."""
+    s = init_spine(str(tmp_path / "t.db"))
+    firstrun.create_first_owner(s, "vec-postoji", "lozinka12")
+
+    def _boom(_=""):
+        raise StopIteration("ne smije se konzultirati input_fn")
+
+    ok = wizard.page_operater(s, input_fn=_boom, out=lambda *_: None)
+    assert ok is True

@@ -32,9 +32,19 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 
 def page_operater(spine, *, input_fn=input, out=print) -> bool:
-    """Stranica 2: kreira prvog admina (operatera). Vrati True na uspjeh."""
+    """Stranica 2: kreira prvog admina (operatera). Vrati True na uspjeh.
+    Ako admin već postoji (npr. kreiran preko web /setup/owner puta, ili je
+    prošli pokušaj pao između create_first_owner i set_stage), preskoči
+    prompt — inače resume nema izlaza (create_first_owner uvijek baca)."""
+    if not firstrun.needs_onboarding(spine):
+        out("Administrator već postoji — preskačem.")
+        return True
     tui.print_header("2/6  Operater (administrator)", out=out)
-    username = tui.prompt_text("Korisničko ime", input_fn=input_fn, out=out)
+    while True:
+        username = tui.prompt_text("Korisničko ime", input_fn=input_fn, out=out)
+        if username:
+            break
+        out("Korisničko ime ne smije biti prazno.")
     while True:
         pw = tui.prompt_text("Lozinka (min 8)", input_fn=input_fn, out=out)
         if len(pw) < _MIN_PW:
