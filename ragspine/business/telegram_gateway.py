@@ -70,8 +70,13 @@ def split_message(text: str, limit: int = _MAX) -> list[str]:
 
 # --- pairing / auth ---
 
+_TOKEN_TTL_S = 600  # token vrijedi 10 min (Codex: bez roka je rizik)
+
+
 def create_pairing_token(spine, user_id: int, org_id: int) -> str:
-    token = secrets.token_urlsafe(9)
+    """Token veže Telegram na OVOG korisnika (self-service — ne admin za drugoga,
+    inače radnik postane admin). Jednokratan, s rokom."""
+    token = secrets.token_urlsafe(16)
     with spine.write() as c:
         c.execute("INSERT INTO telegram_pairing(token, user_id, org_id) VALUES(?,?,?)",
                   (token, user_id, org_id))
@@ -88,7 +93,9 @@ def _consume_pairing(spine, token: str, chat_id: int, username: str) -> bool:
         c.execute("BEGIN IMMEDIATE")
         try:
             row = c.execute(
-                "SELECT user_id, org_id FROM telegram_pairing WHERE token=? AND used=0", (token,)).fetchone()
+                "SELECT user_id, org_id FROM telegram_pairing WHERE token=? AND used=0 "
+                "AND (strftime('%s','now') - strftime('%s', created_at)) < ?",
+                (token, _TOKEN_TTL_S)).fetchone()
             if row is None:
                 c.execute("ROLLBACK")
                 return False
@@ -116,11 +123,23 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
                   limiter=None) -> None:
     """Obradi jedan update: /start uparivanje ili upit kroz answer_fn. answer_fn
     je (query, actor) -> dict s 'answer'. Sve greške izolirane (bot ne pada)."""
-    msg = update.get("message") or {}
-    chat = msg.get("chat") or {}
+    if not isinstance(update, dict):
+        return
+    msg = update.get("message")
+    if not isinstance(msg, dict):
+        return  # ignoriraj edited/callback/channel_post itd.
+    chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+    frm = msg.get("from") if isinstance(msg.get("from"), dict) else {}
     chat_id = chat.get("id")
-    text = (msg.get("text") or "").strip()
-    if not chat_id or not text:
+    text = msg.get("text")
+    if not isinstance(chat_id, int) or not isinstance(text, str):
+        return
+    text = text.strip()
+    if not text:
+        return
+    # SAMO privatni chat, i pošiljatelj == chat (Codex: /start u grupi bi dao
+    # pristup svim članovima pod tuđim računom)
+    if chat.get("type") != "private" or frm.get("id") != chat_id:
         return
     username = chat.get("username") or chat.get("first_name") or ""
 
@@ -138,7 +157,9 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
     if link is None:
         tg.send_message(chat_id, "Nisi uparen. Zatraži token u uredu pa: /start <token>")
         return
-    if limiter is not None and not limiter.allow(f"tg:{chat_id}", limit=10, window_s=60.0):
+    # limit po RAGSPINE korisniku (ne chat_id — isti korisnik može vezati više
+    # chatova); LLM je skup. Dnevni token-budžet je ponytail upgrade.
+    if limiter is not None and not limiter.allow(f"tg:u{link['user_id']}", limit=10, window_s=60.0):
         tg.send_message(chat_id, "Previše upita — pričekaj minutu.")
         return
     actor = _resolve_actor(spine, link)
@@ -173,13 +194,16 @@ def poll_loop(spine, cfg, token: str, answer_fn, stop_event, limiter=None, key: 
         try:
             updates = tg.get_updates(offset, timeout=30)
         except Exception:
-            time.sleep(3)
+            stop_event.wait(3)
             continue
         for u in updates:
-            offset = max(offset, u.get("update_id", offset) + 1)
+            uid = u.get("update_id") if isinstance(u, dict) else None
             try:
                 handle_update(spine, cfg, u, answer_fn, tg, limiter=limiter)
             except Exception:
                 pass
-        if updates:
-            _set_offset(spine, key, offset)
+            # commit offset PO SVAKOM updateu (Codex: offset nakon batcha → duplikati
+            # pri crashu). Offset naprijed i ako handle baci — poruka se ne ponavlja.
+            if isinstance(uid, int):
+                offset = max(offset, uid + 1)
+                _set_offset(spine, key, offset)

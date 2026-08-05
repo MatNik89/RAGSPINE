@@ -921,7 +921,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/telegram/pairing")
     def telegram_pairing(actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)
+        # self-service: token veže Telegram na TOG korisnika (ne admin za drugoga —
+        # inače radnik dobije adminove ovlasti). Svaki prijavljeni korisnik svoj token.
         from ragspine.business.telegram_gateway import create_pairing_token
         token = create_pairing_token(spine, actor.user_id, actor.org_id)
         return {"token": token, "command": f"/start {token}"}
@@ -2034,14 +2035,18 @@ def create_app(spine, cfg) -> FastAPI:
         app.state.tg_stop = stop
         app.state.tg_thread = threading.Thread(
             target=tgw.poll_loop, args=(spine, cfg, token, _answer, stop),
-            kwargs={"limiter": limiter}, daemon=True, name="telegram-gateway")
+            kwargs={"limiter": limiter, "key": f"c{row['id']}"},  # jedinstven offset po konektoru
+            daemon=True, name="telegram-gateway")
         app.state.tg_thread.start()
 
     @app.on_event("shutdown")
     def _stop_telegram():
         ev = getattr(app.state, "tg_stop", None)
+        th = getattr(app.state, "tg_thread", None)
         if ev is not None:
             ev.set()
+        if th is not None:
+            th.join(timeout=5)  # graceful stop+join
 
     _maybe_start_telegram()
     return app

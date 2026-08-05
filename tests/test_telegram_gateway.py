@@ -42,11 +42,11 @@ def test_handle_start_valid_and_invalid(spine, cfg):
     uid, org = _seed_user(spine)
     token = tg.create_pairing_token(spine, uid, org)
     ft = FakeTG()
-    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 111, "username": "b"}, "text": f"/start {token}"}},
+    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 111, "username": "b", "type": "private"}, "from": {"id": 111}, "text": f"/start {token}"}},
                      answer_fn=None, tg=ft)
     assert "Uparen" in ft.sent[-1][1]
     ft2 = FakeTG()
-    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 222}, "text": "/start krivo"}},
+    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 222, "type": "private"}, "from": {"id": 222}, "text": "/start krivo"}},
                      answer_fn=None, tg=ft2)
     assert "token" in ft2.sent[-1][1].lower()
 
@@ -54,7 +54,7 @@ def test_handle_start_valid_and_invalid(spine, cfg):
 def test_handle_unpaired_rejected(spine, cfg):
     ft = FakeTG()
     calls = []
-    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 999}, "text": "koliko je PDV"}},
+    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 999, "type": "private"}, "from": {"id": 999}, "text": "koliko je PDV"}},
                      answer_fn=lambda q, a: calls.append(q) or {"answer": "x"}, tg=ft)
     assert not calls  # answer_fn se NE zove za neuparenog
     assert "upar" in ft.sent[-1][1].lower()
@@ -69,7 +69,7 @@ def test_handle_paired_runs_pipeline(spine, cfg):
     def answer_fn(q, actor):
         got["q"] = q; got["actor"] = actor.username
         return {"answer": "PDV je 25%"}
-    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 111}, "text": "koliko je PDV"}},
+    tg.handle_update(spine, cfg, {"message": {"chat": {"id": 111, "type": "private"}, "from": {"id": 111}, "text": "koliko je PDV"}},
                      answer_fn=answer_fn, tg=ft)
     assert got["q"] == "koliko je PDV" and got["actor"] == "ana"
     assert ft.sent[-1] == (111, "PDV je 25%")
@@ -98,10 +98,33 @@ def test_telegram_gateway_type_and_no_thread(spine, cfg):
     assert getattr(c.app.state, "tg_thread", None) is None
 
 
-def test_pairing_route_admin_only(spine, cfg):
+def test_pairing_route_self_service(spine, cfg):
     c, h = _admin(spine, cfg)
     r = c.post("/telegram/pairing", headers=h)
     assert r.status_code == 200 and r.json()["command"].startswith("/start ")
+    # self-service: i radnik smije generirati SVOJ token (veže na sebe, ne admina)
     add_user(spine, "boris", "pw", "radnik")
     wt = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
-    assert c.post("/telegram/pairing", headers={"Authorization": f"Bearer {wt}"}).status_code == 403
+    assert c.post("/telegram/pairing", headers={"Authorization": f"Bearer {wt}"}).status_code == 200
+
+
+def test_group_chat_rejected(spine, cfg):
+    uid, org = _seed_user(spine)
+    token = tg.create_pairing_token(spine, uid, org)
+    tg._consume_pairing(spine, token, 111, "ana")
+    ft = FakeTG(); calls = []
+    # grupa: chat.type='group', from.id != chat.id → mora se ignorirati
+    tg.handle_update(spine, cfg, {"message": {"chat": {"id": -100, "type": "group"},
+                     "from": {"id": 555}, "text": "tajni upit"}},
+                     answer_fn=lambda q, a: calls.append(q), tg=ft)
+    assert not calls and not ft.sent  # ništa se ne obrađuje ni šalje
+
+
+def test_expired_token_rejected(spine, cfg):
+    uid, org = _seed_user(spine)
+    token = tg.create_pairing_token(spine, uid, org)
+    # ostari token izvan TTL-a
+    with spine.write() as c:
+        c.execute("UPDATE telegram_pairing SET created_at=datetime('now','-20 minutes') WHERE token=?", (token,))
+    assert tg._consume_pairing(spine, token, 111, "x") is False
+    assert tg._link_for(spine, 111) is None
