@@ -1,6 +1,9 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
 P1: Stranica 1 (preduvjeti) + Stranica 2 (operater). Ostale stranice u P2-P4."""
 from ragspine.ops import preflight, tui, wizard_state
+from ragspine.web import firstrun
+
+_MIN_PW = 8
 
 
 def render_preflight(reqs, *, out=print) -> bool:
@@ -28,6 +31,29 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
             return False
 
 
+def page_operater(spine, *, input_fn=input, out=print) -> bool:
+    """Stranica 2: kreira prvog admina (operatera). Vrati True na uspjeh."""
+    tui.print_header("2/6  Operater (administrator)", out=out)
+    username = tui.prompt_text("Korisničko ime", input_fn=input_fn, out=out)
+    while True:
+        pw = tui.prompt_text("Lozinka (min 8)", input_fn=input_fn, out=out)
+        if len(pw) < _MIN_PW:
+            out(f"Lozinka mora imati barem {_MIN_PW} znakova.")
+            continue
+        pw2 = tui.prompt_text("Ponovi lozinku", input_fn=input_fn, out=out)
+        if pw != pw2:
+            out("Lozinke se ne podudaraju.")
+            continue
+        break
+    try:
+        firstrun.create_first_owner(spine, username, pw)
+    except ValueError as e:
+        out(f"Greška: {e}")
+        return False
+    out(f"Administrator '{username}' kreiran.")
+    return True
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")
@@ -39,5 +65,9 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
             out("Setup prekinut na preduvjetima. Pokreni ponovno kad popraviš.")
             return
         wizard_state.set_stage(spine, 1)
-    # Stranica 2 (operater) — Task 8 nadograđuje ovdje.
-    out("Preduvjeti u redu. (Stranica 2 slijedi u Task 8.)")
+    if stage < 2:
+        if not page_operater(spine, input_fn=input_fn, out=out):
+            out("Setup prekinut na operateru.")
+            return
+        wizard_state.set_stage(spine, 2)
+    out("P1 gotov: preduvjeti + operater. Stranice 3-6 slijede u P2-P4.")

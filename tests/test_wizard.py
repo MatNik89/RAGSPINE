@@ -1,4 +1,11 @@
+from ragspine.core.spine import init_spine
+from ragspine.core.security import verify_password
 from ragspine.ops import wizard
+
+
+def _reader(*answers):
+    it = iter(answers)
+    return lambda _="": next(it)
 
 
 def test_render_preflight_blocks_on_fail():
@@ -33,3 +40,23 @@ def test_cmd_setup_seeds_db(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "run", lambda spine, cfg, **kw: None)
     assert main(["setup"]) == 0
     assert called
+
+
+def test_page_operater_creates_admin(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    ok = wizard.page_operater(
+        s, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lambda *_: None)
+    assert ok is True
+    row = s.read().execute("SELECT username, pw_hash FROM users").fetchone()
+    assert row["username"] == "matej"
+    assert verify_password("lozinka12", row["pw_hash"]) is True
+
+
+def test_page_operater_rejects_short_password(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    # prvo prekratka pa mismatch pa ispravna
+    ok = wizard.page_operater(
+        s, input_fn=_reader("matej", "kratka", "kratka", "lozinka12", "lozinka12"),
+        out=lambda *_: None)
+    assert ok is True
+    assert s.read().execute("SELECT 1 FROM users").fetchone() is not None
