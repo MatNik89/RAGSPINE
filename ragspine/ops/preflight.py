@@ -102,6 +102,7 @@ def system_state(cfg=None) -> dict:
         "gpu": hw.get("gpu"),
         "vram_gb": round(_vram_gb(), 1),
         "apple_silicon": hw.get("apple_silicon", False),
+        "ip_mode": _ip_mode(),
     }
 
 
@@ -134,6 +135,36 @@ def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
             return (r.status == 200, "servis radi")
     except Exception:
         return (False, "nije dostupna (servis ne radi ili nije instalirana)")
+
+
+def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
+    """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
+    import socket
+    try:
+        socket.setdefaulttimeout(timeout)
+        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+        return True
+    except OSError:
+        return False
+
+
+def _ip_mode() -> str:
+    """Statička adresa ili DHCP — detektuj OS-specifično.
+    Windows: netsh; drugdje: unknown (detekcija je LAN-specifična)."""
+    import platform
+    if platform.system() != "Windows":
+        return "unknown"
+    try:
+        from ragspine.core.subproc import run_isolated
+        rc, out, _ = run_isolated(["netsh", "interface", "ip", "show", "config"], timeout=5)
+        low = out.lower()
+        if "dhcp enabled:" in low and "dhcp enabled:                         yes" in low:
+            return "dhcp"
+        if "dhcp enabled" in low:
+            return "static"
+    except Exception:
+        pass
+    return "unknown"
 
 
 def requirements(cfg=None) -> list[dict]:
@@ -190,6 +221,12 @@ def requirements(cfg=None) -> list[dict]:
     out.append({"key": "ollama", "naziv": "Ollama (pokretač lokalnog LLM-a)",
                 "status": _status(ok, warn=True), "detalj": odetail,
                 "fix": "winget install Ollama.Ollama pa pokreni 'ollama serve'"})
+
+    inet_ok = internet_ok()
+    out.append({"key": "internet", "naziv": "Internet (za skidanje modela/instalacije)",
+                "status": _status(inet_ok, warn=True),
+                "detalj": "dostupan" if inet_ok else "nema — radi offline s onim što ima",
+                "fix": "spoji mrežu ili koristi --offline s ručno skinutim modelima"})
 
     for mod, naziv, fix in _OPTIONAL_MODULES:
         try:

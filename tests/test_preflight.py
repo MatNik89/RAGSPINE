@@ -1,6 +1,17 @@
 from ragspine.ops import preflight as pf, wizard_state as ws
 
 
+def test_internet_is_warn_not_fail(monkeypatch):
+    monkeypatch.setattr(pf, "internet_ok", lambda: False)
+    reqs = {r["key"]: r for r in pf.requirements()}
+    assert reqs["internet"]["status"] == "warn"   # offline ne blokira
+
+
+def test_system_state_has_ip_mode():
+    st = pf.system_state()
+    assert st["ip_mode"] in ("static", "dhcp", "unknown")
+
+
 def test_tesseract_missing_is_fail(monkeypatch):
     monkeypatch.setattr(pf.shutil, "which", lambda _: None)
     reqs = {r["key"]: r for r in pf.requirements()}
