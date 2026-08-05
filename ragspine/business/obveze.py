@@ -202,7 +202,7 @@ def ensure_period(spine, kind: str, period: str) -> None:
 
 def list_period(spine, kind: str, period: str) -> list[dict]:
     rows = spine.read().execute(
-        """SELECT o.id AS obligation_id, c.name AS client,
+        """SELECT o.id AS obligation_id, o.client_id AS client_id, c.name AS client,
                   COALESCE(s.sent, 0) AS sent, s.sent_by AS sent_by, s.sent_at AS sent_at
            FROM obligations o
            JOIN clients c ON c.id = o.client_id

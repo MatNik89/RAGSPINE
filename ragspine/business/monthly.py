@@ -25,7 +25,14 @@ def _period_bounds(period: str) -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def overview(spine, period: str) -> dict:
+def _vis(rows: list, visible) -> list:
+    """Zadrži retke uredske (client_id IS NULL) i vidljive klijente; None = sve."""
+    if visible is None:
+        return rows
+    return [r for r in rows if r.get("client_id") is None or r.get("client_id") in visible]
+
+
+def overview(spine, period: str, visible=None) -> dict:
     start, end = _period_bounds(period)
 
     # ponytail: query deadline_dates directly for the requested period instead
@@ -66,11 +73,11 @@ def overview(spine, period: str) -> dict:
 
     return {
         "period": period,
-        "deadlines": deadlines,
-        "unsent": unsent,
-        "expiring": expiring,
-        "watch_changes": watch_changes,
-        "recent_notes": recent_notes,
+        "deadlines": deadlines,  # uredski rokovi (bez client_id) — svima
+        "unsent": _vis(unsent, visible),
+        "expiring": _vis(expiring, visible),
+        "watch_changes": _vis(watch_changes, visible),
+        "recent_notes": _vis(recent_notes, visible),
     }
 
 

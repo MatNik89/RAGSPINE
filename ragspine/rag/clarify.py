@@ -116,10 +116,12 @@ def _variant_label(spine, variant: dict) -> str:
     return variant["category"] or variant["title"] or "?"
 
 
-def needs_clarification(spine, query: str) -> dict | None:
+def needs_clarification(spine, query: str, visible=None) -> dict | None:
     """None if the query is specific enough already, or if there's nothing
     to disambiguate (0/1 variant). Otherwise a dict with a concrete HR
-    clarifying question and the distinct variants found."""
+    clarifying question and the distinct variants found. `visible` (skup vidljivih
+    client_id ili None) skriva varijante klijenata koje restringirani radnik ne
+    smije vidjeti (inače bi pitanje otkrilo tuđa imena)."""
     if not is_howto(query):
         return None
     if mentions_client(spine, query) is not None:
@@ -128,6 +130,9 @@ def needs_clarification(spine, query: str) -> dict | None:
         return None
 
     variants = sop_variants(spine, _topic_keywords(query))
+    if visible is not None:
+        variants = [v for v in variants
+                    if v.get("client_id") is None or v.get("client_id") in visible]
 
     seen = set()
     distinct = []

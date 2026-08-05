@@ -76,13 +76,18 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
            actor=None) -> dict:
     org_id = actor.org_id if actor is not None else None
     lane = router.route(query)
+    # None = bez ograničenja (manager/nescopeano); inače skup vidljivih client_id.
+    # Računa se RANO jer monthly/clarify/sql agregati moraju poštovati vidljivost
+    # restringiranog radnika (inače cure obveze/imena/agregati skrivenih klijenata).
+    visible = (client_visibility.visible_ids(spine, actor.user_id, actor.role)
+               if actor is not None else None)
 
     if lane == "reject":
         return _package(_REJECT_MSG, "reject", 0, [], False)
 
     if monthly.MONTHLY_RE.search(query):
         period = monthly._period_now()
-        text = monthly.format_overview(monthly.overview(spine, period))
+        text = monthly.format_overview(monthly.overview(spine, period, visible=visible))
         return _package(text, "monthly", 1.0, [], False)
 
     if lane == "no_retrieval":
@@ -100,7 +105,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # clarify bug never blocks a normal answer.
     if lane == "chat":
         try:
-            clarification = clarify.needs_clarification(spine, query)
+            clarification = clarify.needs_clarification(spine, query, visible=visible)
         except Exception:
             clarification = None
         if clarification is not None:
@@ -129,15 +134,14 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
             prior_turns = []  # ponytail: memory is best-effort — never break the answer
     has_history = bool(prior_turns)
     # arhitektura lane radi side-effect (sprema dogovor) — keširani "Zapamtio"
-    # bez izvršenja bi lagao, pa ni read ni write keša za tu lane
-    skip_cache = has_history or resolved_client is not None or lane == "arhitektura"
+    # bez izvršenja bi lagao, pa ni read ni write keša za tu lane.
+    # visible is not None (restringiran radnik): njegov je odgovor SCOPEAN — ne
+    # smije se ni čitati ni PISATI u keš (inače bi posluženo drugome — cache je
+    # keyed po tekstu+org, ne po vidljivosti).
+    skip_cache = (has_history or resolved_client is not None
+                  or lane == "arhitektura" or visible is not None)
 
-    # restringirani radnik ne smije dobiti keširani odgovor koji je (za nekoga s
-    # širom vidljivošću) mogao biti sastavljen iz dokumenata skrivenog klijenta.
-    visible = (client_visibility.visible_ids(spine, actor.user_id, actor.role)
-               if actor is not None else None)
-
-    if not skip_cache and visible is None:
+    if not skip_cache:
         cached_answer = cache.get(spine, query, org_id=org_id)
         if cached_answer is not None:
             return _package(cached_answer, "chat", 1.0, [], True)
@@ -158,6 +162,10 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         if lane == "arhitektura":
             # side-effect lane mora znati TKO pita (admin-gate u handleru)
             res = handler(spine, cfg, query, llm, actor=actor)
+        elif lane in ("sql", "graph"):
+            # SQL agregati + graf traversal moraju biti scopeani na vidljive
+            # klijente restringiranog radnika (inače cure brojevi/dokumenti)
+            res = handler(spine, cfg, query, llm, visible=visible)
         else:
             res = handler(spine, cfg, query, llm)
         if res is not None:
@@ -244,7 +252,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         features.maybe_file_gap(spine, user, query, final_text, confidence)
     except Exception:
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
-    if verify.accepted(best) and resolved_client is None:
+    # ne spremaj u KB odgovor restringiranog radnika (scopean je — Codex #5)
+    if verify.accepted(best) and resolved_client is None and visible is None:
         kb.save(spine, query, final_text, org_id=org_id)
     result = _package(final_text, "chat", confidence, sources, False)
     if resolved_client is not None:

@@ -100,8 +100,11 @@ def traverse(spine, seeds: list[int], hops: int = 2) -> set[int]:
     return reached
 
 
-def handle(spine, cfg, query: str, llm) -> str:
-    """Graph lane: entities in query -> traverse -> connected docs -> compose+LLM."""
+def handle(spine, cfg, query: str, llm, visible=None) -> str:
+    """Graph lane: entities in query -> traverse -> connected docs -> compose+LLM.
+    `visible` (skup vidljivih client_id ili None) skriva dokumente klijenata koje
+    restringirani radnik ne smije vidjeti (Codex: inače graf šalje chunkove
+    skrivenih dokumenata LLM-u i vraća njihove doc_id)."""
     conn = spine.read()
     ents = extract_entities(query)
     seeds = []
@@ -126,6 +129,19 @@ def handle(spine, cfg, query: str, llm) -> str:
     }
     if not doc_ids:
         return "Nema povezanih dokumenata."
+
+    # restringiran radnik: zadrži samo uredske (client_id IS NULL) i vidljive dok.
+    if visible is not None:
+        dph = ",".join("?" * len(doc_ids))
+        vph = ",".join("?" * len(visible)) if visible else "NULL"
+        doc_ids = {
+            r["id"] for r in conn.execute(
+                f"SELECT id FROM documents WHERE id IN ({dph}) "
+                f"AND (client_id IS NULL OR client_id IN ({vph}))",
+                (*doc_ids, *visible)).fetchall()
+        }
+        if not doc_ids:
+            return "Nema povezanih dokumenata."
 
     if llm is None:
         ent_list = ", ".join(f"{k}={v}" for k, v in ents)
@@ -160,4 +176,4 @@ def handle(spine, cfg, query: str, llm) -> str:
 
 
 from ragspine.rag import pipeline  # noqa: E402  (lazy: avoid any import-order coupling)
-pipeline.LANE_HANDLERS["graph"] = handle
+pipeline.LANE_HANDLERS["graph"] = handle  # dispatch prosljeđuje visible (vidi pipeline)

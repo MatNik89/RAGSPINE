@@ -29,37 +29,60 @@ def _period(q: str) -> str | None:
     return None
 
 
-def handle(spine, query: str) -> str | None:
+def _ph(visible) -> str:
+    return ",".join("?" * len(visible)) if visible else "NULL"
+
+
+def _oib_cond(visible):
+    """eracuni nemaju client_id — ograniči po OIB-u kupca na vidljive klijente."""
+    if visible is None:
+        return None, ()
+    return f"customer_oib IN (SELECT oib FROM clients WHERE id IN ({_ph(visible)}))", tuple(visible)
+
+
+def _id_cond(visible, col: str, allow_null: bool):
+    if visible is None:
+        return None, ()
+    null = f"{col} IS NULL OR " if allow_null else ""
+    return f"({null}{col} IN ({_ph(visible)}))", tuple(visible)
+
+
+def _where(*conds) -> tuple[str, list]:
+    parts, params = [], []
+    for c, p in conds:
+        if c:
+            parts.append(c)
+            params += list(p)
+    return (" WHERE " + " AND ".join(parts)) if parts else "", params
+
+
+def handle(spine, query: str, visible=None) -> str | None:
+    """visible = skup vidljivih client_id (ili None za manager/nescopeano). Svi
+    agregati se ograničavaju da restringirani radnik ne vidi tuđe brojeve/imena."""
     q = _normalize(query)
 
     if re.search(r"(koliko|broj)\s+(je\s+)?racuna\b", q):
         period = _period(q)
-        if period:
-            row = spine.read().execute(
-                "SELECT COUNT(*) AS n FROM eracuni WHERE issued LIKE ?", (period + "%",)
-            ).fetchone()
-        else:
-            row = spine.read().execute("SELECT COUNT(*) AS n FROM eracuni").fetchone()
+        pc = ("issued LIKE ?", (period + "%",)) if period else (None, ())
+        where, params = _where(pc, _oib_cond(visible))
+        row = spine.read().execute(f"SELECT COUNT(*) AS n FROM eracuni{where}", params).fetchone()
         return f"Broj računa: {row['n']}."
 
     if re.search(r"(zbroj|ukupno).*pdv", q):
         period = _period(q)
-        if period:
-            row = spine.read().execute(
-                "SELECT SUM(vat) AS s FROM eracuni WHERE issued LIKE ?", (period + "%",)
-            ).fetchone()
-        else:
-            row = spine.read().execute("SELECT SUM(vat) AS s FROM eracuni").fetchone()
-        total = row["s"] or 0
-        return f"Ukupni PDV: {total:g}."
+        pc = ("issued LIKE ?", (period + "%",)) if period else (None, ())
+        where, params = _where(pc, _oib_cond(visible))
+        row = spine.read().execute(f"SELECT SUM(vat) AS s FROM eracuni{where}", params).fetchone()
+        return f"Ukupni PDV: {(row['s'] or 0):g}."
 
     m = re.search(r"top\s*(\d+)\s*klijen", q)
     if m:
         n = int(m.group(1))
+        where, params = _where(_id_cond(visible, "c.id", allow_null=False))
         rows = spine.read().execute(
             "SELECT c.name AS name, COUNT(*) AS cnt FROM interactions i "
-            "JOIN clients c ON c.name = i.user GROUP BY c.name ORDER BY cnt DESC LIMIT ?",
-            (n,),
+            f"JOIN clients c ON c.name = i.user{where} GROUP BY c.name ORDER BY cnt DESC LIMIT ?",
+            (*params, n),
         ).fetchall()
         if not rows:
             return "Nema podataka o klijentima."
@@ -67,15 +90,17 @@ def handle(spine, query: str) -> str | None:
         return f"Top {n} klijenata: {parts}."
 
     if re.search(r"(koliko|broj)\s+(je\s+)?dokumenata\b", q):
-        row = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()
+        where, params = _where(_id_cond(visible, "client_id", allow_null=True))
+        row = spine.read().execute(f"SELECT COUNT(*) AS n FROM documents{where}", params).fetchone()
         return f"Broj dokumenata: {row['n']}."
 
     if re.search(r"(koliko|broj)\s+(je\s+)?klijenata\b", q):
-        row = spine.read().execute("SELECT COUNT(*) AS n FROM clients").fetchone()
+        where, params = _where(_id_cond(visible, "id", allow_null=False))
+        row = spine.read().execute(f"SELECT COUNT(*) AS n FROM clients{where}", params).fetchone()
         return f"Broj klijenata: {row['n']}."
 
     return None
 
 
 from ragspine.rag import pipeline  # noqa: E402  (lazy: avoid any import-order coupling)
-pipeline.LANE_HANDLERS["sql"] = lambda spine, cfg, query, llm: handle(spine, query)
+pipeline.LANE_HANDLERS["sql"] = lambda spine, cfg, query, llm, visible=None: handle(spine, query, visible=visible)
