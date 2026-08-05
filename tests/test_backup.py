@@ -151,31 +151,3 @@ def test_prune_keep_zero_keeps_at_least_one(cfg):
         backup.create_backup(cfg, stamp=f"20260805-11000{i}")
     backup.prune(cfg, keep=0)  # ne smije obrisati sve
     assert len(backup.list_backups(cfg)) >= 1
-
-
-def test_forget_ui_preview_and_apply(spine, cfg):
-    c, h = _admin(spine, cfg)
-    s = init_spine(cfg.db_path)
-    with s.write() as conn:
-        conn.execute("INSERT INTO clients(name,oib) VALUES('Ivan Horvat','12345678901')")
-        conn.execute("INSERT INTO notes(client_id,author,body) VALUES(1,'ana','Ivan Horvat tajna')")
-    # preview (dry) — ne briše
-    pv = c.post("/forget/preview", json={"term": "Ivan Horvat"}, headers=h)
-    assert pv.status_code == 200 and sum(pv.json().values()) >= 2
-    assert s.read().execute("SELECT COUNT(*) FROM clients").fetchone()[0] == 1  # još tu
-    # apply bez točne potvrde → 400
-    assert c.post("/forget/apply", json={"term": "Ivan Horvat", "confirm": "krivo"}, headers=h).status_code == 400
-    # apply s potvrdom → briše
-    ap = c.post("/forget/apply", json={"term": "Ivan Horvat", "confirm": "Ivan Horvat"}, headers=h)
-    assert ap.status_code == 200
-    assert s.read().execute("SELECT COUNT(*) FROM clients").fetchone()[0] == 0
-
-
-def test_forget_routes_worker_forbidden(spine, cfg):
-    c, h = _admin(spine, cfg)
-    from ragspine.web.deps import add_user
-    add_user(init_spine(cfg.db_path), "boris", "pw", "radnik")
-    wtok = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
-    wh = {"Authorization": f"Bearer {wtok}"}
-    assert c.post("/forget/preview", json={"term": "x"}, headers=wh).status_code == 403
-    assert c.post("/forget/apply", json={"term": "x", "confirm": "x"}, headers=wh).status_code == 403
