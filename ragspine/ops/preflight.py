@@ -125,6 +125,17 @@ def _status(ok: bool, warn: bool = False) -> str:
     return "ok" if ok else ("warn" if warn else "fail")
 
 
+def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
+    """200 na /api/tags = servis radi. Ne oslanja se na `ollama --version`
+    (hermes: instalirana ali ne startana je čest slučaj)."""
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{url}/api/tags", timeout=3) as r:
+            return (r.status == 200, "servis radi")
+    except Exception:
+        return (False, "nije dostupna (servis ne radi ili nije instalirana)")
+
+
 def requirements(cfg=None) -> list[dict]:
     """Lista preduvjeta sa statusom. 'fail' = RAGSPINE neće ispravno raditi;
     'warn' = radi degradirano; 'ok' = spremno."""
@@ -172,8 +183,13 @@ def requirements(cfg=None) -> list[dict]:
             langs_ok = False
     tdetail = ("hrv+eng dostupni" if langs_ok else "instaliran bez hrv/eng jezika") if tess else "nije pronađen"
     out.append({"key": "tesseract", "naziv": "OCR (Tesseract, hrv+eng)",
-                "status": _status(bool(tess) and langs_ok, warn=True), "detalj": tdetail,
+                "status": _status(bool(tess) and langs_ok), "detalj": tdetail,
                 "fix": "winget install UB-Mannheim.TesseractOCR (+ hrv i eng jezični paket)"})
+
+    ok, odetail = ollama_ready(getattr(cfg, "ollama_url", "http://localhost:11434"))
+    out.append({"key": "ollama", "naziv": "Ollama (pokretač lokalnog LLM-a)",
+                "status": _status(ok, warn=True), "detalj": odetail,
+                "fix": "winget install Ollama.Ollama pa pokreni 'ollama serve'"})
 
     for mod, naziv, fix in _OPTIONAL_MODULES:
         try:

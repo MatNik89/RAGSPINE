@@ -1,6 +1,20 @@
 from ragspine.ops import preflight as pf, wizard_state as ws
 
 
+def test_tesseract_missing_is_fail(monkeypatch):
+    monkeypatch.setattr(pf.shutil, "which", lambda _: None)
+    reqs = {r["key"]: r for r in pf.requirements()}
+    assert reqs["tesseract"]["status"] == "fail"   # bio "warn"
+
+
+def test_ollama_row_present(monkeypatch):
+    monkeypatch.setattr(pf, "ollama_ready", lambda url=None: (False, "nije dostupna"))
+    reqs = {r["key"]: r for r in pf.requirements()}
+    assert "ollama" in reqs
+    assert reqs["ollama"]["status"] in ("warn", "fail")
+    assert "Ollama" in reqs["ollama"]["naziv"]
+
+
 def test_fit_pill_fractions_of_total():
     # udio ukupnog RAM-a: <50% stane, 50-70% tijesno, >=70% ne
     assert pf.fit_pill(4.0, 10) == "fits"     # 40%
