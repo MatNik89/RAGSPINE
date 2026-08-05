@@ -1,4 +1,4 @@
-from ragspine.ops import preflight as pf
+from ragspine.ops import preflight as pf, wizard_state as ws
 
 
 def test_fit_pill_fractions_of_total():
@@ -73,6 +73,7 @@ def _admin_client(spine, cfg):
     from ragspine.web.deps import add_user
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")           # prvi login → owner default orga
+    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     return c, {"Authorization": f"Bearer {tok}"}
 

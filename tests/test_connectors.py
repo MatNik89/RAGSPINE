@@ -1,6 +1,7 @@
 """Connector framework: registry, test-before-save, status, maskiranje tajni."""
 import pytest
 from ragspine.business import connectors as cx
+from ragspine.ops import wizard_state as ws
 
 
 @pytest.fixture(autouse=True)
@@ -90,6 +91,7 @@ def _admin(spine, cfg):
     from ragspine.web.deps import add_user
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")
+    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     return c, {"Authorization": f"Bearer {tok}"}
 

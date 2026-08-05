@@ -1,5 +1,5 @@
 import os
-from ragspine.ops import backup
+from ragspine.ops import backup, wizard_state as ws
 from ragspine.core.spine import init_spine
 
 
@@ -97,6 +97,7 @@ def _admin(spine, cfg):
     s = init_spine(cfg.db_path)
     c = TestClient(create_app(s, cfg))
     add_user(s, "ana", "pw")
+    ws.mark_complete(s)  # gatekeeper drži na /ui/setup dok wizard ne završi
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     return c, {"Authorization": f"Bearer {tok}"}
 
