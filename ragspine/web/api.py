@@ -862,8 +862,8 @@ def create_app(spine, cfg) -> FastAPI:
         from ragspine.web.templates_devices import devices_page
         return devices_page()
 
-    @app.get("/ui/kanali", response_class=HTMLResponse)
-    def ui_kanali(request: Request):
+    @app.get("/ui/posta", response_class=HTMLResponse)
+    def ui_posta(request: Request):
         try:
             _require_admin(require_actor_web(request))
         except HTTPException:

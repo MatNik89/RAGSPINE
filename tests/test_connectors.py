@@ -97,15 +97,14 @@ def _admin(spine, cfg):
 def test_builtin_types_registered(spine, cfg):
     c, h = _admin(spine, cfg)  # create_app registrira builtin tipove
     kinds = {t["kind"] for t in c.get("/connector-types", headers=h).json()}
-    assert {"mail_exchange", "mail_graph", "telegram", "whatsapp"} <= kinds
-    assert "viber" not in kinds  # namjerno izbačen
+    assert {"mail_exchange", "mail_graph"} == kinds  # samo mail; kanali izbačeni
 
 
 def test_connector_routes_admin_flow(spine, cfg):
     c, h = _admin(spine, cfg)
-    # telegram test bez telethona → error/pending, ali validacija radi
-    t = c.post("/connectors/test", json={"kind": "telegram",
-              "config": {"api_id": "123", "api_hash": "x", "phone": "+385"}}, headers=h)
+    # mail_exchange test (email format ok → pending, bez exchangeliba → error)
+    t = c.post("/connectors/test", json={"kind": "mail_exchange",
+              "config": {"email": "a@b.hr", "password": "x"}}, headers=h)
     assert t.status_code == 200 and t.json()["status"] in ("pending", "error")
     # kreiraj mail_exchange (email format ok → pending)
     r = c.post("/connectors", json={"kind": "mail_exchange", "name": "Ured mail",
@@ -118,7 +117,7 @@ def test_connector_routes_admin_flow(spine, cfg):
     assert c.delete(f"/connectors/{cid}", headers=h).status_code == 200
     assert c.get("/connectors", headers=h).json() == []
     # UI
-    assert c.get("/ui/kanali", headers=h).status_code == 200
+    assert c.get("/ui/posta", headers=h).status_code == 200
 
 
 def test_connector_routes_worker_forbidden(spine, cfg):
@@ -128,4 +127,4 @@ def test_connector_routes_worker_forbidden(spine, cfg):
     wt = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
     wh = {"Authorization": f"Bearer {wt}"}
     assert c.get("/connectors", headers=wh).status_code == 403
-    assert c.post("/connectors", json={"kind": "telegram", "name": "x", "config": {}}, headers=wh).status_code == 403
+    assert c.post("/connectors", json={"kind": "mail_exchange", "name": "x", "config": {}}, headers=wh).status_code == 403

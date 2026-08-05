@@ -1,5 +1,5 @@
-"""HTML za /ui/kanali — konektori (e-pošta + kanali poruka): katalog dostupnih
-tipova, dinamička forma po tipu, Test prije spremanja, popis konfiguriranih sa
+"""HTML za /ui/posta — konektori e-pošte (M365 Graph / on-prem Exchange):
+katalog tipova, dinamička forma, Test prije spremanja, popis konfiguriranih sa
 statusom. XSS-safe (createElement/textContent)."""
 from ragspine.web.templates_ui import page_shell
 
@@ -92,10 +92,9 @@ _BODY = """
     border:1px solid #d1d5db; border-radius:8px; box-sizing:border-box; }
   label{ font-size:.9em; color:var(--muted); }
 </style>
-<h1>E-pošta i kanali</h1>
-<p class="muted">Poveži uredsku e-poštu i kanale poruka (Telegram, WhatsApp). Nakon
-  upisa podataka <b>Testiraj</b> pa <b>Spremi</b>. Telegram/WhatsApp traže još
-  prijavu/QR — status ostaje „čeka autorizaciju" dok se ne dovrši.</p>
+<h1>E-pošta</h1>
+<p class="muted">Poveži uredsku e-poštu (Microsoft 365 ili Exchange server). Nakon
+  upisa podataka <b>Testiraj</b> pa <b>Spremi</b>.</p>
 
 <div class="card">
   <h2>Dodaj konektor</h2>
@@ -103,7 +102,7 @@ _BODY = """
   <select id="kind"></select>
   <div id="fields"></div>
   <label>Naziv (za tebe)</label>
-  <input id="cname" placeholder="npr. Uredski Gmail / Telegram recepcija">
+  <input id="cname" placeholder="npr. Uredski mail / Info sandučić">
   <button class="btn" id="test">Testiraj</button>
   <button class="btn primary" id="save">Spremi</button>
   <p id="form-msg" class="muted"></p>
@@ -121,4 +120,4 @@ _BODY = """
 
 
 def connectors_page() -> str:
-    return page_shell("E-pošta i kanali", _BODY.replace("__SCRIPT__", _JS), active="postavke")
+    return page_shell("E-pošta", _BODY.replace("__SCRIPT__", _JS), active="postavke")
