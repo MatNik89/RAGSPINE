@@ -141,6 +141,77 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
     return None
 
 
+_PILL_GLYPH = {"fits": "🟢", "tight": "🟡", "too_big": "🔴", "unknown": "?"}
+
+
+def render_model_catalog(fits, recommended, *, out=print) -> list[str]:
+    """Ispiši instalabilne chat modele; vrati imena u prikazanom redoslijedu."""
+    names = []
+    for f in fits:
+        if f["role"] != "chat" or not f["installable"]:
+            continue
+        q = f["best_quant"] or f["tight_quant"]
+        qinfo = next(x for x in f["quants"] if x["quant"] == q)
+        pill = _PILL_GLYPH.get(qinfo["pill"], "?")
+        gpu = " [GPU]" if qinfo["gpu_ready"] else ""
+        star = "  ⭐ PREPORUKA" if f["name"] == recommended else ""
+        out(f"  {pill} {f['name']} ({f['params']}, {q} ~{qinfo['size_gb']} GB){gpu} — {f['desc']}{star}")
+        names.append(f["name"])
+    return names
+
+
+def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
+    """Stranica 3: Ollama spremnost -> katalog -> JEDAN model -> pull -> spremi
+    -> embedding -> self-test. Skip-grana vraca True (spec: ne zaglavi)."""
+    tui.print_header("3/6  Model (LLM)", out=out)
+    url = getattr(cfg, "ollama_url", "http://127.0.0.1:11434")
+
+    ok, detail = preflight.ollama_ready(url)
+    if not ok:
+        out(f"Ollama: {detail} — pokušavam pokrenuti servis...")
+        ok = preflight.start_ollama(url=url)
+    if not ok:
+        out("Ollama nije dostupna. Model možeš postaviti kasnije u Postavkama.")
+        if tui.prompt_yes_no("Preskoči stranicu modela?", default=True,
+                             input_fn=input_fn, out=out):
+            return True
+        return False
+
+    ver = preflight.ollama_version(url)
+    if not preflight.ollama_floor_ok(ver):
+        out(f"⚠ Ollama verzija {ver or 'nepoznata'} < 0.5.0 — preporučen upgrade "
+            "(winget upgrade Ollama.Ollama). Nastavljam.")
+
+    fits = preflight.model_fits(cfg)
+    rec = preflight.recommend_chat_model(fits)
+    out("Dostupni modeli (za ovaj hardver):")
+    names = render_model_catalog(fits, rec, out=out)
+    if not names:
+        out("Nijedan model ne stane u RAM ovog računala — postavi kasnije (Postavke).")
+        return True
+    choices = names + ["Preskoči — postavi kasnije"]
+    default_idx = names.index(rec) if rec in names else 0
+    idx = tui.prompt_choice("Odaberi JEDAN model:", choices, default=default_idx,
+                            input_fn=input_fn, out=out)
+    if idx == len(names):   # skip opcija
+        return True
+    model = names[idx]
+
+    out(f"Skidam {model} (prekid je siguran — nastavlja gdje je stalo)...")
+    if not preflight.ollama_pull(model, url, out=out):
+        out("Model nije skinut. Pokreni setup ponovno ili postavi kasnije u Postavkama.")
+        return tui.prompt_yes_no("Nastavi setup bez modela?", default=True,
+                                 input_fn=input_fn, out=out)
+
+    emb = setup_embedding(spine, cfg, out=out)
+    from ragspine.business import model_settings
+    model_settings.save(spine, "ollama", model=model, ollama_url=url,
+                        embed_model=emb or "", user="setup")
+    if not self_test(spine, cfg, input_fn=input_fn, out=out):
+        out("⚠ Self-test nije prošao — model je spremljen, provjeri ga kasnije u Postavkama.")
+    return True
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")

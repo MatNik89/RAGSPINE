@@ -175,3 +175,54 @@ def test_self_test_retries_then_user_gives_up(tmp_path, monkeypatch):
                           out=lambda *_: None)
     assert ok is False
     assert len(calls) == 3
+
+
+def _fits_16gb():
+    return wizard.preflight.model_fits(state={"ram_total_gb": 16.0, "vram_gb": 0.0})
+
+
+def test_render_model_catalog_marks_recommendation():
+    fits = _fits_16gb()
+    rec = wizard.preflight.recommend_chat_model(fits)
+    lines = []
+    names = wizard.render_model_catalog(fits, rec, out=lines.append)
+    assert rec in names
+    assert any("PREPORUKA" in l for l in lines)
+    assert any("🟢" in l or "🟡" in l for l in lines)
+
+
+def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (False, "nema"))
+    monkeypatch.setattr(wizard.preflight, "start_ollama", lambda **k: False)
+    # "da" na "preskoci i postavi kasnije?"
+    ok = wizard.page_model(s, None, input_fn=_reader("da"), out=lambda *_: None)
+    assert ok is True
+
+
+def test_page_model_full_happy_path(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.business import model_settings
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
+    monkeypatch.setattr(wizard.preflight, "system_state",
+                        lambda c=None: {"ram_total_gb": 16.0, "vram_gb": 0.0})
+    pulled = []
+    monkeypatch.setattr(wizard.preflight, "ollama_pull",
+                        lambda name, url=None, out=print: pulled.append(name) or True)
+    monkeypatch.setattr(wizard, "setup_embedding", lambda sp, c, out=print: "emb-model")
+    monkeypatch.setattr(wizard, "self_test", lambda sp, c, **k: True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "def-emb"
+    # "" = prihvati default (preporuceni model je predodabran u prompt_choice)
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader(""), out=lambda *_: None)
+    assert ok is True
+    assert len(pulled) == 1
+    saved = model_settings.get(s)
+    assert saved["provider"] == "ollama"
+    assert saved["model"] == pulled[0]
+    assert saved["embed_model"] == "emb-model"
