@@ -1,5 +1,5 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
-P1: Stranica 1 (preduvjeti) + Stranica 2 (operater). Ostale stranice u P2-P4."""
+P2: Stranice 1 (preduvjeti) + 2 (operater) + 3 (model). Ostale stranice u P3-P4."""
 import dataclasses
 import re
 import time
@@ -229,6 +229,11 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na operateru.")
                 return
             wizard_state.set_stage(spine, 2)
+        if stage < 3:
+            if not page_model(spine, cfg, input_fn=input_fn, out=out):
+                out("Setup prekinut na modelu. Pokreni ponovno za nastavak.")
+                return
+            wizard_state.set_stage(spine, 3)
     except (EOFError, KeyboardInterrupt):
         # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
         # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
@@ -238,9 +243,8 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    # P1 pokriva stranice 1-2; wizard je time gotov koliko je danas implementiran
-    # pa smije ugasiti setup-gate (inače web UI ostaje zaključan na /ui/setup).
-    # Pomicati dalje kako stranice 3-6 stižu u P2-P4 (mark_complete tek nakon zadnje).
+    # P2 pokriva stranice 1-3; mark_complete se pomice dalje kako stranice
+    # 4-6 stizu u P3-P4 (poziv ide iza ZADNJE implementirane stranice).
     wizard_state.mark_complete(spine)
-    out("P1 gotov: preduvjeti + operater. Setup je dovršen — web sučelje je dostupno.")
-    out("Stranice 3-6 (dodatna podešavanja) slijede u P2-P4 i bit će naknadno dostupne.")
+    out("P2 gotov: preduvjeti + operater + model. Setup je dovrsen — web sucelje je dostupno.")
+    out("Stranice 4-6 (mreza/HTTPS/servis, mape, sazetak) slijede u P3-P4.")

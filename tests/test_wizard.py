@@ -94,16 +94,58 @@ def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
 
 
 def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
-    """P1 wizard end-to-end (preduvjeti OK + operater kreiran) mora postaviti
-    setup_complete — inače gatekeeper (firstrun.needs_setup) trajno zaključava
-    web sučelje na /ui/setup i za instalacije koje su upravo dovršile wizard."""
+    """P2 wizard end-to-end (preduvjeti OK + operater kreiran + model stranica)
+    mora postaviti setup_complete — inače gatekeeper (firstrun.needs_setup)
+    trajno zaključava web sučelje na /ui/setup i za instalacije koje su upravo
+    dovršile wizard. page_model je mockan da ne diraju mrežu/Ollama."""
     ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
+    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
-    assert ws.get_stage(spine) == 2
+    assert ws.get_stage(spine) == 3
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
+
+
+def test_run_reaches_stage3_and_completes(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import wizard_state as ws
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
+    called = []
+    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: called.append(1) or True)
+    wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
+    assert called == [1]
+    assert ws.get_stage(s) == 3
+    assert ws.is_complete(s) is True
+
+
+def test_run_no_complete_when_model_page_cancelled(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import wizard_state as ws
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: False)
+    wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
+    assert ws.get_stage(s) == 2          # stranice 1-2 prosle
+    assert ws.is_complete(s) is False    # model otkazan -> nije complete
+
+
+def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import wizard_state as ws
+    s = init_spine(str(tmp_path / "t.db"))
+    ws.set_stage(s, 2)
+    ran = []
+    monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: ran.append("p1") or True)
+    monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: ran.append("p2") or True)
+    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: ran.append("p3") or True)
+    wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
+    assert ran == ["p3"]
+    assert ws.is_complete(s) is True
 
 
 def test_choose_embed_model_bge_when_ram_allows():
