@@ -403,7 +403,8 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
     out(f"  • Baza: {cfg.db_path} — snapshot naredbom: ragspine backup")
     out(f"  • Tajni ključ (JWT): {Path(cfg.data_dir) / 'secret'} — bez njega prijave "
         "nakon restorea ne rade; kopiraj ga UZ bazu")
-    out(r"  • Ollama modeli: %USERPROFILE%\.ollama\models — bez njih RAG ne radi "
+    ollama_dir = r"%USERPROFILE%\.ollama\models" if os.name == "nt" else "~/.ollama/models"
+    out(f"  • Ollama modeli: {ollama_dir} — bez njih RAG ne radi "
         "ni uz vraćenu bazu i ključ")
     out("  • Restore provjeri na drugom stroju: ragspine restore <ime> (server zaustavljen)")
     if tui.prompt_yes_no("Napravi verificirani snapshot baze sada?", default=True,
