@@ -155,10 +155,19 @@ def ollama_floor_ok(version: str | None, floor: str = _OLLAMA_FLOOR) -> bool:
 def start_ollama(wait_s: float = 8.0, url: str = "http://127.0.0.1:11434") -> bool:
     """Pokušaj pokrenuti `ollama serve` detached pa čekaj da /api/tags prodiše.
     False kad binary ne postoji ili servis ne prodiše u wait_s."""
+    kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+                    "stdin": subprocess.DEVNULL}
+    if platform.system() == "Windows":
+        # POSIX start_new_session je no-op na Windowsu — treba DETACHED_PROCESS
+        # da daemon preživi zatvaranje wizard konzole. getattr fallback da test
+        # na Linuxu s mockanim platform.system()=="Windows" ne padne na
+        # AttributeError (atributi postoje samo na Windows buildu Pythona).
+        kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0x8)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
+    else:
+        kwargs["start_new_session"] = True
     try:
-        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
+        subprocess.Popen(["ollama", "serve"], **kwargs)
     except OSError:
         return False
     deadline = time.monotonic() + wait_s

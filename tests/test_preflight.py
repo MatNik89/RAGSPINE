@@ -140,6 +140,20 @@ def test_start_ollama_false_when_binary_missing(monkeypatch):
     assert pf.start_ollama(wait_s=0.1) is False
 
 
+def test_start_ollama_windows_uses_detached_flags(monkeypatch):
+    captured = {}
+
+    def _popen(cmd, **kw):
+        captured.update(kw)
+        return object()
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pf.subprocess, "Popen", _popen)
+    monkeypatch.setattr(pf, "ollama_ready", lambda url=None: (True, "radi"))
+    assert pf.start_ollama(wait_s=0.1) is True
+    assert captured.get("creationflags", 0) != 0
+    assert "start_new_session" not in captured
+
+
 def _ndjson_resp(lines):
     import io, json
     payload = b"".join(json.dumps(l).encode() + b"\n" for l in lines)

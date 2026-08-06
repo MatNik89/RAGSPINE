@@ -1,11 +1,16 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
-P2: Stranice 1 (preduvjeti) + 2 (operater) + 3 (model). Ostale stranice u P3-P4."""
+P2: Stranice 1 (preduvjeti) + 2 (operater) + 3 (model).
+P3: Stranica 4 (mreža/HTTPS/servis). Stranice 5-6 stižu u P4."""
 import dataclasses
+import ipaddress
 import re
+import shutil
+import sys
 import time
+from pathlib import Path
 
 from ragspine.core.llm import LLMError, LLMUnavailable
-from ragspine.ops import preflight, tui, wizard_state
+from ragspine.ops import certs, preflight, tui, winsvc, wizard_state
 from ragspine.web import firstrun
 
 _MIN_PW = 8
@@ -207,6 +212,83 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
+def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
+    """Stranica 4: bind IP + port, cert/HTTPS, proxy, servis (preskočivo)."""
+    tui.print_header("4/6  Mreža + HTTPS + servis", out=out)
+    lan = preflight.local_ip()
+
+    # 1) bind IP
+    choices = [f"{lan} (detektirani LAN IP)", "0.0.0.0 (sve mreže)",
+               "127.0.0.1 (samo ovo računalo)", "Ručni unos"]
+    idx = tui.prompt_choice("Na kojoj adresi server sluša?", choices,
+                            default=0, input_fn=input_fn, out=out)
+    if idx == 0:
+        bind = lan
+    elif idx == 1:
+        bind = "0.0.0.0"
+    elif idx == 2:
+        bind = "127.0.0.1"
+    else:
+        while True:
+            bind = tui.prompt_text("IP adresa", input_fn=input_fn, out=out)
+            try:
+                ipaddress.ip_address(bind)
+                break
+            except ValueError:
+                out("Neispravna IP adresa.")
+
+    # 2) port
+    while True:
+        raw = tui.prompt_text("Port", default="8443", input_fn=input_fn, out=out)
+        try:
+            port = int(raw)
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except ValueError:
+            out("Port mora biti broj 1-65535.")
+            continue
+        if not preflight.port_free(bind if bind != "0.0.0.0" else "127.0.0.1", port):
+            out(f"Port {port} je zauzet — odaberi drugi.")
+            continue
+        break
+
+    # 3) statička adresa (upozorenje, ne izvršavamo netsh set)
+    if preflight.system_state(cfg).get("ip_mode") == "dhcp":
+        out("⚠ Računalo je na DHCP-u — adresa se može promijeniti i klijenti gube vezu.")
+        out("  Postavi statičku: netsh interface ip set address (ili rezervacija na routeru).")
+
+    # 4) proxy
+    proxy = tui.prompt_text("HTTP proxy (prazno = bez proxyja)",
+                            input_fn=input_fn, out=out)
+    preflight.set_proxy(spine, proxy)
+    if proxy:
+        out(f"  Za Ollama servis postavi env: HTTPS_PROXY={proxy}")
+
+    # 5) cert
+    cert_ip = lan if bind == "0.0.0.0" else bind
+    cert_dir = str(Path(getattr(cfg, "data_dir", ".")) / "certs")
+    cert, key = certs.generate_self_signed(cert_dir, ips=[cert_ip],
+                                           hostnames=["ragspine.local"])
+    out(f"HTTPS certifikat: {cert}")
+    out(f"  SHA256: {certs.fingerprint_sha256(cert)}")
+    out("  Na klijente ga instaliraj naredbom: ragspine trust")
+
+    # 6) spremi net postavke
+    spine.set_override("net", "host", bind)
+    spine.set_override("net", "port", str(port))
+    spine.set_override("net", "cert_path", cert)
+    spine.set_override("net", "key_path", key)
+    out(f"✓ Server će služiti na https://{cert_ip}:{port}")
+
+    # 7) servis (preskočivo; neuspjeh ne ruši stranicu)
+    if tui.prompt_yes_no("Instaliraj kao servis (autostart)?", default=False,
+                         input_fn=input_fn, out=out):
+        exe = shutil.which("ragspine") or f"{sys.executable} -m ragspine"
+        if not winsvc.install_service(exe, getattr(cfg, "data_dir", "."), port, out=out):
+            out("⚠ Servis nije instaliran — možeš ponoviti kasnije (admin konzola).")
+    return True
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")
@@ -229,6 +311,11 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na modelu. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 3)
+        if stage < 4:
+            if not page_mreza(spine, cfg, input_fn=input_fn, out=out):
+                out("Setup prekinut na mreži. Pokreni ponovno za nastavak.")
+                return
+            wizard_state.set_stage(spine, 4)
     except (EOFError, KeyboardInterrupt):
         # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
         # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
@@ -238,8 +325,8 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    # P2 pokriva stranice 1-3; mark_complete se pomiče dalje kako stranice
-    # 4-6 stižu u P3-P4 (poziv ide iza ZADNJE implementirane stranice).
+    # P3 pokriva stranice 1-4; mark_complete se pomiče dalje kako stranice
+    # 5-6 stižu u P4 (poziv ide iza ZADNJE implementirane stranice).
     wizard_state.mark_complete(spine)
-    out("P2 gotov: preduvjeti + operater + model. Setup je dovršen — web sučelje je dostupno.")
-    out("Stranice 4-6 (mreža/HTTPS/servis, mape, sažetak) slijede u P3-P4.")
+    out("P3 gotov: preduvjeti + operater + model + mreža/HTTPS. Setup je dovršen — web sučelje je dostupno.")
+    out("Stranice 5-6 (mape, sažetak) slijede u P4.")

@@ -9,6 +9,52 @@ def _reader(*answers):
     return lambda _="": next(it)
 
 
+def _mreza_mocks(monkeypatch, tmp_path):
+    monkeypatch.setattr(wizard.preflight, "local_ip", lambda: "192.168.1.7")
+    monkeypatch.setattr(wizard.preflight, "port_free", lambda h, p: True)
+    monkeypatch.setattr(wizard.preflight, "system_state",
+                        lambda c=None: {"ip_mode": "static"})
+    monkeypatch.setattr(wizard.certs, "generate_self_signed",
+                        lambda d, ips, hostnames=None: (str(tmp_path / "cert.pem"),
+                                                        str(tmp_path / "key.pem")))
+    monkeypatch.setattr(wizard.certs, "fingerprint_sha256", lambda p: "AA:BB")
+
+
+def test_page_mreza_happy_path_saves_overrides(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    _mreza_mocks(monkeypatch, tmp_path)
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    # izbori: "1" (detektirani IP), port Enter (default 8443), proxy Enter (bez),
+    # servis "ne"
+    ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "", "", "ne"),
+                           out=lambda *_: None)
+    assert ok is True
+    assert s.get_override("net", "host") == "192.168.1.7"
+    assert s.get_override("net", "port") == "8443"
+    assert s.get_override("net", "cert_path").endswith("cert.pem")
+    assert s.get_override("net", "key_path").endswith("key.pem")
+
+
+def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    _mreza_mocks(monkeypatch, tmp_path)
+    ports = iter([False, True])                     # prvi zauzet, drugi slobodan
+    monkeypatch.setattr(wizard.preflight, "port_free", lambda h, p: next(ports))
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "8443", "9000", "", "ne"),
+                           out=lines.append)
+    assert ok is True
+    assert s.get_override("net", "port") == "9000"
+    assert any("zauzet" in l.lower() for l in lines)
+
+
 def test_render_preflight_blocks_on_fail():
     reqs = [
         {"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""},
@@ -101,24 +147,22 @@ def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
     ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: True)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
-    assert ws.get_stage(spine) == 3
+    assert ws.get_stage(spine) == 4
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
 
 
-def test_run_reaches_stage3_and_completes(tmp_path, monkeypatch):
+def test_run_reaches_stage4_and_completes(tmp_path, monkeypatch):
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
-    monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
-    monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
-    called = []
-    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: called.append(1) or True)
+    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza"):
+        monkeypatch.setattr(wizard, p, lambda *a, **k: True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert called == [1]
-    assert ws.get_stage(s) == 3
+    assert ws.get_stage(s) == 4
     assert ws.is_complete(s) is True
 
 
@@ -134,7 +178,22 @@ def test_run_no_complete_when_model_page_cancelled(tmp_path, monkeypatch):
     assert ws.is_complete(s) is False    # model otkazan -> nije complete
 
 
+def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import wizard_state as ws
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: False)
+    wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
+    assert ws.get_stage(s) == 3          # stranice 1-3 prosle
+    assert ws.is_complete(s) is False    # mreza otkazana -> nije complete
+
+
 def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
+    """Napomena (Task 5 P3): otkad run() ima stage 4 (page_mreza), resume od
+    stage 2 pokreće i model I mreža stranicu (ne samo model) — ran ima oba."""
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
@@ -143,8 +202,9 @@ def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: ran.append("p1") or True)
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: ran.append("p2") or True)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: ran.append("p3") or True)
+    monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: ran.append("p4") or True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ran == ["p3"]
+    assert ran == ["p3", "p4"]
     assert ws.is_complete(s) is True
 
 
