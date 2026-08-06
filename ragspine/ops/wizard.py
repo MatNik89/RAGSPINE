@@ -12,7 +12,7 @@ import types
 from pathlib import Path
 
 from ragspine.core.llm import LLMError, LLMUnavailable
-from ragspine.ops import certs, preflight, tui, winsvc, wizard_state
+from ragspine.ops import backup, certs, preflight, tui, winsvc, wizard_state
 from ragspine.web import firstrun
 
 _MIN_PW = 8
@@ -370,6 +370,52 @@ def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
+def render_summary(spine, cfg, *, out=print) -> None:
+    """Sažetak stranica 1-5: konfigurirano / preskočeno + gdje dodati kasnije."""
+    from ragspine.business import folders
+    admin = "✓ kreiran" if not firstrun.needs_onboarding(spine) else "✗ nije kreiran"
+    model = spine.get_override("model", "model") or ""
+    emb = spine.get_override("model", "embed_model") or ""
+    host = spine.get_override("net", "host") or ""
+    port = spine.get_override("net", "port") or ""
+    cert = spine.get_override("net", "cert_path") or ""
+    out("Sažetak:")
+    out(f"  Administrator: {admin}")
+    out(f"  LLM model: {model or '— preskočeno (Postavke → Model)'}")
+    out(f"  Embedding: {emb or '— preskočeno (Postavke → Model)'}")
+    out(f"  Mreža: {f'https://{host}:{port}' if host else '— zadano (Postavke → Mreža)'}")
+    out(f"  HTTPS cert: {cert or '— nema (ragspine setup, stranica 4)'}")
+    mape = folders.list_folders(spine)
+    if mape:
+        for m in mape:
+            out(f"  Mapa [{m['role']}]: {m['path']}")
+    else:
+        out("  Mape: — preskočeno (Postavke → Mrežne mape)")
+
+
+def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
+    """Stranica 6: sažetak + konkretan backup/restore. Uvijek vraća True —
+    zadnja stranica ne smije blokirati dovršetak setupa."""
+    tui.print_header("6/6  Gotovo — sažetak i sigurnosne kopije", out=out)
+    render_summary(spine, cfg, out=out)
+    out("")
+    out("Sigurnosne kopije (spremi na vanjski medij/NAS — bez ovoga restore ne vraća sustav):")
+    out(f"  • Baza: {cfg.db_path} — snapshot naredbom: ragspine backup")
+    out(f"  • Tajni ključ (JWT): {Path(cfg.data_dir) / 'secret'} — bez njega prijave "
+        "nakon restorea ne rade; kopiraj ga UZ bazu")
+    out(r"  • Ollama modeli: %USERPROFILE%\.ollama\models — bez njih RAG ne radi "
+        "ni uz vraćenu bazu i ključ")
+    out("  • Restore provjeri na drugom stroju: ragspine restore <ime> (server zaustavljen)")
+    if tui.prompt_yes_no("Napravi verificirani snapshot baze sada?", default=True,
+                         input_fn=input_fn, out=out):
+        try:
+            res = backup.create_backup(cfg)
+            out(f"  ✓ {res['path']} ({res['size']} B, verificiran quick_checkom)")
+        except Exception as e:
+            out(f"  ⚠ Snapshot nije uspio: {e} — pokreni `ragspine backup` ručno.")
+    return True
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")
@@ -402,6 +448,11 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na mapama. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 5)
+        if stage < 6:
+            if not page_gotovo(spine, cfg, input_fn=input_fn, out=out):
+                out("Setup prekinut na sažetku. Pokreni ponovno za nastavak.")
+                return
+            wizard_state.set_stage(spine, 6)
     except (EOFError, KeyboardInterrupt):
         # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
         # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
@@ -411,7 +462,5 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    # Stranica 6 (sažetak) stiže u sljedećem tasku; mark_complete ide iza
-    # ZADNJE implementirane stranice.
     wizard_state.mark_complete(spine)
-    out("Setup dovršen: preduvjeti + operater + model + mreža + mape. Sažetak (6/6) slijedi.")
+    out("✓ Setup dovršen (6/6) — web sučelje je spremno.")

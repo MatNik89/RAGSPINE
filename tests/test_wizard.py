@@ -221,30 +221,29 @@ def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
 
 
 def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
-    """P2 wizard end-to-end (preduvjeti OK + operater kreiran + model stranica)
-    mora postaviti setup_complete — inače gatekeeper (firstrun.needs_setup)
-    trajno zaključava web sučelje na /ui/setup i za instalacije koje su upravo
-    dovršile wizard. page_model je mockan da ne diraju mrežu/Ollama."""
+    """P4 wizard end-to-end trebao bi dosegnuti stage 6 (page_gotovo) i završiti.
+    page_model/mreza/mape/gotovo su mockani da ne diraju mrežu/Ollama."""
     ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: True)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
-    assert ws.get_stage(spine) == 5
+    assert ws.get_stage(spine) == 6
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
 
 
-def test_run_reaches_stage5_and_completes(tmp_path, monkeypatch):
+def test_run_reaches_stage6_and_completes(tmp_path, monkeypatch):
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
-    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape"):
+    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape", "page_gotovo"):
         monkeypatch.setattr(wizard, p, lambda *a, **k: True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ws.get_stage(s) == 5
+    assert ws.get_stage(s) == 6
     assert ws.is_complete(s) is True
 
 
@@ -275,8 +274,8 @@ def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
 
 
 def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
-    """Napomena (Task 1 P4): otkad run() ima stage 5 (page_mape), resume od
-    stage 2 pokreće model, mreža I mape stranice — ran ima sve tri."""
+    """Napomena (Task 2 P4): otkad run() ima stage 6 (page_gotovo), resume od
+    stage 2 pokreće model, mreža, mape I gotovo stranice — ran ima sve četiri."""
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
@@ -287,8 +286,9 @@ def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: ran.append("p3") or True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: ran.append("p4") or True)
     monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: ran.append("p5") or True)
+    monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: ran.append("p6") or True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ran == ["p3", "p4", "p5"]
+    assert ran == ["p3", "p4", "p5", "p6"]
     assert ws.is_complete(s) is True
 
 
@@ -473,3 +473,54 @@ def test_page_model_full_happy_path(tmp_path, monkeypatch):
     assert saved["provider"] == "ollama"
     assert saved["model"] == pulled[0]
     assert saved["embed_model"] == "emb-model"
+
+
+def test_render_summary_pokazuje_konfigurirano_i_preskoceno(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    s.set_override("model", "model", "qwen2.5:7b")
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+    lines = []
+    wizard.render_summary(s, _Cfg(), out=lines.append)
+    text = "\n".join(lines)
+    assert "qwen2.5:7b" in text
+    assert "https://192.168.1.7:8443" in text
+    assert "Mape" in text            # preskočeno → uputa na Postavke
+    assert "preskočeno" in text
+
+
+def test_page_gotovo_backup_da(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+    made = []
+    monkeypatch.setattr(wizard.backup, "create_backup",
+                        lambda cfg: made.append(1) or
+                        {"name": "x", "path": str(tmp_path / "x.db"), "size": 7})
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader(""), out=lines.append)
+    assert ok is True and made == [1]
+    text = "\n".join(lines)
+    assert ".ollama" in text and "secret" in text
+
+
+def test_page_gotovo_backup_greska_ne_rusi(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+
+    def _boom(cfg):
+        raise RuntimeError("verifikacija pala")
+    monkeypatch.setattr(wizard.backup, "create_backup", _boom)
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("d"), out=lines.append)
+    assert ok is True
+    assert any("ragspine backup" in l for l in lines)
