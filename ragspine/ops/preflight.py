@@ -183,6 +183,43 @@ def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
         return (False, "nije dostupna (servis ne radi ili nije instalirana)")
 
 
+def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) -> bool:
+    """Skini model preko Ollama daemona (POST /api/pull, NDJSON stream).
+    Daemon sam nastavlja djelomicni download (resume) — dovoljno je ponovno pozvati.
+    True na zavrsni status "success"."""
+    import json
+    req = urllib.request.Request(f"{url}/api/pull",
+                                 data=json.dumps({"model": name}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    last_pct = -1
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            for raw in r:
+                try:
+                    ev = json.loads(raw)
+                except ValueError:
+                    continue
+                if ev.get("error"):
+                    out(f"Greska pri skidanju: {ev['error']}")
+                    return False
+                status = ev.get("status", "")
+                total, done = ev.get("total"), ev.get("completed")
+                if total and done is not None:
+                    pct = int(done * 100 / total)
+                    if pct != last_pct:   # ne spamaj isti postotak
+                        out(f"  {status}: {pct}%")
+                        last_pct = pct
+                elif status:
+                    out(f"  {status}")
+                if status == "success":
+                    return True
+    except Exception as e:
+        out(f"Greska pri skidanju modela: {e}")
+        return False
+    out("Skidanje prekinuto prije kraja — pokreni ponovno (nastavlja gdje je stalo).")
+    return False
+
+
 def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
     """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
     import socket

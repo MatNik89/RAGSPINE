@@ -196,3 +196,35 @@ def test_recommend_chat_model_prefers_largest_fitting():
 def test_recommend_chat_model_none_when_nothing_fits():
     fits = pf.model_fits(state={"ram_total_gb": 1.0, "vram_gb": 0.0})
     assert pf.recommend_chat_model(fits) is None
+
+
+def _ndjson_resp(lines):
+    import io, json
+    payload = b"".join(json.dumps(l).encode() + b"\n" for l in lines)
+
+    class _Resp(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    return _Resp(payload)
+
+
+def test_ollama_pull_success_with_progress(monkeypatch):
+    resp = _ndjson_resp([
+        {"status": "pulling manifest"},
+        {"status": "downloading", "total": 100, "completed": 50},
+        {"status": "success"},
+    ])
+    monkeypatch.setattr(pf.urllib.request, "urlopen", lambda *a, **k: resp)
+    lines = []
+    assert pf.ollama_pull("qwen2.5:7b", "http://x", out=lines.append) is True
+    assert any("50%" in l for l in lines)
+
+
+def test_ollama_pull_false_on_error(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("mreza pukla")
+    monkeypatch.setattr(pf.urllib.request, "urlopen", _boom)
+    lines = []
+    assert pf.ollama_pull("qwen2.5:7b", "http://x", out=lines.append) is False
+    assert any("Gre" in l for l in lines)   # "Greska..." poruka, ne traceback
