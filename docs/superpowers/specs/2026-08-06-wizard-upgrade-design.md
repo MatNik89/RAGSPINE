@@ -6,9 +6,18 @@ eksplicitna ponuda — odabrana eksplicitna ponuda).
 ## 1. Problem
 
 Spec `2026-08-05-setup-wizard-design.md` (Stranica 1): „Upgrade: ako DB već postoji →
-detektiraj, ponudi migraciju, ne novi setup." Nije implementirano. Instalacija koja je
-radila PRIJE wizarda ima bazu s adminom, modelom, mrežom... ali bez `setup_complete`
-flaga — `ragspine setup` je danas tjera kroz svih 6 stranica kao da je nova.
+detektiraj, ponudi migraciju, ne novi setup." Nije bilo eksplicitne ponude. Instalacija
+koja je radila PRIJE wizarda ima bazu s adminom, modelom, mrežom... ali bez
+`setup_complete` flaga.
+
+Napomena o interakciji s postojećom migracijom: `_migrate_setup_complete_for_upgrades`
+(`core/spine.py`) već kod otvaranja baze (unutar `init_spine`) tiho postavi
+`setup_complete=true` čim baza ima bar jednog korisnika a flag nedostaje — to se odvije
+PRIJE nego `wizard.run()` uopće krene, pa `_cmd_setup` (`__main__.py`) odmah ispiše
+„Setup je već dovršen" i izađe. Zato eksplicitna ponuda iz ovog dokumenta realno okida
+samo kroz `--reset` (reset se izvodi NAKON `init_spine` u istom procesu, dakle prije nego
+migracija ponovno stigne postaviti flag) — i kroz svaki budući put koji stigne u `run()`
+sa stage 0, korisnicima i bez complete flaga.
 
 ## 2. Što „migracija" znači
 

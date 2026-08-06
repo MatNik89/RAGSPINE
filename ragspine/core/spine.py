@@ -178,7 +178,16 @@ def _migrate_setup_complete_for_upgrades(conn: sqlite3.Connection) -> None:
     Prazna baza (bez korisnika) se NE dira — svježa instalacija i dalje ide kroz
     wizard/onboarding kao i prije. Direktan SQL (ne wizard_state.mark_complete /
     spine.set_override) jer je ovo pozvano iz __init__ dok je write()-lock već
-    držan pa bi ponovni ulaz u self.write() blokirao (lock nije reentrant)."""
+    držan pa bi ponovni ulaz u self.write() blokirao (lock nije reentrant).
+
+    Resume nasuprot legacy: ako postoji config_overrides red module='setup'
+    key='stage', wizard je već pokretan na ovoj bazi (bilo koji stage >= 1
+    znači bar jedan wizard_state.set_stage) — to je nedovršen wizard, ne
+    stara predwizard instalacija, pa se NE smije auto-dovršiti; resume mora
+    ostati moguć u novom procesu. Prihvaćeni rubni slučaj: ako je proces
+    prekinut PRIJE prvog set_stage (nema stage reda), migracija će ovu bazu
+    ipak tretirati kao legacy i postaviti complete=true — obnovljivo kroz
+    `--reset`."""
     has_user = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
     if not has_user:
         return
@@ -186,6 +195,11 @@ def _migrate_setup_complete_for_upgrades(conn: sqlite3.Connection) -> None:
         "SELECT value FROM config_overrides WHERE module='setup' AND key='complete'"
     ).fetchone()
     if row is not None and row["value"] == "true":
+        return
+    has_stage = conn.execute(
+        "SELECT 1 FROM config_overrides WHERE module='setup' AND key='stage'"
+    ).fetchone() is not None
+    if has_stage:
         return
     conn.execute(
         """INSERT INTO config_overrides(module,key,value,source_url,updated_at)

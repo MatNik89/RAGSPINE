@@ -696,7 +696,10 @@ def test_launch_now_edge_oserror_ne_rusi(tmp_path, monkeypatch):
 
 
 def _legacy_spine(tmp_path):
-    """Baza kakvu ostavi instalacija prije wizarda: admin + model + mreža."""
+    """Stanje nakon --reset na već dovršenom sustavu: stage 0, bez complete
+    flaga, admin + model + mreža postoje. (Prava predwizard baza se auto-
+    dovrši migracijom kod otvaranja — spine._migrate_setup_complete_for_upgrades
+    — prije nego run() uopće krene; ovaj fixture modelira jedini realni okidač.)"""
     s = init_spine(str(tmp_path / "t.db"))
     firstrun.create_first_owner(s, "admin", "lozinka123")
     s.set_override("model", "model", "qwen2.5:7b")
