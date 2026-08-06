@@ -45,18 +45,31 @@ WantedBy=multi-user.target
 
 
 def install_service(exe: str, data_dir: str, port: int, *, out=print) -> bool:
-    """Windows: izvrši komande redom (traži admin/UAC konzolu); stani na grešci.
+    """Windows: firewall + ACL se STVARNO izvršavaju; sc.exe create/failure se
+    SAMO ispisuju (ne izvršavaju) jer `ragspine serve` je konzolna aplikacija
+    bez Windows service-protokola — sc.exe create bi kreirao servis koji odmah
+    umire (greška 1053). Vraća False jer servis nije stvarno kreiran.
+    ponytail: pravi Windows servis traži service wrapper (WinSW ili NSSM) koji
+    prevede konzolnu app u SCM protokol — backlog. LocalService + ACL iz ove
+    funkcije i dalje vrijede kad wrapper stigne.
     Drugi OS: ispiši systemd unit + upute, vrati False."""
     if platform.system() != "Windows":
         out("Windows servis je Windows-only. Za systemd (Linux):")
         out(systemd_unit(exe, data_dir))
         out("Spremi u /etc/systemd/system/ragspine.service pa: systemctl enable --now ragspine")
         return False
-    out("Kreiram Windows servis (pokreni iz admin konzole — inače 'pristup odbijen')...")
-    for cmd in service_commands(exe, data_dir, port):
+    create_cmd, failure_cmd, firewall_cmd, icacls_cmd = service_commands(exe, data_dir, port)
+    out("⚠ `ragspine serve` je konzolna aplikacija, ne pravi Windows servis (SCM protokol) —")
+    out("  sc.exe create bi kreirao servis koji odmah padne (greška 1053).")
+    out("  Za pravi servis treba wrapper (WinSW ili NSSM — backlog). Ručne komande:")
+    out("  " + " ".join(create_cmd))
+    out("  " + " ".join(failure_cmd))
+    out("Postavljam firewall pravilo i ACL na podatkovnu mapu...")
+    for cmd in (firewall_cmd, icacls_cmd):
         rc, _o, err = run_isolated(cmd, timeout=60)
         if rc != 0:
             out(f"Greška kod: {' '.join(cmd[:3])}... — {err[:200]}")
             return False
-    out(f"✓ Servis {_SVC} kreiran (autostart + recovery), firewall otvoren, ACL postavljen.")
-    return True
+    out(f"✓ Firewall otvoren (port {port}) i ACL na {data_dir} postavljen. "
+        f"Servis {_SVC} NIJE kreiran — instaliraj wrapper pa ručno pokreni gornje komande.")
+    return False

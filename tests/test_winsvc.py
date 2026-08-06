@@ -28,13 +28,24 @@ def test_service_commands_spaced_paths():
     assert create_cmd[binpath_idx + 1] == "C:/Program Files/rs.exe serve"
 
 
-def test_install_service_windows_executes_all(monkeypatch):
+def test_install_service_windows_skips_sc_executes_firewall_acl(monkeypatch):
+    """sc.exe create/failure se NE izvršavaju (lažni uspjeh — Nalaz a); samo se
+    ispisuju kao ručne komande + napomena o service wrapperu. Firewall i ACL
+    se stvarno izvršavaju preko run_isolated. Nema pravog servisa -> False."""
     calls = []
     monkeypatch.setattr(winsvc.platform, "system", lambda: "Windows")
     monkeypatch.setattr(winsvc, "run_isolated",
                         lambda cmd, timeout=60, **kw: calls.append(cmd) or (0, "", ""))
-    assert winsvc.install_service("C:/rs.exe", "C:/data", 8443, out=lambda *_: None) is True
-    assert len(calls) == len(winsvc.service_commands("C:/rs.exe", "C:/data", 8443))
+    lines = []
+    result = winsvc.install_service("C:/rs.exe", "C:/data", 8443, out=lines.append)
+    assert result is False
+    assert all("sc.exe" not in " ".join(c) for c in calls)
+    assert len(calls) == 2   # samo netsh + icacls
+    assert any("advfirewall" in " ".join(c) for c in calls)
+    assert any("icacls" in " ".join(c) for c in calls)
+    flat = "\n".join(lines)
+    assert "sc.exe create" in flat
+    assert "WinSW" in flat or "NSSM" in flat
 
 
 def test_install_service_stops_on_error(monkeypatch):
@@ -42,12 +53,12 @@ def test_install_service_stops_on_error(monkeypatch):
 
     def _run(cmd, timeout=60, **kw):
         calls.append(cmd)
-        return (1 if len(calls) == 2 else 0, "", "pristup odbijen")
+        return (1, "", "pristup odbijen")
     monkeypatch.setattr(winsvc.platform, "system", lambda: "Windows")
     monkeypatch.setattr(winsvc, "run_isolated", _run)
     lines = []
     assert winsvc.install_service("C:/rs.exe", "C:/data", 8443, out=lines.append) is False
-    assert len(calls) == 2                          # stao na grešci
+    assert len(calls) == 1                          # stao na grešci (netsh, prvi izvršeni)
     assert any("pristup odbijen" in l for l in lines)
 
 
