@@ -428,6 +428,12 @@ def create_app(spine, cfg) -> FastAPI:
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
+    # DB-odabir modela (wizard/postavke) mora vrijediti i izvan LLM request-puta —
+    # embed._get_model() čita globalni get_config() izravno (nema pristup spineu),
+    # pa se override primijeni jednom ovdje. Idempotentno: model_settings.apply na
+    # već-primijenjenom cfg-u je no-op ako DB izbor nije promijenjen otad.
+    from ragspine.config import set_config
+    set_config(model_settings.apply(spine, cfg))
     tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
     limiter = RateLimiter()
     _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba

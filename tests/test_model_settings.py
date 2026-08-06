@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from ragspine.business import model_settings
+from ragspine.config import get_config
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
 from ragspine.ops import wizard_state as ws
@@ -76,6 +77,16 @@ def test_apply_ollama_clears_key(spine, cfg):
 
 def test_apply_no_selection_returns_cfg_unchanged(spine, cfg):
     assert model_settings.apply(spine, cfg) is cfg
+
+
+def test_startup_applies_embed_model_override_to_global_config(spine, cfg):
+    # wizard/postavke spremaju embed_model preko model_settings.save; embed._get_model()
+    # čita globalni get_config() izravno (nema pristup spineu) — pa create_app mora
+    # primijeniti DB-odabir na global config pri konstrukciji, inače vektorska pretraga
+    # tiho koristi env-default model.
+    model_settings.save(spine, "ollama", embed_model="BAAI/bge-m3")
+    create_app(spine, cfg)
+    assert get_config().embed_model == "BAAI/bge-m3"
 
 
 # ---------- endpoints + UI ----------
