@@ -19,6 +19,8 @@ import sys
 import time
 import urllib.request
 
+from ragspine.core.subproc import run_isolated
+
 # --- stanje računala (cross-OS, bez nove ovisnosti) ---
 
 
@@ -220,6 +222,45 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
     return False
 
 
+_LLMFIT_CHAT_CATS = {"Chat", "Coding", "Reasoning", "General"}
+_LLMFIT_MAX_ROWS = 12
+
+
+def llmfit_models(cfg=None) -> list[dict] | None:
+    """Modeli po llmfitu: on detektira hardver i izračuna najbolju kvantizaciju.
+    Vraćamo samo Ollama-pokretljive chat modele koji stanu (Good/Marginal),
+    sortirane po score-u. None kad llmfit nije dostupan ili izlaz ne valja."""
+    import json
+    try:
+        rc, out, _err = run_isolated([sys.executable, "-m", "llmfit", "--json"],
+                                     timeout=60)
+        if rc != 0:
+            return None
+        data = json.loads(out)
+    except Exception:
+        return None
+    rows = []
+    for m in data.get("models", []):
+        if not m.get("ollama_name"):
+            continue
+        if m.get("category") not in _LLMFIT_CHAT_CATS:
+            continue
+        if m.get("fit_label") not in ("Good", "Marginal"):
+            continue
+        rows.append({
+            "name": m.get("name", ""), "ollama_name": m["ollama_name"],
+            "category": m.get("category", ""), "fit_label": m["fit_label"],
+            "best_quant": m.get("best_quant", ""),
+            "memory_gb": float(m.get("memory_required_gb") or 0.0),
+            "tps": float(m.get("estimated_tps") or 0.0),
+            "score": float(m.get("score") or 0.0),
+            "use_case": m.get("use_case") or "",
+            "params": m.get("parameter_count") or "",
+        })
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return rows[:_LLMFIT_MAX_ROWS]
+
+
 def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
     """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
     import socket
@@ -237,7 +278,6 @@ def _ip_mode() -> str:
     if platform.system() != "Windows":
         return "unknown"
     try:
-        from ragspine.core.subproc import run_isolated
         rc, out, _ = run_isolated(["netsh", "interface", "ip", "show", "config"], timeout=5)
         for line in out.lower().splitlines():
             normalized = " ".join(line.split())

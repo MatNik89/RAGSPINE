@@ -228,3 +228,45 @@ def test_ollama_pull_false_on_error(monkeypatch):
     lines = []
     assert pf.ollama_pull("qwen2.5:7b", "http://x", out=lines.append) is False
     assert any("Gre" in l for l in lines)   # "Greska..." poruka, ne traceback
+
+
+def _llmfit_json(models):
+    import json
+    return json.dumps({"models": models, "system": {}})
+
+
+def _lm(name, ollama, cat="Chat", fit="Good", score=50.0):
+    return {"name": name, "ollama_name": ollama, "category": cat,
+            "fit_label": fit, "best_quant": "Q4_K_M", "memory_required_gb": 4.7,
+            "estimated_tps": 12.0, "score": score, "use_case": "chat",
+            "parameter_count": "7B"}
+
+
+def test_llmfit_models_filters_sorts_caps(monkeypatch):
+    models = [
+        _lm("hf/a", "a:7b", score=60.0),
+        _lm("hf/b", None),                             # bez ollama_name -> van
+        _lm("hf/c", "c:3b", cat="Embedding"),          # kriva kategorija -> van
+        _lm("hf/d", "d:14b", fit="Too Tight"),         # ne stane -> van
+        _lm("hf/e", "e:7b", cat="Reasoning", score=90.0),
+    ] + [_lm(f"hf/x{i}", f"x{i}:1b", score=float(i)) for i in range(15)]
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda cmd, timeout=60: (0, _llmfit_json(models), ""))
+    rows = pf.llmfit_models()
+    assert rows is not None
+    assert len(rows) == 12                              # cap
+    assert rows[0]["ollama_name"] == "e:7b"             # najveci score prvi
+    assert rows[1]["ollama_name"] == "a:7b"
+    names = {r["ollama_name"] for r in rows}
+    assert None not in names and "c:3b" not in names and "d:14b" not in names
+    assert rows[0]["memory_gb"] == 4.7 and rows[0]["tps"] == 12.0
+
+
+def test_llmfit_models_none_when_binary_fails(monkeypatch):
+    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60: (1, "", "boom"))
+    assert pf.llmfit_models() is None
+
+
+def test_llmfit_models_none_on_garbage(monkeypatch):
+    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60: (0, "nije json", ""))
+    assert pf.llmfit_models() is None
