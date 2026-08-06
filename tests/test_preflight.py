@@ -378,6 +378,30 @@ def test_port_free_true_and_false():
         srv.close()
 
 
+def test_port_free_windows_skips_reuseaddr(monkeypatch):
+    """Nalaz b: SO_REUSEADDR na Windowsu ima drugu semantiku (dopušta bind na
+    zauzet port) — Windows granom se ono NE smije postaviti."""
+    calls = []
+
+    class _FakeSock:
+        def setsockopt(self, level, optname, value):
+            calls.append(optname)
+
+        def bind(self, addr):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(pf.os, "name", "nt")
+    monkeypatch.setattr(pf.socket, "socket", lambda *a, **k: _FakeSock())
+    assert pf.port_free("127.0.0.1", 12345) is True
+    assert pf.socket.SO_REUSEADDR not in calls
+
+
 def test_install_via_winget_windows_path(monkeypatch):
     calls = []
     monkeypatch.setattr(pf.platform, "system", lambda: "Windows")

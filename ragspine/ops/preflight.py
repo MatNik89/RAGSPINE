@@ -300,10 +300,18 @@ def local_ip() -> str:
 
 
 def port_free(host: str, port: int) -> bool:
-    """True kad se port može bindati (slobodan)."""
+    """True kad se port može bindati (slobodan).
+    SO_REUSEADDR na Windowsu ima drugu semantiku nego na POSIX-u — dopušta
+    bind na već zauzet port, pa bi provjera uvijek prošla (Codex nalaz).
+    Windows: SO_EXCLUSIVEADDRUSE ako postoji, inače bez opcije reuse-a."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if os.name != "nt":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            else:
+                excl = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+                if excl is not None:
+                    s.setsockopt(socket.SOL_SOCKET, excl, 1)
             s.bind((host, port))
             return True
     except OSError:
