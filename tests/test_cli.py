@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ragspine.__main__ import main
 from ragspine.ops import doctor
 
@@ -45,3 +47,16 @@ def test_net_overrides_apply(tmp_path, monkeypatch):
     s.set_override("net", "key_path", "/x/key.pem")
     host, port, cert, key = _net_overrides(s, cfg)
     assert (host, port, cert, key) == ("0.0.0.0", 8443, "/x/cert.pem", "/x/key.pem")
+
+
+def test_serve_warns_when_cert_key_missing(cfg, monkeypatch, capsys):
+    """Nalaz c: cert/key overridi postavljeni ali datoteke ne postoje -> mora
+    upozoriti prije tihog pada na HTTP (a ne samo šutke nastaviti)."""
+    import uvicorn
+    from ragspine.core.spine import init_spine
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    s = init_spine(cfg.db_path)
+    s.set_override("net", "cert_path", str(Path(cfg.data_dir) / "nope.pem"))
+    s.set_override("net", "key_path", str(Path(cfg.data_dir) / "nope-key.pem"))
+    assert main(["serve"]) == 0
+    assert "bez HTTPS" in capsys.readouterr().out

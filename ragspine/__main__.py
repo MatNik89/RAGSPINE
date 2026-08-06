@@ -34,8 +34,11 @@ def _cmd_serve(args) -> int:
     # server_header=False: ne curi "uvicorn" verziju; middleware već šalje Server: RAGSPINE
     host, port, cert, key = _net_overrides(spine, cfg)
     ssl_kw = {}
-    if cert and key and Path(cert).exists() and Path(key).exists():
-        ssl_kw = {"ssl_certfile": cert, "ssl_keyfile": key}
+    if cert and key:
+        if Path(cert).exists() and Path(key).exists():
+            ssl_kw = {"ssl_certfile": cert, "ssl_keyfile": key}
+        else:
+            print(f"⚠ Cert/key ne postoje ({cert}, {key}) — pokrećem bez HTTPS-a.")
     uvicorn.run(create_app(spine, cfg), host=host, port=port,
                 server_header=False, **ssl_kw)
     return 0
