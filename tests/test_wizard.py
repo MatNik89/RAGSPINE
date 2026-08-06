@@ -104,3 +104,36 @@ def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
     assert ws.get_stage(spine) == 2
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
+
+
+def test_choose_embed_model_bge_when_ram_allows():
+    st = {"ram_total_gb": 16.0}
+    assert wizard.choose_embed_model(st, "mali-default") == "BAAI/bge-m3"
+
+
+def test_choose_embed_model_fallback_on_small_ram():
+    st = {"ram_total_gb": 2.0}   # 1.2/2.0 = 60% -> tight, ne "fits"
+    assert wizard.choose_embed_model(st, "mali-default") == "mali-default"
+
+
+def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    from ragspine.config import Config, set_config
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    cfg = Config.from_env()
+    set_config(cfg)
+    calls = []
+
+    def _fake_download(c):
+        calls.append(c.embed_model)
+        if c.embed_model == "BAAI/bge-m3":
+            return {"ok": False, "error": "ne stane"}
+        return {"ok": True, "model": c.embed_model, "dim": 384}
+
+    monkeypatch.setattr(wizard, "_download_embed", _fake_download)
+    monkeypatch.setattr(wizard.preflight, "system_state",
+                        lambda c=None: {"ram_total_gb": 16.0})
+    got = wizard.setup_embedding(s, cfg, out=lambda *_: None)
+    assert got == cfg.embed_model          # fallback na default
+    assert calls == ["BAAI/bge-m3", cfg.embed_model]
+    set_config(None)

@@ -52,13 +52,14 @@ def _get_model():
     return _model
 
 
-def download_model() -> dict:
+def download_model(cfg=None) -> dict:
     """Eksplicitni warmup: povuci embedding model (jednom, svjesno) da vektorska
     pretraga proradi. Bez ovoga _get_model radi local_files_only i tiho no-op-a.
     Vraća {ok, model, dim} ili {ok:False, error}."""
     if not available():
         return {"ok": False, "error": "fastembed/sqlite-vec nisu instalirani (pip install .[full])"}
-    cfg = get_config()
+    if cfg is None:
+        cfg = get_config()
     global _model, _model_failed
     try:
         from fastembed import TextEmbedding

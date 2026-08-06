@@ -1,9 +1,13 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
 P1: Stranica 1 (preduvjeti) + Stranica 2 (operater). Ostale stranice u P2-P4."""
+import dataclasses
+
 from ragspine.ops import preflight, tui, wizard_state
 from ragspine.web import firstrun
 
 _MIN_PW = 8
+_BGE_M3 = "BAAI/bge-m3"
+_BGE_M3_GB = 1.2   # fp16, priblizno (kao MODEL_CATALOG)
 
 
 def render_preflight(reqs, *, out=print) -> bool:
@@ -62,6 +66,35 @@ def page_operater(spine, *, input_fn=input, out=print) -> bool:
         return False
     out(f"Administrator '{username}' kreiran.")
     return True
+
+
+def _download_embed(cfg):
+    """Indirekcija radi testabilnosti (embed vuce fastembed tek pri pozivu)."""
+    from ragspine.rag import embed
+    return embed.download_model(cfg)
+
+
+def choose_embed_model(state: dict, default_model: str) -> str:
+    """bge-m3 kad KOMOTNO stane u ukupni RAM; inace ostavi default (mali)."""
+    total = state.get("ram_total_gb") or 0.0
+    if preflight.fit_pill(_BGE_M3_GB, total) == "fits":
+        return _BGE_M3
+    return default_model
+
+
+def setup_embedding(spine, cfg, *, out=print) -> str | None:
+    """Odaberi embedding po RAM-u, skini i VERIFICIRAJ; na gresku fallback na
+    cfg.embed_model. Vrati ime verificiranog modela ili None (ne blokira setup)."""
+    chosen = choose_embed_model(preflight.system_state(cfg), cfg.embed_model)
+    for candidate in dict.fromkeys([chosen, cfg.embed_model]):   # bez duplikata
+        out(f"Embedding model: {candidate} — skidam i provjeravam...")
+        res = _download_embed(dataclasses.replace(cfg, embed_model=candidate))
+        if res.get("ok"):
+            out(f"  ✓ {candidate} (dim {res.get('dim')})")
+            return candidate
+        out(f"  ⚠ {candidate}: {res.get('error', 'nepoznata greska')}")
+    out("Embedding nije skinut — RAG indeksiranje nece raditi dok se ne skine u Postavkama.")
+    return None
 
 
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
