@@ -217,18 +217,24 @@ def test_self_test_retries_then_user_gives_up(tmp_path, monkeypatch):
     assert len(calls) == 3
 
 
-def _fits_16gb():
-    return wizard.preflight.model_fits(state={"ram_total_gb": 16.0, "vram_gb": 0.0})
+def _llmfit_rows():
+    return [
+        {"name": "hf/q7", "ollama_name": "qwen2.5:7b", "category": "Chat",
+         "fit_label": "Good", "best_quant": "Q4_K_M", "memory_gb": 4.7,
+         "tps": 11.0, "score": 90.0, "use_case": "opći asistent", "params": "7B"},
+        {"name": "hf/l3", "ollama_name": "llama3.2:3b", "category": "Chat",
+         "fit_label": "Marginal", "best_quant": "Q4_K_M", "memory_gb": 2.0,
+         "tps": 20.0, "score": 70.0, "use_case": "brzi sažeci", "params": "3B"},
+    ]
 
 
-def test_render_model_catalog_marks_recommendation():
-    fits = _fits_16gb()
-    rec = wizard.preflight.recommend_chat_model(fits)
+def test_render_llmfit_models_marks_first_as_recommendation():
     lines = []
-    names = wizard.render_model_catalog(fits, rec, out=lines.append)
-    assert rec in names
+    names = wizard.render_llmfit_models(_llmfit_rows(), out=lines.append)
+    assert names == ["qwen2.5:7b", "llama3.2:3b"]
     assert any("PREPORUKA" in l for l in lines)
-    assert any("🟢" in l or "🟡" in l for l in lines)
+    assert any("🟢" in l for l in lines) and any("🟡" in l for l in lines)
+    assert any("tok/s" in l for l in lines)
 
 
 def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
@@ -241,14 +247,28 @@ def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
     assert ok is True
 
 
+def test_page_model_skip_when_llmfit_unavailable(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
+    monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda c=None: None)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "def-emb"
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader(), out=lambda *_: None)
+    assert ok is True    # llmfit nedostupan -> postavi kasnije, ne zaglavi
+
+
 def test_page_model_full_happy_path(tmp_path, monkeypatch):
     from ragspine.core.spine import init_spine
     from ragspine.business import model_settings
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
-    monkeypatch.setattr(wizard.preflight, "system_state",
-                        lambda c=None: {"ram_total_gb": 16.0, "vram_gb": 0.0})
+    monkeypatch.setattr(wizard.preflight, "llmfit_models",
+                        lambda c=None: _llmfit_rows())
     pulled = []
     monkeypatch.setattr(wizard.preflight, "ollama_pull",
                         lambda name, url=None, out=print: pulled.append(name) or True)
@@ -261,7 +281,7 @@ def test_page_model_full_happy_path(tmp_path, monkeypatch):
     # "" = prihvati default (preporuceni model je predodabran u prompt_choice)
     ok = wizard.page_model(s, _Cfg(), input_fn=_reader(""), out=lambda *_: None)
     assert ok is True
-    assert len(pulled) == 1
+    assert pulled == ["qwen2.5:7b"]
     saved = model_settings.get(s)
     assert saved["provider"] == "ollama"
     assert saved["model"] == pulled[0]

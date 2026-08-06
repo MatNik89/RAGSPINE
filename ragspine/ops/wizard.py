@@ -141,22 +141,19 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
     return None
 
 
-_PILL_GLYPH = {"fits": "🟢", "tight": "🟡", "too_big": "🔴", "unknown": "?"}
+_PILL_GLYPH = {"Good": "🟢", "Marginal": "🟡", "Too Tight": "🔴"}
 
 
-def render_model_catalog(fits, recommended, *, out=print) -> list[str]:
-    """Ispiši instalabilne chat modele; vrati imena u prikazanom redoslijedu."""
+def render_llmfit_models(rows, *, out=print) -> list[str]:
+    """Ispiši llmfit retke (već filtrirane i sortirane po score-u); vrati
+    ollama imena u prikazanom redoslijedu. Prvi = ⭐ preporuka."""
     names = []
-    for f in fits:
-        if f["role"] != "chat" or not f["installable"]:
-            continue
-        q = f["best_quant"] or f["tight_quant"]
-        qinfo = next(x for x in f["quants"] if x["quant"] == q)
-        pill = _PILL_GLYPH.get(qinfo["pill"], "?")
-        gpu = " [GPU]" if qinfo["gpu_ready"] else ""
-        star = "  ⭐ PREPORUKA" if f["name"] == recommended else ""
-        out(f"  {pill} {f['name']} ({f['params']}, {q} ~{qinfo['size_gb']} GB){gpu} — {f['desc']}{star}")
-        names.append(f["name"])
+    for i, r in enumerate(rows):
+        pill = _PILL_GLYPH.get(r["fit_label"], "?")
+        star = "  ⭐ PREPORUKA" if i == 0 else ""
+        out(f"  {pill} {r['ollama_name']} ({r['params']}, {r['best_quant']} "
+            f"~{r['memory_gb']:.1f} GB, ~{r['tps']:.0f} tok/s) — {r['use_case']}{star}")
+        names.append(r["ollama_name"])
     return names
 
 
@@ -182,18 +179,16 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
         out(f"⚠ Ollama verzija {ver or 'nepoznata'} < {preflight._OLLAMA_FLOOR} — preporučen upgrade "
             "(winget upgrade Ollama.Ollama). Nastavljam.")
 
-    fits = preflight.model_fits(cfg)
-    rec = preflight.recommend_chat_model(fits)
-    out("Dostupni modeli (za ovaj hardver):")
-    names = render_model_catalog(fits, rec, out=out)
-    if not names:
-        out("Nijedan model ne stane u RAM ovog računala — postavi kasnije (Postavke).")
+    rows = preflight.llmfit_models(cfg)
+    if not rows:
+        out("llmfit nije dostupan ili nema modela koji stanu — model postavi kasnije u Postavkama.")
         return True
+    out("Modeli za ovaj hardver (llmfit — kvantizacija izračunata po stroju):")
+    names = render_llmfit_models(rows, out=out)
     choices = names + ["Preskoči — postavi kasnije"]
-    default_idx = names.index(rec) if rec in names else 0
-    idx = tui.prompt_choice("Odaberi JEDAN model:", choices, default=default_idx,
+    idx = tui.prompt_choice("Odaberi JEDAN model:", choices, default=0,
                             input_fn=input_fn, out=out)
-    if idx == len(names):   # skip opcija
+    if idx == len(names):
         return True
     model = names[idx]
 
