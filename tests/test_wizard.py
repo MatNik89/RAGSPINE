@@ -621,3 +621,75 @@ def test_page_gotovo_backup_greska_ne_rusi(tmp_path, monkeypatch):
     ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("d"), out=lines.append)
     assert ok is True
     assert any("ragspine backup" in l for l in lines)
+
+
+def test_page_gotovo_ollama_putanja_windows(tmp_path, monkeypatch):
+    """page_gotovo prikazuje putanju za Ollama modele — na Windowsu
+    %USERPROFILE%\\.ollama\\models."""
+    from pathlib import PosixPath
+    s = init_spine(str(tmp_path / "t.db"))
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+
+    monkeypatch.setattr(wizard.os, "name", "nt")
+    monkeypatch.setattr(wizard, "Path", PosixPath)
+    monkeypatch.setattr(wizard.backup, "create_backup",
+                        lambda cfg: {"name": "x", "path": str(tmp_path / "x.db"), "size": 7})
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("n"), out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert r"%USERPROFILE%\.ollama\models" in text
+
+
+def test_page_gotovo_ollama_putanja_posix(tmp_path, monkeypatch):
+    """page_gotovo prikazuje putanju za Ollama modele — na POSIX-u
+    ~/.ollama/models."""
+    from pathlib import PosixPath
+    s = init_spine(str(tmp_path / "t.db"))
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+
+    monkeypatch.setattr(wizard.os, "name", "posix")
+    monkeypatch.setattr(wizard, "Path", PosixPath)
+    monkeypatch.setattr(wizard.backup, "create_backup",
+                        lambda cfg: {"name": "x", "path": str(tmp_path / "x.db"), "size": 7})
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("n"), out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert "~/.ollama/models" in text
+
+
+def test_launch_now_edge_oserror_ne_rusi(tmp_path, monkeypatch):
+    """launch_now — OSError na drugom popenu (Edge) ne smije propagirati.
+    Očekuj da se prvi popen (serve) uspješno pokrene, drugi (Edge) padne,
+    izlaz sadrži 'Server pokrenut' i 'Otvori ručno' s URL-om."""
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
+
+    calls = []
+
+    def _popen_with_edge_fail(cmd, **k):
+        calls.append(cmd)
+        # Prvi poziv (serve) uspješan, drugi (Edge) pada s OSError
+        if len(calls) == 2:
+            raise OSError("msedge nije dostupna")
+
+    lines = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lines.append,
+                      popen=_popen_with_edge_fail)
+
+    assert len(calls) == 2
+    assert calls[0][-1] == "serve"
+    assert calls[1][:4] == ["cmd", "/c", "start", ""]
+    text = "\n".join(lines)
+    assert "Server pokrenut" in text
+    assert "Otvori ručno u pregledniku" in text
+    assert "192.168.1.7:8443" in text
