@@ -27,12 +27,19 @@ function Find-Python {
     @{ exe = "python";  args = @() },
     @{ exe = "python3"; args = @() }
   )
-  foreach ($c in $cands) {
-    if (Get-Command $c.exe -ErrorAction SilentlyContinue) {
-      & $c.exe @($c.args) -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)" 2>$null
-      if ($LASTEXITCODE -eq 0) { return $c }
+  # PS 5.1 + EAP=Stop: stderr nativnog programa kroz 2>$null postane
+  # TERMINIRAJUCA greska (py.exe "No suitable Python runtime found" za
+  # neinstaliranu verziju ubije petlju umjesto da proba sljedeceg kandidata)
+  # — zato probe vrtimo pod EAP=Continue (E2E nalaz, stroj Nick).
+  $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+  try {
+    foreach ($c in $cands) {
+      if (Get-Command $c.exe -ErrorAction SilentlyContinue) {
+        & $c.exe @($c.args) -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) { return $c }
+      }
     }
-  }
+  } finally { $ErrorActionPreference = $eap }
   return $null
 }
 $py = Find-Python
@@ -61,7 +68,11 @@ Write-Host "Instaliram RAGSPINE (.[full]) — moze potrajati…"
 Write-Host "✓ Instalirano"
 
 # --- 4. seed + (opcijski) embedding model ---
-& $ragspine setup 2>$null | Out-Null   # seed baze; ignoriramo izlazni kod (idempotentno)
+# seed baze; ignoriramo izlazni kod (idempotentno). EAP=Continue iz istog
+# razloga kao u Find-Python (stderr + 2>$null = terminirajuca greska u 5.1).
+$eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+& $ragspine setup 2>$null | Out-Null
+$ErrorActionPreference = $eap
 if ($env:RAGSPINE_SKIP_MODEL -ne "1") {
   Write-Host "Povlacim embedding model (jednokratno ~220MB; preskoci s `$env:RAGSPINE_SKIP_MODEL=1)…"
   & $ragspine setup --download-models
