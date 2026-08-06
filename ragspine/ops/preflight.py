@@ -14,7 +14,10 @@ registryja kad zatreba.
 """
 import os
 import shutil
+import subprocess
 import sys
+import time
+import urllib.request
 
 # --- stanje računala (cross-OS, bez nove ovisnosti) ---
 
@@ -126,10 +129,53 @@ def _status(ok: bool, warn: bool = False) -> str:
     return "ok" if ok else ("warn" if warn else "fail")
 
 
+def ollama_version(url: str = "http://127.0.0.1:11434") -> str | None:
+    """GET /api/version -> "0.5.4" ili None. Ne baca."""
+    import json
+    try:
+        with urllib.request.urlopen(f"{url}/api/version", timeout=3) as r:
+            return json.loads(r.read()).get("version") or None
+    except Exception:
+        return None
+
+
+_OLLAMA_FLOOR = "0.5.0"
+
+
+def ollama_floor_ok(version: str | None, floor: str = _OLLAMA_FLOOR) -> bool:
+    """Tuple-usporedba "0.5.4" >= "0.5.0". Neparsabilno/None -> False."""
+    if not version:
+        return False
+    try:
+        v = tuple(int(x) for x in version.split("-")[0].split("."))
+        f = tuple(int(x) for x in floor.split("."))
+        return v >= f
+    except ValueError:
+        return False
+
+
+def start_ollama(wait_s: float = 8.0, url: str = "http://127.0.0.1:11434") -> bool:
+    """Pokusaj pokrenuti `ollama serve` detached pa cekaj da /api/tags prodise.
+    False kad binary ne postoji ili servis ne prodise u wait_s."""
+    try:
+        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    except OSError:
+        return False
+    deadline = time.monotonic() + wait_s
+    while time.monotonic() < deadline:
+        ok, _ = ollama_ready(url)
+        if ok:
+            return True
+        time.sleep(0.25)
+    ok, _ = ollama_ready(url)
+    return ok
+
+
 def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
     """200 na /api/tags = servis radi. Ne oslanja se na `ollama --version`
     (hermes: instalirana ali ne startana je čest slučaj)."""
-    import urllib.request
     try:
         with urllib.request.urlopen(f"{url}/api/tags", timeout=3) as r:
             return (r.status == 200, "servis radi")

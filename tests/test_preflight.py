@@ -129,3 +129,44 @@ def test_preflight_route_admin_only(spine, cfg):
     add_user(spine, "boris", "pw", "radnik")
     wtok = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
     assert c.get("/preflight", headers={"Authorization": f"Bearer {wtok}"}).status_code == 403
+
+
+def test_ollama_version_parses(monkeypatch):
+    import io, json
+
+    class _Resp(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(pf.urllib.request, "urlopen",
+                        lambda *a, **k: _Resp(json.dumps({"version": "0.5.4"}).encode()))
+    assert pf.ollama_version("http://x") == "0.5.4"
+
+
+def test_ollama_version_none_on_error(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("nema servisa")
+    monkeypatch.setattr(pf.urllib.request, "urlopen", _boom)
+    assert pf.ollama_version("http://x") is None
+
+
+def test_ollama_floor_ok():
+    assert pf.ollama_floor_ok("0.5.0") is True
+    assert pf.ollama_floor_ok("0.12.1") is True
+    assert pf.ollama_floor_ok("0.4.9") is False
+    assert pf.ollama_floor_ok(None) is False
+    assert pf.ollama_floor_ok("čudno") is False
+
+
+def test_start_ollama_returns_true_when_service_comes_up(monkeypatch):
+    monkeypatch.setattr(pf.subprocess, "Popen", lambda *a, **k: object())
+    monkeypatch.setattr(pf, "ollama_ready", lambda url=None: (True, "servis radi"))
+    assert pf.start_ollama(wait_s=0.1) is True
+
+
+def test_start_ollama_false_when_binary_missing(monkeypatch):
+    def _boom(*a, **k):
+        raise FileNotFoundError("ollama")
+    monkeypatch.setattr(pf.subprocess, "Popen", _boom)
+    assert pf.start_ollama(wait_s=0.1) is False
