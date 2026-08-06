@@ -160,10 +160,9 @@ def test_choose_embed_model_fallback_on_small_ram():
 
 def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
-    from ragspine.config import Config, set_config
+    from ragspine.config import Config
     monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
     cfg = Config.from_env()
-    set_config(cfg)
     calls = []
 
     def _fake_download(c):
@@ -178,7 +177,6 @@ def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
     got = wizard.setup_embedding(s, cfg, out=lambda *_: None)
     assert got == cfg.embed_model          # fallback na default
     assert calls == ["BAAI/bge-m3", cfg.embed_model]
-    set_config(None)
 
 
 class _FakeRes:

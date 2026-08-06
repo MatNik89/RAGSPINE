@@ -10,7 +10,7 @@ from ragspine.web import firstrun
 
 _MIN_PW = 8
 _BGE_M3 = "BAAI/bge-m3"
-_BGE_M3_GB = 1.2   # fp16, priblizno (kao MODEL_CATALOG)
+_BGE_M3_GB = 1.2   # fp16, približno (kao MODEL_CATALOG)
 
 
 def render_preflight(reqs, *, out=print) -> bool:
@@ -72,7 +72,7 @@ def page_operater(spine, *, input_fn=input, out=print) -> bool:
 
 
 def _download_embed(cfg):
-    """Indirekcija radi testabilnosti (embed vuce fastembed tek pri pozivu)."""
+    """Indirekcija radi testabilnosti (embed vuče fastembed tek pri pozivu)."""
     from ragspine.rag import embed
     return embed.download_model(cfg)
 
@@ -82,7 +82,7 @@ _SELF_TEST_PROMPT = "Odgovori točno: OK RAGSPINE"
 
 def _llm_complete(spine, cfg, prompt: str):
     """Indirekcija radi testabilnosti; LLMClient ima vlastiti timeout (120 s)
-    koji pokriva i cold-load vecih modela."""
+    koji pokriva i cold-load većih modela."""
     from ragspine.business import model_settings
     from ragspine.core.llm import LLMClient
     return LLMClient(model_settings.apply(spine, cfg)).complete(
@@ -91,35 +91,35 @@ def _llm_complete(spine, cfg, prompt: str):
 
 def self_test(spine, cfg, *, input_fn=input, out=print, retries: int = 3) -> bool:
     """Kratki test odabranog modela. Uspjeh = ne-prazan odgovor unutar timeouta.
-    Regex "OK RAGSPINE" = soft-check (upozorenje). Kvar ne rusi setup."""
+    Regex "OK RAGSPINE" = soft-check (upozorenje). Kvar ne ruši setup."""
     for attempt in range(1, retries + 1):
-        out(f"Self-test modela (pokusaj {attempt}/{retries}; prvi odziv zna trajati i minutu)...")
+        out(f"Self-test modela (pokušaj {attempt}/{retries}; prvi odziv zna trajati i minutu)...")
         t0 = time.monotonic()
         try:
             res = _llm_complete(spine, cfg, _SELF_TEST_PROMPT)
-        except (LLMError, LLMUnavailable, Exception) as e:
+        except Exception as e:
             out(f"  ✗ {e}")
             if attempt < retries and tui.prompt_yes_no(
-                    "Pokusaj ponovno?", default=True, input_fn=input_fn, out=out):
+                    "Pokušaj ponovno?", default=True, input_fn=input_fn, out=out):
                 continue
             return False
         text = (getattr(res, "text", "") or "").strip()
         if not text:
             out("  ✗ prazan odgovor")
             if attempt < retries and tui.prompt_yes_no(
-                    "Pokusaj ponovno?", default=True, input_fn=input_fn, out=out):
+                    "Pokušaj ponovno?", default=True, input_fn=input_fn, out=out):
                 continue
             return False
         elapsed = time.monotonic() - t0
         out(f"  ✓ model odgovara ({elapsed:.1f} s)")
         if not re.search(r"OK RAGSPINE", text, re.IGNORECASE):
-            out("  ⚠ upozorenje: odgovor ne sadrzi 'OK RAGSPINE' — model radi, ali slabo slijedi upute.")
+            out("  ⚠ upozorenje: odgovor ne sadrži 'OK RAGSPINE' — model radi, ali slabo slijedi upute.")
         return True
     return False
 
 
 def choose_embed_model(state: dict, default_model: str) -> str:
-    """bge-m3 kad KOMOTNO stane u ukupni RAM; inace ostavi default (mali)."""
+    """bge-m3 kad KOMOTNO stane u ukupni RAM; inače ostavi default (mali)."""
     total = state.get("ram_total_gb") or 0.0
     if preflight.fit_pill(_BGE_M3_GB, total) == "fits":
         return _BGE_M3
@@ -127,7 +127,7 @@ def choose_embed_model(state: dict, default_model: str) -> str:
 
 
 def setup_embedding(spine, cfg, *, out=print) -> str | None:
-    """Odaberi embedding po RAM-u, skini i VERIFICIRAJ; na gresku fallback na
+    """Odaberi embedding po RAM-u, skini i VERIFICIRAJ; na grešku fallback na
     cfg.embed_model. Vrati ime verificiranog modela ili None (ne blokira setup)."""
     chosen = choose_embed_model(preflight.system_state(cfg), cfg.embed_model)
     for candidate in dict.fromkeys([chosen, cfg.embed_model]):   # bez duplikata
@@ -136,8 +136,8 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
         if res.get("ok"):
             out(f"  ✓ {candidate} (dim {res.get('dim')})")
             return candidate
-        out(f"  ⚠ {candidate}: {res.get('error', 'nepoznata greska')}")
-    out("Embedding nije skinut — RAG indeksiranje nece raditi dok se ne skine u Postavkama.")
+        out(f"  ⚠ {candidate}: {res.get('error', 'nepoznata greška')}")
+    out("Embedding nije skinut — RAG indeksiranje neće raditi dok se ne skine u Postavkama.")
     return None
 
 
@@ -162,7 +162,7 @@ def render_model_catalog(fits, recommended, *, out=print) -> list[str]:
 
 def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 3: Ollama spremnost -> katalog -> JEDAN model -> pull -> spremi
-    -> embedding -> self-test. Skip-grana vraca True (spec: ne zaglavi)."""
+    -> embedding -> self-test. Skip-grana vraća True (spec: ne zaglavi)."""
     tui.print_header("3/6  Model (LLM)", out=out)
     url = getattr(cfg, "ollama_url", "http://127.0.0.1:11434")
 
@@ -179,7 +179,7 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
 
     ver = preflight.ollama_version(url)
     if not preflight.ollama_floor_ok(ver):
-        out(f"⚠ Ollama verzija {ver or 'nepoznata'} < 0.5.0 — preporučen upgrade "
+        out(f"⚠ Ollama verzija {ver or 'nepoznata'} < {preflight._OLLAMA_FLOOR} — preporučen upgrade "
             "(winget upgrade Ollama.Ollama). Nastavljam.")
 
     fits = preflight.model_fits(cfg)
@@ -243,8 +243,8 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    # P2 pokriva stranice 1-3; mark_complete se pomice dalje kako stranice
-    # 4-6 stizu u P3-P4 (poziv ide iza ZADNJE implementirane stranice).
+    # P2 pokriva stranice 1-3; mark_complete se pomiče dalje kako stranice
+    # 4-6 stižu u P3-P4 (poziv ide iza ZADNJE implementirane stranice).
     wizard_state.mark_complete(spine)
-    out("P2 gotov: preduvjeti + operater + model. Setup je dovrsen — web sucelje je dostupno.")
-    out("Stranice 4-6 (mreza/HTTPS/servis, mape, sazetak) slijede u P3-P4.")
+    out("P2 gotov: preduvjeti + operater + model. Setup je dovršen — web sučelje je dostupno.")
+    out("Stranice 4-6 (mreža/HTTPS/servis, mape, sažetak) slijede u P3-P4.")

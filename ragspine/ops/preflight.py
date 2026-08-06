@@ -155,8 +155,8 @@ def ollama_floor_ok(version: str | None, floor: str = _OLLAMA_FLOOR) -> bool:
 
 
 def start_ollama(wait_s: float = 8.0, url: str = "http://127.0.0.1:11434") -> bool:
-    """Pokusaj pokrenuti `ollama serve` detached pa cekaj da /api/tags prodise.
-    False kad binary ne postoji ili servis ne prodise u wait_s."""
+    """Pokušaj pokrenuti `ollama serve` detached pa čekaj da /api/tags prodiše.
+    False kad binary ne postoji ili servis ne prodiše u wait_s."""
     try:
         subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL,
@@ -185,8 +185,8 @@ def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
 
 def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) -> bool:
     """Skini model preko Ollama daemona (POST /api/pull, NDJSON stream).
-    Daemon sam nastavlja djelomicni download (resume) — dovoljno je ponovno pozvati.
-    True na zavrsni status "success"."""
+    Daemon sam nastavlja djelomični download (resume) — dovoljno je ponovno pozvati.
+    True na završni status "success"."""
     import json
     req = urllib.request.Request(f"{url}/api/pull",
                                  data=json.dumps({"model": name}).encode(),
@@ -200,7 +200,7 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
                 except ValueError:
                     continue
                 if ev.get("error"):
-                    out(f"Greska pri skidanju: {ev['error']}")
+                    out(f"Greška pri skidanju: {ev['error']}")
                     return False
                 status = ev.get("status", "")
                 total, done = ev.get("total"), ev.get("completed")
@@ -214,7 +214,7 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
                 if status == "success":
                     return True
     except Exception as e:
-        out(f"Greska pri skidanju modela: {e}")
+        out(f"Greška pri skidanju modela: {e}")
         return False
     out("Skidanje prekinuto prije kraja — pokreni ponovno (nastavlja gdje je stalo).")
     return False
@@ -330,34 +330,34 @@ def requirements(cfg=None) -> list[dict]:
 # otisak. Brojevi su približni (kao GPT4All ramrequired), ne skidaju se s mreže.
 MODEL_CATALOG = [
     {"name": "qwen2.5:3b", "role": "chat", "params": "3B",
-     "desc": "brz opci asistent za slabija racunala; solidan hrvatski",
+     "desc": "brz opći asistent za slabija računala; solidan hrvatski",
      "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.3, "fp16": 6.2}},
     {"name": "llama3.2:3b", "role": "chat", "params": "3B",
-     "desc": "lagani Meta model; dobar za sazetke i jednostavna pitanja",
+     "desc": "lagani Meta model; dobar za sažetke i jednostavna pitanja",
      "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.4, "fp16": 6.4}},
     {"name": "mistral:7b", "role": "chat", "params": "7B",
      "desc": "brz i precizan generalist; dobro slijedi upute",
      "quants": {"Q4_K_M": 4.4, "Q5_K_M": 5.1, "Q8_0": 7.7, "fp16": 14.5}},
     {"name": "qwen2.5:7b", "role": "chat", "params": "7B",
-     "desc": "najbolji omjer kvalitete i brzine; preporuka za vecina ureda",
+     "desc": "najbolji omjer kvalitete i brzine; preporuka za većinu ureda",
      "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
     {"name": "qwen2.5-coder:7b", "role": "chat", "params": "7B",
      "desc": "specijaliziran za kod i strukturirane formate (SQL, JSON)",
      "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
     {"name": "deepseek-r1:7b", "role": "chat", "params": "7B",
-     "desc": "rezonira korak-po-korak; sporiji, bolji na racunskim zadacima",
+     "desc": "rezonira korak-po-korak; sporiji, bolji na računskim zadacima",
      "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
     {"name": "llama3.1:8b", "role": "chat", "params": "8B",
-     "desc": "prokusani Meta generalist; siroko testiran",
+     "desc": "prokušani Meta generalist; široko testiran",
      "quants": {"Q4_K_M": 4.9, "Q5_K_M": 5.7, "Q8_0": 8.5, "fp16": 16.1}},
     {"name": "gemma2:9b", "role": "chat", "params": "9B",
-     "desc": "Google model; jak na razumijevanju teksta i sazimanju",
+     "desc": "Google model; jak na razumijevanju teksta i sažimanju",
      "quants": {"Q4_K_M": 5.8, "Q5_K_M": 6.6, "Q8_0": 9.8, "fp16": 18.5}},
     {"name": "qwen2.5:14b", "role": "chat", "params": "14B",
      "desc": "osjetno pametniji od 7B; treba 16+ GB RAM-a",
      "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
     {"name": "deepseek-r1:14b", "role": "chat", "params": "14B",
-     "desc": "jace rezoniranje za slozene obracune; sporiji odziv",
+     "desc": "jače rezoniranje za složene obračune; sporiji odziv",
      "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
     {"name": "phi4:14b", "role": "chat", "params": "14B",
      "desc": "Microsoftov kompaktni 14B; jak na logici i matematici",
@@ -369,7 +369,7 @@ MODEL_CATALOG = [
      "desc": "visejezicni embedding (i hrvatski); bolji retrieval",
      "quants": {"Q4_K_M": 0.4, "fp16": 1.2}},
     {"name": "nomic-embed-text", "role": "embed", "params": "0.1B",
-     "desc": "mali embedding za slabija racunala",
+     "desc": "mali embedding za slabija računala",
      "quants": {"Q4_K_M": 0.1, "fp16": 0.3}},
 ]
 
@@ -430,8 +430,8 @@ def _params_b(params: str) -> float:
 
 
 def recommend_chat_model(fits: list[dict]) -> str | None:
-    """Najveci chat model koji KOMOTNO stane (best_quant); fallback najveci
-    koji barem tijesno stane. None kad nista ne stane."""
+    """Najveći chat model koji KOMOTNO stane (best_quant); fallback najveći
+    koji barem tijesno stane. None kad ništa ne stane."""
     chat = [f for f in fits if f["role"] == "chat"]
     comfy = [f for f in chat if f["best_quant"]]
     if comfy:
