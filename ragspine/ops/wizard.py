@@ -3,6 +3,7 @@ P2: Stranice 1 (preduvjeti) + 2 (operater) + 3 (model).
 P3: Stranica 4 (mreža/HTTPS/servis). Stranice 5-6 stižu u P4."""
 import dataclasses
 import ipaddress
+import os
 import re
 import shutil
 import sys
@@ -35,7 +36,19 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
     tui.print_header("1/6  Preduvjeti", out=out)
     while True:
         reqs = preflight.requirements(cfg)
-        if render_preflight(reqs, out=out):
+        ok = render_preflight(reqs, out=out)
+        # winget auto-install je Windows-only (drugdje ga wizard ne nudi — brief).
+        tried_install = False
+        if os.name == "nt":
+            for r in reqs:
+                if r["key"] in preflight.WINGET_IDS and r["status"] in ("fail", "warn"):
+                    if tui.prompt_yes_no(f"Pokušaj auto-instalaciju ({r['naziv']})?",
+                                         default=False, input_fn=input_fn, out=out):
+                        preflight.install_via_winget(r["key"], out=out)
+                        tried_install = True
+        if tried_install:
+            continue   # ponovno provjeri preduvjete nakon (mogućeg) installa
+        if ok:
             return True
         out("")
         out("Neki obavezni preduvjeti nedostaju (✗). Popravi ih pa ponovi.")
@@ -185,6 +198,11 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
             "(winget upgrade Ollama.Ollama). Nastavljam.")
 
     rows = preflight.llmfit_models(cfg)
+    if not rows and not shutil.which("llmfit") and tui.prompt_yes_no(
+            "llmfit nije pronađen (preporuke modela po hardveru). Pokušaj auto-instalaciju (pip)?",
+            default=False, input_fn=input_fn, out=out):
+        preflight.install_llmfit(out=out)   # pip je cross-platform — bez os.name provjere
+        rows = preflight.llmfit_models(cfg)
     if not rows:
         out("llmfit nije dostupan ili nema modela koji stanu — model postavi kasnije u Postavkama.")
         return True

@@ -75,6 +75,36 @@ def test_render_preflight_passes_when_no_fail():
     assert wizard.render_preflight(reqs, out=lambda *_: None) is True
 
 
+def test_page_preduvjeti_offers_winget_install_on_windows(monkeypatch):
+    """Nalaz d: tesseract/ollama fail/warn na Windowsu -> ponudi auto-install
+    preko winget-a; nakon pokušaja ponovno provjeri preduvjete."""
+    reqs_fail = [{"key": "tesseract", "naziv": "OCR", "status": "fail",
+                  "detalj": "nije pronađen", "fix": "winget install ..."}]
+    reqs_ok = [{"key": "tesseract", "naziv": "OCR", "status": "ok", "detalj": "ok", "fix": ""}]
+    seq = iter([reqs_fail, reqs_ok])
+    monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: next(seq))
+    monkeypatch.setattr(wizard.os, "name", "nt")
+    calls = []
+    monkeypatch.setattr(wizard.preflight, "install_via_winget",
+                        lambda key, out=print: calls.append(key) or True)
+    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("d"), out=lambda *_: None)
+    assert ok is True
+    assert calls == ["tesseract"]
+
+
+def test_page_preduvjeti_no_winget_offer_on_non_windows(monkeypatch):
+    """Izvan Windowsa auto-install se ne nudi — samo standardni retry prompt."""
+    reqs_fail = [{"key": "tesseract", "naziv": "OCR", "status": "fail",
+                  "detalj": "nije pronađen", "fix": "apt install ..."}]
+    monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: reqs_fail)
+    monkeypatch.setattr(wizard.os, "name", "posix")
+    monkeypatch.setattr(wizard.preflight, "install_via_winget",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("ne smije se zvati izvan Windowsa")))
+    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("ne"), out=lambda *_: None)
+    assert ok is False
+
+
 def test_cmd_setup_seeds_db(tmp_path, monkeypatch):
     """`ragspine setup` mora i dalje sjati bazu (kontni plan, watch izvori...) —
     wizard mijenja UX, ne smije ispustiti staru seeds.all sporednu radnju."""
@@ -313,12 +343,55 @@ def test_page_model_skip_when_llmfit_unavailable(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
     monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda c=None: None)
+    # llmfit "instaliran" (na PATH-u) -> ne pita za auto-install, ide ravno na skip
+    monkeypatch.setattr(wizard.shutil, "which", lambda name: "/usr/bin/llmfit")
 
     class _Cfg:
         ollama_url = "http://127.0.0.1:11434"
         embed_model = "def-emb"
     ok = wizard.page_model(s, _Cfg(), input_fn=_reader(), out=lambda *_: None)
     assert ok is True    # llmfit nedostupan -> postavi kasnije, ne zaglavi
+
+
+def test_page_model_llmfit_missing_declines_install(tmp_path, monkeypatch):
+    """Nalaz d: llmfit binary nema na PATH-u -> ponudi pip auto-install; 'ne' ->
+    install_llmfit se ne zove."""
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
+    monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda c=None: None)
+    monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
+    calls = []
+    monkeypatch.setattr(wizard.preflight, "install_llmfit",
+                        lambda out=print: calls.append(1) or True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "def-emb"
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader("ne"), out=lambda *_: None)
+    assert ok is True
+    assert calls == []
+
+
+def test_page_model_llmfit_missing_accepts_install(tmp_path, monkeypatch):
+    """'da' -> install_llmfit se zove (pip, bez os.name provjere)."""
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
+    monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda c=None: None)
+    monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
+    calls = []
+    monkeypatch.setattr(wizard.preflight, "install_llmfit",
+                        lambda out=print: calls.append(1) or True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "def-emb"
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader("d"), out=lambda *_: None)
+    assert ok is True
+    assert calls == [1]
 
 
 def test_page_model_full_happy_path(tmp_path, monkeypatch):
