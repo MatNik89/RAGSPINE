@@ -7,6 +7,7 @@ Javne funkcije:
 - fit_pill(): udio RAM-a za embedding model; embedding sam je ručno kurirano.
 """
 import os
+import platform
 import shutil
 import socket
 import subprocess
@@ -312,7 +313,6 @@ def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> 
 def _ip_mode() -> str:
     """Statička adresa ili DHCP — detektuj OS-specifično.
     Windows: netsh; drugdje: unknown (detekcija je LAN-specifična)."""
-    import platform
     if platform.system() != "Windows":
         return "unknown"
     try:
@@ -458,3 +458,55 @@ def summary(cfg=None, reduced: bool = False) -> dict:
         "already_pulled": (rec or {}).get("already_pulled", []),
         "models": llmfit_models(cfg) or [],  # llmfit kao izvor modela (ako nedostaje → [])
     }
+
+
+# --- Windows auto-install + llmfit + proxy ---
+
+WINGET_IDS = {"tesseract": "UB-Mannheim.TesseractOCR", "ollama": "Ollama.Ollama"}
+_WINGET_BIN = {"tesseract": "tesseract", "ollama": "ollama"}
+
+
+def install_via_winget(key: str, *, out=print) -> bool:
+    """Windows auto-install preko winget allowliste (UAC potvrda iskoči korisniku).
+    Drugi OS: ispiši naredbu i vrati False. Validira binary nakon installa."""
+    if key not in WINGET_IDS:
+        raise ValueError(f"nepoznat paket: {key!r}")
+    wid = WINGET_IDS[key]
+    cmd = ["winget", "install", "--exact", "--id", wid, "--source", "winget",
+           "--accept-package-agreements", "--accept-source-agreements"]
+    if platform.system() != "Windows":
+        out(f"Auto-install je Windows-only. Ručno: {' '.join(cmd)}")
+        out("  (Linux: apt/dnf; macOS: brew — potraži paket u svom package manageru.)")
+        return False
+    out(f"Instaliram {wid} — očekuj UAC potvrdu (klikni Da)...")
+    rc, _out_txt, err = run_isolated(cmd, timeout=600)
+    if rc != 0:
+        out(f"winget nije uspio (rc {rc}): {err[:200]}")
+        return False
+    if not shutil.which(_WINGET_BIN[key]):
+        out(f"Instalirano, ali '{_WINGET_BIN[key]}' nije na PATH-u — "
+            "restartaj terminal ili dodaj PATH ručno pa ponovi provjeru.")
+        return False
+    out(f"✓ {wid} instaliran i dostupan.")
+    return True
+
+
+def install_llmfit(*, out=print) -> bool:
+    """pip install llmfit (fallback kad ragspine nije instaliran s depsima)."""
+    out("Instaliram llmfit (pip)...")
+    rc, _o, err = run_isolated([sys.executable, "-m", "pip", "install", "--user", "llmfit"],
+                               timeout=600)
+    if rc != 0:
+        out(f"pip nije uspio: {err[:200]}")
+        return False
+    ok = bool(shutil.which("llmfit"))
+    out("✓ llmfit instaliran." if ok else "⚠ llmfit instaliran, ali nije na PATH-u.")
+    return ok
+
+
+def set_proxy(spine, proxy: str) -> None:
+    spine.set_override("setup", "proxy", proxy or "")
+
+
+def get_proxy(spine) -> str:
+    return spine.get_override("setup", "proxy") or ""

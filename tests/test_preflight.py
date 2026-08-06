@@ -362,3 +362,51 @@ def test_port_free_true_and_false():
         assert pf.port_free("127.0.0.1", free) is True
     finally:
         srv.close()
+
+
+def test_install_via_winget_windows_path(monkeypatch):
+    calls = []
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda cmd, timeout=60, **kw: calls.append(cmd) or (0, "", ""))
+    monkeypatch.setattr(pf.shutil, "which", lambda name: f"C:/x/{name}.exe")
+    lines = []
+    assert pf.install_via_winget("ollama", out=lines.append) is True
+    assert calls and calls[0][:4] == ["winget", "install", "--exact", "--id"]
+    assert "Ollama.Ollama" in calls[0]
+    assert any("UAC" in l for l in lines)
+
+
+def test_install_via_winget_non_windows_prints_cmd(monkeypatch):
+    monkeypatch.setattr(pf.platform, "system", lambda: "Linux")
+    called = []
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda *a, **k: called.append(1) or (0, "", ""))
+    lines = []
+    assert pf.install_via_winget("tesseract", out=lines.append) is False
+    assert not called                       # ništa se ne izvršava
+    assert any("winget install" in l for l in lines)
+
+
+def test_install_via_winget_unknown_key():
+    with pytest.raises(ValueError):
+        pf.install_via_winget("nepoznato")
+
+
+def test_install_via_winget_path_problem(monkeypatch):
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60, **kw: (0, "", ""))
+    monkeypatch.setattr(pf.shutil, "which", lambda name: None)   # instaliran ali ne na PATH-u
+    lines = []
+    assert pf.install_via_winget("ollama", out=lines.append) is False
+    assert any("PATH" in l for l in lines)
+
+
+def test_proxy_roundtrip(tmp_path):
+    from ragspine.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    assert pf.get_proxy(s) == ""
+    pf.set_proxy(s, "http://proxy.ured.local:3128")
+    assert pf.get_proxy(s) == "http://proxy.ured.local:3128"
+    pf.set_proxy(s, "")
+    assert pf.get_proxy(s) == ""
