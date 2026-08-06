@@ -8,6 +8,7 @@ Javne funkcije:
 """
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -278,9 +279,29 @@ def llmfit_models(cfg=None) -> list[dict] | None:
     return deduped[:_LLMFIT_MAX_ROWS]
 
 
+def local_ip() -> str:
+    """Primarni LAN IP — UDP connect trik (ne šalje pakete). 127.0.0.1 na grešku."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 53))
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def port_free(host: str, port: int) -> bool:
+    """True kad se port može bindati (slobodan)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((host, port))
+            return True
+    except OSError:
+        return False
+
+
 def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
     """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
-    import socket
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True

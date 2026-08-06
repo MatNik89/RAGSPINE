@@ -328,3 +328,37 @@ def test_llmfit_models_dedups_by_ollama_name(monkeypatch):
     assert len(rows) == len(set(names))            # cap broji distinktne modele
     a_row = next(r for r in rows if r["ollama_name"] == "a:7b")
     assert a_row["name"] == "hf/a-high"             # veći score pobjeđuje
+
+
+def test_local_ip_returns_string(monkeypatch):
+    class _S:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def connect(self, addr): pass
+        def getsockname(self): return ("192.168.1.7", 12345)
+    monkeypatch.setattr(pf.socket, "socket", lambda *a, **k: _S())
+    assert pf.local_ip() == "192.168.1.7"
+
+
+def test_local_ip_fallback_on_error(monkeypatch):
+    def _boom(*a, **k):
+        raise OSError("nema mreže")
+    monkeypatch.setattr(pf.socket, "socket", _boom)
+    assert pf.local_ip() == "127.0.0.1"
+
+
+def test_port_free_true_and_false():
+    import socket as s
+    srv = s.socket(s.AF_INET, s.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    taken = srv.getsockname()[1]
+    try:
+        assert pf.port_free("127.0.0.1", taken) is False
+        srv2 = s.socket(s.AF_INET, s.SOCK_STREAM)
+        srv2.bind(("127.0.0.1", 0))
+        free = srv2.getsockname()[1]
+        srv2.close()
+        assert pf.port_free("127.0.0.1", free) is True
+    finally:
+        srv.close()

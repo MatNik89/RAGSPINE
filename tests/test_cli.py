@@ -28,3 +28,20 @@ def test_watch_ocr_wired(tmp_path, monkeypatch, capsys):
 def test_forget_command_removed(capsys):
     # brisanje klijentskih podataka namjerno NIJE dostupno (zakonska retencija)
     assert main(["forget", "bilo-sto"]) != 0
+
+
+def test_net_overrides_apply(tmp_path, monkeypatch):
+    from ragspine.core.spine import init_spine
+    from ragspine.__main__ import _net_overrides
+    from ragspine.config import Config
+    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    s = init_spine(str(tmp_path / "t.db"))
+    cfg = Config.from_env()
+    host, port, cert, key = _net_overrides(s, cfg)
+    assert (host, port) == (cfg.host, cfg.port)   # bez overridea -> cfg
+    s.set_override("net", "host", "0.0.0.0")
+    s.set_override("net", "port", "8443")
+    s.set_override("net", "cert_path", "/x/cert.pem")
+    s.set_override("net", "key_path", "/x/key.pem")
+    host, port, cert, key = _net_overrides(s, cfg)
+    assert (host, port, cert, key) == ("0.0.0.0", 8443, "/x/cert.pem", "/x/key.pem")

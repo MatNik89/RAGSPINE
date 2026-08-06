@@ -3,11 +3,24 @@ import argparse
 import getpass
 import os
 import sys
+from pathlib import Path
 
 
 def _stub(args) -> int:
     print("nije još implementirano")
     return 2
+
+
+def _net_overrides(spine, cfg):
+    """Mrežne postavke iz config_overrides(module='net') s cfg fallbackom."""
+    host = spine.get_override("net", "host") or cfg.host
+    try:
+        port = int(spine.get_override("net", "port") or cfg.port)
+    except ValueError:
+        port = cfg.port
+    cert = spine.get_override("net", "cert_path") or ""
+    key = spine.get_override("net", "key_path") or ""
+    return host, port, cert, key
 
 
 def _cmd_serve(args) -> int:
@@ -19,7 +32,12 @@ def _cmd_serve(args) -> int:
     cfg = get_config()
     spine = init_spine(cfg.db_path)
     # server_header=False: ne curi "uvicorn" verziju; middleware već šalje Server: RAGSPINE
-    uvicorn.run(create_app(spine, cfg), host=cfg.host, port=cfg.port, server_header=False)
+    host, port, cert, key = _net_overrides(spine, cfg)
+    ssl_kw = {}
+    if cert and key and Path(cert).exists() and Path(key).exists():
+        ssl_kw = {"ssl_certfile": cert, "ssl_keyfile": key}
+    uvicorn.run(create_app(spine, cfg), host=host, port=port,
+                server_header=False, **ssl_kw)
     return 0
 
 
