@@ -10,7 +10,7 @@ from ragspine.web import firstrun
 
 _MIN_PW = 8
 _BGE_M3 = "BAAI/bge-m3"
-_BGE_M3_GB = 1.2   # fp16, približno (kao MODEL_CATALOG)
+_BGE_M3_GB = 1.2   # fp16, približno (iz llmfit specifikacije)
 
 
 def render_preflight(reqs, *, out=print) -> bool:
@@ -158,7 +158,7 @@ def render_llmfit_models(rows, *, out=print) -> list[str]:
 
 
 def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 3: Ollama spremnost -> katalog -> JEDAN model -> pull -> spremi
+    """Stranica 3: Ollama spremnost -> llmfit lista -> JEDAN model -> pull -> spremi
     -> embedding -> self-test. Skip-grana vraća True (spec: ne zaglavi)."""
     tui.print_header("3/6  Model (LLM)", out=out)
     url = getattr(cfg, "ollama_url", "http://127.0.0.1:11434")

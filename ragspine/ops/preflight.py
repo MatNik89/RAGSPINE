@@ -1,16 +1,12 @@
-"""Preflight: stanje računala + preduvjeti za pokretanje RAGSPINE + kompresija-
-svjestan izbor lokalnog modela ("koji LLM stane, na kojoj kvantizaciji").
+"""Preflight: stanje računala + preduvjeti za pokretanje RAGSPINE.
 
-Tri javna ulaza:
+Javne funkcije:
 - system_state(): RAM/disk/CPU/GPU/OS/Python (cross-OS, čisti stdlib).
 - requirements(): lista "što treba na računalu" sa statusom ok/warn/fail + fix.
-- model_fits(): za svaki model iz kataloga, koja kvantizacija stane na ovo
-  računalo (fit-pill), po uzoru na Jan/GPT4All (usporedba veličine kvantiziranog
-  modela sa slobodnom memorijom, uz sigurnosnu marginu).
+- llmfit_models(): modeli iz llmfit (hardver-osjetljiv izbor kvantizacije).
+- fit_pill(): udio RAM-a za embedding model (Good/Marginal/Too Tight).
 
-ponytail: katalog i veličine su kurirani (ručno, kao GPT4All ramrequired), ne
-skinu se metapodaci s mreže. Upgrade path: povuci žive veličine s Ollama/HF
-registryja kad zatreba.
+Modeli (chat/embedding) dolaze od llmfit, ne iz kurirane baze.
 """
 import os
 import shutil
@@ -363,62 +359,13 @@ def requirements(cfg=None) -> list[dict]:
     return out
 
 
-# --- kompresija-svjestan izbor modela ---
-
-# Kurirani katalog lokalnih modela. `quants` = veličina GGUF datoteke (GB) po
-# kvantizaciji; ista arhitektura, različita kompresija → različit memorijski
-# otisak. Brojevi su približni (kao GPT4All ramrequired), ne skidaju se s mreže.
-MODEL_CATALOG = [
-    {"name": "qwen2.5:3b", "role": "chat", "params": "3B",
-     "desc": "brz opći asistent za slabija računala; solidan hrvatski",
-     "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.3, "fp16": 6.2}},
-    {"name": "llama3.2:3b", "role": "chat", "params": "3B",
-     "desc": "lagani Meta model; dobar za sažetke i jednostavna pitanja",
-     "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.4, "fp16": 6.4}},
-    {"name": "mistral:7b", "role": "chat", "params": "7B",
-     "desc": "brz i precizan generalist; dobro slijedi upute",
-     "quants": {"Q4_K_M": 4.4, "Q5_K_M": 5.1, "Q8_0": 7.7, "fp16": 14.5}},
-    {"name": "qwen2.5:7b", "role": "chat", "params": "7B",
-     "desc": "najbolji omjer kvalitete i brzine; preporuka za većinu ureda",
-     "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
-    {"name": "qwen2.5-coder:7b", "role": "chat", "params": "7B",
-     "desc": "specijaliziran za kod i strukturirane formate (SQL, JSON)",
-     "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
-    {"name": "deepseek-r1:7b", "role": "chat", "params": "7B",
-     "desc": "rezonira korak-po-korak; sporiji, bolji na računskim zadacima",
-     "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
-    {"name": "llama3.1:8b", "role": "chat", "params": "8B",
-     "desc": "prokušani Meta generalist; široko testiran",
-     "quants": {"Q4_K_M": 4.9, "Q5_K_M": 5.7, "Q8_0": 8.5, "fp16": 16.1}},
-    {"name": "gemma2:9b", "role": "chat", "params": "9B",
-     "desc": "Google model; jak na razumijevanju teksta i sažimanju",
-     "quants": {"Q4_K_M": 5.8, "Q5_K_M": 6.6, "Q8_0": 9.8, "fp16": 18.5}},
-    {"name": "qwen2.5:14b", "role": "chat", "params": "14B",
-     "desc": "osjetno pametniji od 7B; treba 16+ GB RAM-a",
-     "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
-    {"name": "deepseek-r1:14b", "role": "chat", "params": "14B",
-     "desc": "jače rezoniranje za složene obračune; sporiji odziv",
-     "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
-    {"name": "phi4:14b", "role": "chat", "params": "14B",
-     "desc": "Microsoftov kompaktni 14B; jak na logici i matematici",
-     "quants": {"Q4_K_M": 9.1, "Q5_K_M": 10.6, "Q8_0": 15.8, "fp16": 29.3}},
-    {"name": "qwen2.5:32b", "role": "chat", "params": "32B",
-     "desc": "najjaci lokalni izbor; samo za servere s 64+ GB RAM-a",
-     "quants": {"Q4_K_M": 19.9, "Q5_K_M": 23.3, "Q8_0": 34.8, "fp16": 65.5}},
-    {"name": "bge-m3", "role": "embed", "params": "0.6B",
-     "desc": "visejezicni embedding (i hrvatski); bolji retrieval",
-     "quants": {"Q4_K_M": 0.4, "fp16": 1.2}},
-    {"name": "nomic-embed-text", "role": "embed", "params": "0.1B",
-     "desc": "mali embedding za slabija računala",
-     "quants": {"Q4_K_M": 0.1, "fp16": 0.3}},
-]
+# --- kompresija-svjestan izbor modela (embedding) ---
 
 # Jedna jasna margina (Codex): udio UKUPNOG RAM-a koji model smije zauzeti.
 # <50% = komotno stane · 50–70% = tijesno (radi, ali malo zraka za KV cache/OS)
 # ≥70% = ne. Ukupni (ne trenutno slobodni) RAM = sposobnost namjenskog servera.
 _FITS_FRAC = 0.5
 _TIGHT_FRAC = 0.7
-_VRAM_RESERVE = 0.8  # KV cache/runtime rezerva na GPU-u
 
 
 def fit_pill(size_gb: float, total_gb: float) -> str:
@@ -430,66 +377,6 @@ def fit_pill(size_gb: float, total_gb: float) -> str:
     if frac < _TIGHT_FRAC:
         return "tight"
     return "too_big"
-
-
-def model_fits(cfg=None, state: dict | None = None) -> list[dict]:
-    """Za svaki model: fit-pill po kvantizaciji. best_quant = najkvalitetnija koja
-    KOMOTNO stane (fits); tight_quant = najkvalitetnija koja barem tijesno stane.
-    Budžet = UKUPNI RAM (sposobnost). VRAM ≥ veličina+rezerva → može na GPU (brže)."""
-    st = state or system_state(cfg)
-    total = st.get("ram_total_gb") or st.get("ram_free_gb") or 0.0
-    vram = st.get("vram_gb") or 0.0
-    quality_order = ["fp16", "Q8_0", "Q5_K_M", "Q4_K_M"]  # najkvalitetnija → najmanja
-    out = []
-    for m in MODEL_CATALOG:
-        quants = []
-        best_fit = None
-        tight_fit = None
-        for q in [x for x in quality_order if x in m["quants"]]:
-            size = m["quants"][q]
-            pill = fit_pill(size, total)
-            gpu = vram > 0 and size <= vram * _VRAM_RESERVE
-            quants.append({"quant": q, "size_gb": size, "pill": pill, "gpu_ready": gpu})
-            if pill == "fits" and best_fit is None:
-                best_fit = q
-            if pill == "tight" and tight_fit is None:
-                tight_fit = q
-        out.append({"name": m["name"], "role": m["role"], "params": m["params"],
-                    "desc": m.get("desc", ""),
-                    "quants": quants, "best_quant": best_fit, "tight_quant": tight_fit,
-                    "installable": best_fit is not None or tight_fit is not None})
-    return out
-
-
-def _params_b(params: str) -> float:
-    """"7B" -> 7.0; neparsabilno -> 0."""
-    try:
-        return float(params.rstrip("Bb"))
-    except ValueError:
-        return 0.0
-
-
-def recommend_chat_model(fits: list[dict]) -> str | None:
-    """Najveći chat model koji KOMOTNO stane (best_quant); fallback najveći
-    koji barem tijesno stane. None kad ništa ne stane."""
-    chat = [f for f in fits if f["role"] == "chat"]
-    comfy = [f for f in chat if f["best_quant"]]
-    if comfy:
-        return max(comfy, key=lambda f: _params_b(f["params"]))["name"]
-    tight = [f for f in chat if f["tight_quant"]]
-    if tight:
-        return max(tight, key=lambda f: _params_b(f["params"]))["name"]
-    return None
-
-
-def _llmfit(cfg) -> dict | None:
-    """Vanjski llmfit CLI ako je instaliran (dodatna preporuka po hardveru).
-    None ako ga nema — naš model_fits ionako pokriva izbor."""
-    from ragspine.ops import setup
-    try:
-        return setup.llmfit(cfg)
-    except Exception:
-        return None
 
 
 def _redact(st: dict, reqs: list) -> tuple[dict, list]:
@@ -507,7 +394,7 @@ def _redact(st: dict, reqs: list) -> tuple[dict, list]:
 
 def summary(cfg=None, reduced: bool = False) -> dict:
     """Sve na jednom mjestu za Postavke ekran / wizard. reduced=True za anonimni
-    onboarding (redigirane putanje/inventar)."""
+    onboarding (redigirane putanje/inventar). Modeli dolaze iz llmfit_models()."""
     st = system_state(cfg)
     reqs = requirements(cfg)
     if reduced:
@@ -524,9 +411,8 @@ def summary(cfg=None, reduced: bool = False) -> dict:
         "state": st,
         "requirements": reqs,
         "requirements_ok": all(r["status"] != "fail" for r in reqs),
-        "models": model_fits(cfg, st),
         "recommended_tier": (rec or {}).get("tier"),
         "ollama_installed": (rec or {}).get("ollama_installed", False),
         "already_pulled": (rec or {}).get("already_pulled", []),
-        "llmfit": _llmfit(cfg),
+        "models": llmfit_models(cfg) or [],  # llmfit kao izvor modela (ako nedostaje → [])
     }
