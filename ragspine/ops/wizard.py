@@ -4,8 +4,10 @@ P3: Stranica 4 (mreža/HTTPS/servis). Stranice 5-6 stižu u P4."""
 import dataclasses
 import ipaddress
 import os
+import platform
 import re
 import shutil
+import subprocess
 import sys
 import time
 import types
@@ -417,6 +419,57 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
+def _detached_kwargs() -> dict:
+    """Popen kwargs da dijete preživi zatvaranje wizard konzole (isti obrazac
+    kao preflight.start_ollama; getattr fallback za testove na Linuxu s
+    mockanim platform.system())."""
+    kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+                    "stdin": subprocess.DEVNULL}
+    if platform.system() == "Windows":
+        kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0x8)
+                                   | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen) -> None:
+    """Ponudi start servera (detached) + Edge app-prozor. Poziva se IZA
+    mark_complete — nikakav kvar ovdje ne smije poništiti dovršeni setup.
+    ponytail: pravi servis (autostart) čeka WinSW/NSSM wrapper (v. winsvc);
+    do tada je ovo ručni start koji preživi zatvaranje konzole."""
+    host = spine.get_override("net", "host") or "127.0.0.1"
+    port = spine.get_override("net", "port") or "8443"
+    url_host = preflight.local_ip() if host == "0.0.0.0" else host
+    url = f"https://{url_host}:{port}"
+    try:
+        start = tui.prompt_yes_no(f"Pokreni RAGSPINE sada? ({url})", default=True,
+                                  input_fn=input_fn, out=out)
+    except (EOFError, KeyboardInterrupt):
+        start = False
+    if not start:
+        out(f"Kasnije: `ragspine serve` pa otvori {url}")
+        return
+    exe = shutil.which("ragspine")
+    cmd = [exe, "serve"] if exe else [sys.executable, "-m", "ragspine", "serve"]
+    try:
+        popen(cmd, **_detached_kwargs())
+    except OSError as e:
+        out(f"⚠ Server nije pokrenut ({e}) — pokreni ručno: ragspine serve")
+        return
+    out(f"✓ Server pokrenut u pozadini — {url}")
+    if platform.system() == "Windows":
+        try:
+            # start preko App Paths (msedge nije na PATH-u); "" = naslov prozora
+            popen(["cmd", "/c", "start", "", "msedge", f"--app={url}"],
+                  **_detached_kwargs())
+            out("Otvaram Edge app-prozor...")
+        except OSError:
+            out(f"Otvori ručno u pregledniku: {url}")
+    else:
+        out(f"Otvori u pregledniku: {url}")
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")
@@ -465,3 +518,4 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         return
     wizard_state.mark_complete(spine)
     out("✓ Setup dovršen (6/6) — web sučelje je spremno.")
+    launch_now(spine, cfg, input_fn=input_fn, out=out)

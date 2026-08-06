@@ -229,6 +229,7 @@ def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
     assert ws.get_stage(spine) == 6
@@ -242,6 +243,7 @@ def test_run_reaches_stage6_and_completes(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
     for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape", "page_gotovo"):
         monkeypatch.setattr(wizard, p, lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
     assert ws.get_stage(s) == 6
     assert ws.is_complete(s) is True
@@ -287,9 +289,66 @@ def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: ran.append("p4") or True)
     monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: ran.append("p5") or True)
     monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: ran.append("p6") or True)
+    monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
     assert ran == ["p3", "p4", "p5", "p6"]
     assert ws.is_complete(s) is True
+
+
+def test_launch_now_odbijen_ne_pokrece_nista(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    calls = []
+    lines = []
+    wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
+                      popen=lambda *a, **k: calls.append(a))
+    assert calls == []
+    assert any("ragspine serve" in l for l in lines)
+
+
+def test_launch_now_windows_pokrece_serve_i_edge(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
+    calls = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
+                      popen=lambda cmd, **k: calls.append(cmd))
+    assert len(calls) == 2
+    assert calls[0][-1] == "serve"
+    assert calls[1][:4] == ["cmd", "/c", "start", ""]
+    assert "--app=https://192.168.1.7:8443" in calls[1]
+
+
+def test_launch_now_bind_sve_mreze_koristi_lan_ip(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "0.0.0.0")
+    s.set_override("net", "port", "8443")
+    monkeypatch.setattr(wizard.preflight, "local_ip", lambda: "192.168.1.7")
+    lines = []
+    wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
+                      popen=lambda *a, **k: None)
+    assert any("https://192.168.1.7:8443" in l for l in lines)
+
+
+def test_launch_now_oserror_ne_rusi(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+
+    def _boom(cmd, **k):
+        raise OSError("nema binarke")
+    lines = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lines.append, popen=_boom)
+    assert any("ragspine serve" in l for l in lines)
+
+
+def test_launch_now_eof_tretira_kao_ne(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+
+    def _eof(_=""):
+        raise EOFError()
+    calls = []
+    wizard.launch_now(s, None, input_fn=_eof, out=lambda *_: None,
+                      popen=lambda *a, **k: calls.append(a))   # ne smije propagirati
+    assert calls == []
 
 
 def test_choose_embed_model_bge_when_ram_allows():
