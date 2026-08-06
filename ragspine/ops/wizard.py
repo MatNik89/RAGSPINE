@@ -408,7 +408,8 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
     ollama_dir = r"%USERPROFILE%\.ollama\models" if os.name == "nt" else "~/.ollama/models"
     out(f"  • Ollama modeli: {ollama_dir} — bez njih RAG ne radi "
         "ni uz vraćenu bazu i ključ")
-    out("  • Restore provjeri na drugom stroju: ragspine restore <ime> (server zaustavljen)")
+    out("  • Restore provjeri na drugom stroju: ragspine restore <putanja do kopije> "
+        "(server zaustavljen)")
     if tui.prompt_yes_no("Napravi verificirani snapshot baze sada?", default=True,
                          input_fn=input_fn, out=out):
         try:
@@ -452,8 +453,18 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         return
     exe = shutil.which("ragspine")
     cmd = [exe, "serve"] if exe else [sys.executable, "-m", "ragspine", "serve"]
+    # folders je fail-closed bez mount_roots (v. business/folders._scoped) — bez ovoga
+    # bi mape registrirane na stranici 5 na happy pathu tiho ne radile. Wizard je
+    # admin-trust kontekst (ista odluka kao registracija kroz SimpleNamespace u page_mape).
+    from ragspine.business import folders
+    roots = [m["path"] for m in folders.list_folders(spine)]
+    env = None
+    if roots:
+        existing = [p for p in os.environ.get("RAGSPINE_MOUNT_ROOTS", "").split(",") if p.strip()]
+        merged = list(dict.fromkeys(existing + roots))
+        env = {**os.environ, "RAGSPINE_MOUNT_ROOTS": ",".join(merged)}
     try:
-        popen(cmd, **_detached_kwargs())
+        popen(cmd, env=env, **_detached_kwargs())
     except OSError as e:
         out(f"⚠ Server nije pokrenut ({e}) — pokreni ručno: ragspine serve")
         return

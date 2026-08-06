@@ -330,6 +330,30 @@ def test_launch_now_bind_sve_mreze_koristi_lan_ip(tmp_path, monkeypatch):
     assert any("https://192.168.1.7:8443" in l for l in lines)
 
 
+def test_launch_now_bez_mapa_env_none(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    calls = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
+                      popen=lambda cmd, **k: calls.append(k))
+    assert calls[0]["env"] is None
+
+
+def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path):
+    import types
+    from ragspine.business import folders
+    s = init_spine(str(tmp_path / "t.db"))
+    mapa = tmp_path / "propisi"
+    mapa.mkdir()
+    folders.register(s, types.SimpleNamespace(mount_roots=[str(mapa)]),
+                     str(mapa), "propisi", label="Propisi", user="test")
+    calls = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
+                      popen=lambda cmd, **k: calls.append(k))
+    env = calls[0]["env"]
+    assert env is not None
+    assert str(mapa.resolve()) in env["RAGSPINE_MOUNT_ROOTS"].split(",")
+
+
 def test_launch_now_oserror_ne_rusi(tmp_path):
     s = init_spine(str(tmp_path / "t.db"))
 
