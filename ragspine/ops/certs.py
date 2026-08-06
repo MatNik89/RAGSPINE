@@ -43,18 +43,26 @@ def generate_self_signed(out_dir: str, ips: list[str],
     # Kreiraj key.pem s 0600 dozvolama od početka — bez prozora gdje je dostupan drugima.
     # O_EXCL traži postojeću datoteku; ako se pojavi u međuvremenu, ponytail:
     # pretpostavljamo single-writer (setup wizard/CLI nije paralelno).
-    try:
-        fd = os.open(str(key_p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption()))
-    except FileExistsError:
-        # Cert i key se pojavili između idempotency-check i kreiranja — vrati postojeće.
-        if cert_p.exists() and key_p.exists():
-            return str(cert_p), str(key_p)
-        raise
+    # Ako cert.pem nedostaje, key je siročad od prethodnog crasha → obriši i pokušaj ponovno.
+    key_bytes = key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption())
+    for attempt in range(2):
+        try:
+            fd = os.open(str(key_p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(key_bytes)
+            break  # Ključ je uspješno kreiran
+        except FileExistsError:
+            if cert_p.exists():
+                # Oba fajla se pojavio između check-a i kreiranja — vrati postojeće.
+                return str(cert_p), str(key_p)
+            # Siročad: key bez certa od prethodnog crasha. Obriši i pokušaj ponovno.
+            if attempt == 0:
+                key_p.unlink(missing_ok=True)
+                continue
+            raise  # Drugi pokušaj neuspješan
     cert_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     return str(cert_p), str(key_p)
 
