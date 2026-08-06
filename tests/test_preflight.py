@@ -449,3 +449,29 @@ def test_proxy_roundtrip(tmp_path):
     assert pf.get_proxy(s) == "http://proxy.ured.local:3128"
     pf.set_proxy(s, "")
     assert pf.get_proxy(s) == ""
+
+
+def test_llmfit_models_kesira_po_procesu(monkeypatch):
+    calls = []
+    payload = '{"models": []}'
+
+    def _fake_run(cmd, timeout=60, mem_mb=1024):
+        calls.append(cmd)
+        return 0, payload, ""
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated", _fake_run)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 16})
+    first = pf.llmfit_models(None)
+    second = pf.llmfit_models(None)
+    assert first == [] and second == []
+    assert len(calls) == 1          # drugi poziv ide iz keša
+
+
+def test_llmfit_models_ne_kesira_neuspjeh(monkeypatch):
+    rcs = iter([1, 0])
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda cmd, timeout=60, mem_mb=1024: (next(rcs), '{"models": []}', ""))
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 16})
+    assert pf.llmfit_models(None) is None    # rc=1 → None, ne kešira se
+    assert pf.llmfit_models(None) == []      # sljedeći pokušaj ponovno pokreće

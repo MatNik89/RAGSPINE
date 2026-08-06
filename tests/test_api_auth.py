@@ -62,3 +62,22 @@ def test_malformed_login_body_400(spine, cfg):
 def test_empty_login_body_400(spine, cfg):
     c = _client(spine, cfg)
     assert c.post("/auth/login", json={}).status_code == 400
+
+
+def test_login_rehasha_legacy_200k_hash(spine, cfg):
+    import hashlib
+    salt = b"\x01" * 16
+    h = hashlib.pbkdf2_hmac("sha256", b"tajna", salt, 200_000)
+    legacy = f"{salt.hex()}${h.hex()}"
+    with spine.write() as c:
+        c.execute("INSERT INTO users(username, pw_hash, role) VALUES(?,?,?)",
+                  ("stari", legacy, "owner"))
+    c2 = _client(spine, cfg)
+    r = c2.post("/auth/login", json={"username": "stari", "password": "tajna"})
+    assert r.status_code == 200
+    row = spine.read().execute(
+        "SELECT pw_hash FROM users WHERE username=?", ("stari",)).fetchone()
+    assert row["pw_hash"].startswith("pbkdf2$600000$")
+    # prijava radi i s novim hashom
+    assert c2.post("/auth/login",
+                   json={"username": "stari", "password": "tajna"}).status_code == 200

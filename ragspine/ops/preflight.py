@@ -229,11 +229,19 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
 _LLMFIT_CHAT_CATS = {"Chat", "Coding", "Reasoning", "General"}
 _LLMFIT_MAX_ROWS = 12
 
+# llmfit subprocess je spor (~sekunde); wizard i web preflight ga zovu više
+# puta u procesu. Keš po procesu; None (neuspjeh) se NE kešira da
+# retry-nakon-installa proradi. Testovi resetiraju kroz conftest.
+_llmfit_cache: list[dict] | None = None
+
 
 def llmfit_models(cfg=None) -> list[dict] | None:
     """Modeli po llmfitu: on detektira hardver i izračuna najbolju kvantizaciju.
     Vraćamo samo Ollama-pokretljive chat modele koji stanu (Good/Marginal),
     sortirane po score-u. None kad llmfit nije dostupan ili izlaz ne valja."""
+    global _llmfit_cache
+    if _llmfit_cache is not None:
+        return _llmfit_cache
     import json
     try:
         # PATH binary prvo; `python -m llmfit` wrapper traži binary u sysconfig scripts putanji pa puca za pip --user instalacije.
@@ -285,7 +293,8 @@ def llmfit_models(cfg=None) -> list[dict] | None:
             continue
         seen.add(r["ollama_name"])
         deduped.append(r)
-    return deduped[:_LLMFIT_MAX_ROWS]
+    _llmfit_cache = deduped[:_LLMFIT_MAX_ROWS]
+    return _llmfit_cache
 
 
 def local_ip() -> str:

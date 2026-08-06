@@ -14,6 +14,15 @@ def _reset_embed_globals():
     embed._model = None
     embed._model_failed = False
 
+
+@pytest.fixture(autouse=True)
+def _reset_llmfit_cache():
+    """llmfit keš po procesu ne smije procuriti između testova."""
+    from ragspine.ops import preflight
+    preflight._llmfit_cache = None
+    yield
+    preflight._llmfit_cache = None
+
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))

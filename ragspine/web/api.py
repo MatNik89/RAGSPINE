@@ -520,6 +520,12 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(401, "invalid credentials")
         if not verify_password(password, row["pw_hash"]):
             raise HTTPException(401, "invalid credentials")
+        if not row["pw_hash"].startswith("pbkdf2$"):
+            # legacy 200k hash (bez prefiksa): rehash na aktualne parametre
+            # pri uspješnoj prijavi — lozinku imamo samo sada, u plaintextu.
+            with spine.write() as c:
+                c.execute("UPDATE users SET pw_hash=? WHERE id=?",
+                          (hash_password(password), row["id"]))
         # uid+org_id su pokazivači za Actor lookup; org-uloga se NE stavlja u
         # token (čita se svježa iz memberships na svakom zahtjevu).
         org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
