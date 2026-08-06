@@ -170,3 +170,29 @@ def test_start_ollama_false_when_binary_missing(monkeypatch):
         raise FileNotFoundError("ollama")
     monkeypatch.setattr(pf.subprocess, "Popen", _boom)
     assert pf.start_ollama(wait_s=0.1) is False
+
+
+def test_catalog_has_desc_and_new_models():
+    names = {m["name"] for m in pf.MODEL_CATALOG}
+    assert {"mistral:7b", "gemma2:9b", "phi4:14b", "deepseek-r1:7b",
+            "deepseek-r1:14b", "qwen2.5-coder:7b"} <= names
+    assert all(m.get("desc") for m in pf.MODEL_CATALOG)
+
+
+def test_model_fits_carries_desc():
+    fits = pf.model_fits(state={"ram_total_gb": 16.0, "vram_gb": 0.0})
+    assert all("desc" in f for f in fits)
+
+
+def test_recommend_chat_model_prefers_largest_fitting():
+    fits = pf.model_fits(state={"ram_total_gb": 16.0, "vram_gb": 0.0})
+    rec = pf.recommend_chat_model(fits)
+    # 16 GB: 7-8B Q4/Q5 komotno stanu, 14B Q4 (9.0) je tight (>50%), 32B ne
+    assert rec is not None
+    chat = {f["name"]: f for f in fits if f["role"] == "chat"}
+    assert chat[rec]["best_quant"] is not None
+
+
+def test_recommend_chat_model_none_when_nothing_fits():
+    fits = pf.model_fits(state={"ram_total_gb": 1.0, "vram_gb": 0.0})
+    assert pf.recommend_chat_model(fits) is None

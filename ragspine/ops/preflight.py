@@ -293,20 +293,46 @@ def requirements(cfg=None) -> list[dict]:
 # otisak. Brojevi su približni (kao GPT4All ramrequired), ne skidaju se s mreže.
 MODEL_CATALOG = [
     {"name": "qwen2.5:3b", "role": "chat", "params": "3B",
+     "desc": "brz opci asistent za slabija racunala; solidan hrvatski",
      "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.3, "fp16": 6.2}},
     {"name": "llama3.2:3b", "role": "chat", "params": "3B",
+     "desc": "lagani Meta model; dobar za sazetke i jednostavna pitanja",
      "quants": {"Q4_K_M": 2.0, "Q5_K_M": 2.3, "Q8_0": 3.4, "fp16": 6.4}},
+    {"name": "mistral:7b", "role": "chat", "params": "7B",
+     "desc": "brz i precizan generalist; dobro slijedi upute",
+     "quants": {"Q4_K_M": 4.4, "Q5_K_M": 5.1, "Q8_0": 7.7, "fp16": 14.5}},
     {"name": "qwen2.5:7b", "role": "chat", "params": "7B",
+     "desc": "najbolji omjer kvalitete i brzine; preporuka za vecina ureda",
+     "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
+    {"name": "qwen2.5-coder:7b", "role": "chat", "params": "7B",
+     "desc": "specijaliziran za kod i strukturirane formate (SQL, JSON)",
+     "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
+    {"name": "deepseek-r1:7b", "role": "chat", "params": "7B",
+     "desc": "rezonira korak-po-korak; sporiji, bolji na racunskim zadacima",
      "quants": {"Q4_K_M": 4.7, "Q5_K_M": 5.4, "Q8_0": 8.1, "fp16": 15.2}},
     {"name": "llama3.1:8b", "role": "chat", "params": "8B",
+     "desc": "prokusani Meta generalist; siroko testiran",
      "quants": {"Q4_K_M": 4.9, "Q5_K_M": 5.7, "Q8_0": 8.5, "fp16": 16.1}},
+    {"name": "gemma2:9b", "role": "chat", "params": "9B",
+     "desc": "Google model; jak na razumijevanju teksta i sazimanju",
+     "quants": {"Q4_K_M": 5.8, "Q5_K_M": 6.6, "Q8_0": 9.8, "fp16": 18.5}},
     {"name": "qwen2.5:14b", "role": "chat", "params": "14B",
+     "desc": "osjetno pametniji od 7B; treba 16+ GB RAM-a",
      "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
+    {"name": "deepseek-r1:14b", "role": "chat", "params": "14B",
+     "desc": "jace rezoniranje za slozene obracune; sporiji odziv",
+     "quants": {"Q4_K_M": 9.0, "Q5_K_M": 10.5, "Q8_0": 15.7, "fp16": 29.5}},
+    {"name": "phi4:14b", "role": "chat", "params": "14B",
+     "desc": "Microsoftov kompaktni 14B; jak na logici i matematici",
+     "quants": {"Q4_K_M": 9.1, "Q5_K_M": 10.6, "Q8_0": 15.8, "fp16": 29.3}},
     {"name": "qwen2.5:32b", "role": "chat", "params": "32B",
+     "desc": "najjaci lokalni izbor; samo za servere s 64+ GB RAM-a",
      "quants": {"Q4_K_M": 19.9, "Q5_K_M": 23.3, "Q8_0": 34.8, "fp16": 65.5}},
     {"name": "bge-m3", "role": "embed", "params": "0.6B",
+     "desc": "visejezicni embedding (i hrvatski); bolji retrieval",
      "quants": {"Q4_K_M": 0.4, "fp16": 1.2}},
     {"name": "nomic-embed-text", "role": "embed", "params": "0.1B",
+     "desc": "mali embedding za slabija racunala",
      "quants": {"Q4_K_M": 0.1, "fp16": 0.3}},
 ]
 
@@ -352,9 +378,31 @@ def model_fits(cfg=None, state: dict | None = None) -> list[dict]:
             if pill == "tight" and tight_fit is None:
                 tight_fit = q
         out.append({"name": m["name"], "role": m["role"], "params": m["params"],
+                    "desc": m.get("desc", ""),
                     "quants": quants, "best_quant": best_fit, "tight_quant": tight_fit,
                     "installable": best_fit is not None or tight_fit is not None})
     return out
+
+
+def _params_b(params: str) -> float:
+    """"7B" -> 7.0; neparsabilno -> 0."""
+    try:
+        return float(params.rstrip("Bb"))
+    except ValueError:
+        return 0.0
+
+
+def recommend_chat_model(fits: list[dict]) -> str | None:
+    """Najveci chat model koji KOMOTNO stane (best_quant); fallback najveci
+    koji barem tijesno stane. None kad nista ne stane."""
+    chat = [f for f in fits if f["role"] == "chat"]
+    comfy = [f for f in chat if f["best_quant"]]
+    if comfy:
+        return max(comfy, key=lambda f: _params_b(f["params"]))["name"]
+    tight = [f for f in chat if f["tight_quant"]]
+    if tight:
+        return max(tight, key=lambda f: _params_b(f["params"]))["name"]
+    return None
 
 
 def _llmfit(cfg) -> dict | None:
