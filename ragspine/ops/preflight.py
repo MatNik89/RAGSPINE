@@ -3,10 +3,8 @@
 Javne funkcije:
 - system_state(): RAM/disk/CPU/GPU/OS/Python (cross-OS, čisti stdlib).
 - requirements(): lista "što treba na računalu" sa statusom ok/warn/fail + fix.
-- llmfit_models(): modeli iz llmfit (hardver-osjetljiv izbor kvantizacije).
-- fit_pill(): udio RAM-a za embedding model (Good/Marginal/Too Tight).
-
-Modeli (chat/embedding) dolaze od llmfit, ne iz kurirane baze.
+- llmfit_models(): chat modeli iz llmfit (hardver-osjetljiv izbor kvantizacije).
+- fit_pill(): udio RAM-a za embedding model; embedding sam je ručno kurirano.
 """
 import os
 import shutil

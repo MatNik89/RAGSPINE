@@ -10,7 +10,7 @@ from ragspine.web import firstrun
 
 _MIN_PW = 8
 _BGE_M3 = "BAAI/bge-m3"
-_BGE_M3_GB = 1.2   # fp16, približno (iz llmfit specifikacije)
+_BGE_M3_GB = 1.2   # fp16, približno (ručno kurirano)
 
 
 def render_preflight(reqs, *, out=print) -> bool:

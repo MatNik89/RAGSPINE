@@ -4,10 +4,9 @@ kvantizaciji). XSS-safe (createElement/textContent), bez vanjskih resursa."""
 from ragspine.web.templates_ui import page_shell
 
 _PILL = {
-    "fits": ("\\u2713 stane", "ok"),
-    "tight": ("\\u26a0 tijesno", "warn"),
-    "too_big": ("\\u2715 preveliko", "bad"),
-    "unknown": ("?", ""),
+    "Good": ("\\ud83d\\udfe2", "ok"),       # 🟢 Green
+    "Marginal": ("\\ud83d\\udfe1", "warn"), # 🟡 Yellow
+    "Too Tight": ("\\ud83d\\udd34", "bad"), # 🔴 Red
 }
 _REQ = {"ok": "\\u2713", "warn": "\\u26a0", "fail": "\\u2715"}
 
@@ -59,32 +58,39 @@ async function load(){
     ? 'Sve obavezno zadovoljeno \\u2014 RAGSPINE mo\\u017ee raditi.'
     : 'Nedostaje ne\\u0161to obavezno (crveno) \\u2014 RAGSPINE ne\\u0107e ispravno raditi dok se ne rije\\u0161i.';
 
-  // --- modeli (kompresija-svjestan fit) ---
+  // --- modeli (llmfit — hardver-osjetljiva preporuka) ---
   var mb = $('models'); mb.textContent='';
-  d.models.forEach(function(m){
-    if(m.role !== 'chat') return;
-    var tr=document.createElement('tr');
-    cell(tr, m.name);
-    cell(tr, m.params);
-    // po kvantizaciji: pill
-    m.quants.forEach(function(q){
-      var info = PILL[q.pill] || ['?',''];
-      var td=document.createElement('td');
-      var b=document.createElement('span'); b.className='pill '+info[1];
-      b.textContent = q.quant + ': ' + info[0] + ' (' + q.size_gb + ' GB)' + (q.gpu_ready ? ' \\u26a1' : '');
-      td.appendChild(b); tr.appendChild(td);
+  if(d.models && d.models.length > 0) {
+    d.models.forEach(function(m){
+      var tr=document.createElement('tr');
+      // Pill: Good/Marginal/Too Tight
+      var info = PILL[m.fit_label] || ['?',''];
+      var td_pill=document.createElement('td'); td_pill.className='st '+info[1];
+      td_pill.textContent = info[0];
+      tr.appendChild(td_pill);
+      // Model name (ollama_name)
+      cell(tr, m.ollama_name);
+      // Parametri
+      cell(tr, m.params);
+      // Best quant + memory
+      var memory_text = '~' + m.memory_gb.toFixed(1) + ' GB';
+      cell(tr, (m.best_quant || '—') + ' (' + memory_text + ')');
+      // Brzina
+      cell(tr, '~' + Math.round(m.tps) + ' tok/s');
+      // Use case
+      cell(tr, m.use_case);
+      mb.appendChild(tr);
     });
-    var best=document.createElement('td');
-    if(m.best_quant){ best.className='st ok'; best.textContent='preporuka: '+m.best_quant; }
-    else if(m.tight_quant){ best.className='st warn'; best.textContent='tijesno: '+m.tight_quant; }
-    else { best.className='st fail'; best.textContent='ne stane'; }
-    tr.appendChild(best);
+  } else {
+    var tr=document.createElement('tr');
+    var td=document.createElement('td'); td.colSpan=6; td.textContent='Nema dostupnih modela (llmfit nije dostupan).';
+    tr.appendChild(td);
     mb.appendChild(tr);
-  });
+  }
   var note = 'Tier hardvera: ' + (d.recommended_tier || '?') +
     ' \\u00b7 Ollama: ' + (d.ollama_installed ? 'instaliran' : 'nije instaliran') +
-    ' \\u00b7 ve\\u0107 povu\\u010deno: ' + ((d.already_pulled||[]).join(', ') || 'ni\\u0161ta');
-  if(d.llmfit) note += ' \\u00b7 llmfit: aktivan';
+    ' \\u00b7 ve\\u0107 povu\\u010deno: ' + ((d.already_pulled||[]).join(', ') || 'ni\\u0161ta') +
+    ' \\u00b7 Modeli: llmfit';
   $('models-note').textContent = note;
 }
 document.addEventListener('DOMContentLoaded', load);

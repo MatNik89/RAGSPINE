@@ -203,3 +203,24 @@ def test_llmfit_models_none_when_binary_fails(monkeypatch):
 def test_llmfit_models_none_on_garbage(monkeypatch):
     monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60: (0, "nije json", ""))
     assert pf.llmfit_models() is None
+
+
+def test_summary_models_have_llmfit_shape(monkeypatch, cfg):
+    # Shape guard: summary()["models"] rows must contain llmfit keys (not old model_fits keys)
+    models = [_lm("hf/a", "a:7b", score=60.0), _lm("hf/b", "b:3b", score=50.0)]
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda cmd, timeout=60: (0, _llmfit_json(models), ""))
+    s = pf.summary(cfg)
+    assert "models" in s
+    assert len(s["models"]) > 0
+    # Check that rows have llmfit shape (ollama_name, fit_label, tps, etc.)
+    for m in s["models"]:
+        assert "ollama_name" in m, "Row must have ollama_name (from llmfit)"
+        assert "fit_label" in m, "Row must have fit_label (Good/Marginal/Too Tight)"
+        assert "tps" in m, "Row must have estimated_tps"
+        assert "memory_gb" in m, "Row must have memory_required_gb"
+        assert "best_quant" in m, "Row must have best_quant"
+        # Old model_fits keys should NOT exist
+        assert "role" not in m, "Old model_fits key 'role' should not exist"
+        assert "quants" not in m, "Old model_fits key 'quants' should not exist"
+        assert "tight_quant" not in m, "Old model_fits key 'tight_quant' should not exist"
