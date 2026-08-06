@@ -72,7 +72,10 @@ def ddg(query: str, fetch=None) -> list[dict]:
 def handle(spine, cfg, query: str, llm, fetch=None) -> str:
     results = ddg(query, fetch=fetch)
     if not results:
-        return "Nema web rezultata."
+        # None = ugovor lane handlera: pipeline nastavlja na chat/LLM put.
+        # (E2E nalaz: string ovdje je svaki upit na praznom indeksu pretvarao
+        # u mrtvo "Nema web rezultata." bez ikakvog LLM odgovora.)
+        return None
 
     listing = "\n".join(f"{r['title']} — {r['url']}" for r in results)
     if llm is None:

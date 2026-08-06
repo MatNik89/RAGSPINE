@@ -72,3 +72,22 @@ def test_chat_falls_back_to_web_when_irrelevant(spine, cfg, monkeypatch):
     r = pipeline.answer(spine, cfg, "kakvo je vrijeme sutra?", "ana", llm=llm)
     assert r["lane"] == "web"
     assert "macama" in r["answer"]
+
+
+def test_prazan_web_ne_zaustavlja_odgovor(spine, cfg, monkeypatch):
+    """E2E nalaz (Nick): prazan indeks + web bez rezultata vraćao je doslovno
+    "Nema web rezultata." i nikad dolazio do LLM-a. Web handler kod praznog
+    rezultata mora vratiti None (ugovor lane handlera) pa pipeline nastavlja."""
+    from ragspine.web import websearch  # noqa: F401  (registrira "web" lane)
+
+    monkeypatch.setattr("ragspine.web.websearch.safe_fetch",
+                        lambda url, **kw: b"nista korisno")
+    cfg.llm_base_url = "https://api.x.com"; cfg.llm_api_key = "k"; cfg.llm_model = "m"
+
+    def transport(u, h, b):
+        return {"choices": [{"message": {"content": "NE"}}], "model": "m", "usage": {}}
+
+    llm = LLMClient(cfg, transport=transport)
+    r = pipeline.answer(spine, cfg, "objasni ukratko sto je pdv", "ana", llm=llm)
+    assert "Nema web rezultata" not in r["answer"]
+    assert r["lane"] == "chat"
