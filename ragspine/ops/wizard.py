@@ -511,6 +511,14 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
     stage = wizard_state.get_stage(spine)
     out(f"RAGSPINE setup (nastavak od koraka {stage + 1}).")
     try:
+        # Upgrade grana (spec str.1): postojeća baza — korisnici postoje, a
+        # setup nikad nije dovršen. Resume (stage>0) nije upgrade slučaj.
+        if stage == 0 and not firstrun.needs_onboarding(spine):
+            if page_upgrade(spine, cfg, input_fn=input_fn, out=out):
+                wizard_state.mark_complete(spine)
+                out("✓ Postojeća konfiguracija preuzeta — setup dovršen.")
+                launch_now(spine, cfg, input_fn=input_fn, out=out)
+                return
         if stage < 1:
             if not page_preduvjeti(spine, cfg, input_fn=input_fn, out=out):
                 out("Setup prekinut na preduvjetima. Pokreni ponovno kad popraviš.")

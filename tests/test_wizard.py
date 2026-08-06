@@ -737,3 +737,54 @@ def test_page_upgrade_default_ne_kad_fali_model(tmp_path):
     firstrun.create_first_owner(s, "admin", "lozinka123")   # samo admin, bez modela/mreže
     ok = wizard.page_upgrade(s, _UpgCfg(), input_fn=_reader(""), out=lambda *_: None)
     assert ok is False
+
+
+def _stub_pages(monkeypatch, ran):
+    for p in ("page_preduvjeti", "page_operater", "page_model",
+              "page_mreza", "page_mape", "page_gotovo"):
+        monkeypatch.setattr(wizard, p,
+                            lambda *a, _p=p, **k: ran.append(_p) or True)
+    monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
+
+
+def test_run_legacy_baza_da_preskace_stranice(tmp_path, monkeypatch):
+    s = _legacy_spine(tmp_path)
+    ran = []
+    _stub_pages(monkeypatch, ran)
+    wizard.run(s, _UpgCfg(), input_fn=_reader("d"), out=lambda *_: None)
+    assert ran == []
+    assert ws.is_complete(s) is True
+
+
+def test_run_legacy_baza_ne_ide_normalni_wizard(tmp_path, monkeypatch):
+    s = _legacy_spine(tmp_path)
+    ran = []
+    _stub_pages(monkeypatch, ran)
+    wizard.run(s, _UpgCfg(), input_fn=_reader("n"), out=lambda *_: None)
+    assert "page_preduvjeti" in ran and "page_gotovo" in ran
+    assert ws.is_complete(s) is True
+
+
+def test_run_svjeza_baza_bez_ponude(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))          # bez korisnika
+    ran = []
+    _stub_pages(monkeypatch, ran)
+    ponuda = []
+    monkeypatch.setattr(wizard, "page_upgrade",
+                        lambda *a, **k: ponuda.append(1) or True)
+    wizard.run(s, _UpgCfg(), input_fn=_reader(), out=lambda *_: None)
+    assert ponuda == []
+    assert "page_preduvjeti" in ran
+
+
+def test_run_resume_bez_ponude(tmp_path, monkeypatch):
+    s = _legacy_spine(tmp_path)
+    ws.set_stage(s, 1)                               # resume, ne upgrade
+    ran = []
+    _stub_pages(monkeypatch, ran)
+    ponuda = []
+    monkeypatch.setattr(wizard, "page_upgrade",
+                        lambda *a, **k: ponuda.append(1) or True)
+    wizard.run(s, _UpgCfg(), input_fn=_reader(), out=lambda *_: None)
+    assert ponuda == []
+    assert "page_operater" in ran and "page_preduvjeti" not in ran
