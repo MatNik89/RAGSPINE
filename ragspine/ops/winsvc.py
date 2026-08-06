@@ -12,11 +12,13 @@ _SVC = "RAGSPINE"
 
 
 def service_commands(exe: str, data_dir: str, port: int) -> list[list[str]]:
-    """Komande za kreiranje servisa, recovery, firewall i ACL — redom."""
+    """Komande za kreiranje servisa, recovery, firewall i ACL — redom.
+    sc.exe traži parove ključ=vrednost kao dva odvojena tokena; list2cmdline
+    na Windowsu ne navoduje pojedine tokene, samo cijelo buildirane naredbe."""
     return [
-        ["sc.exe", "create", _SVC, f"binPath= {exe} serve", "start= auto",
-         "obj= NT AUTHORITY\\LocalService"],
-        ["sc.exe", "failure", _SVC, "reset= 86400", "actions= restart/5000"],
+        ["sc.exe", "create", _SVC, "binPath=", f"{exe} serve", "start=", "auto",
+         "obj=", "NT AUTHORITY\\LocalService"],
+        ["sc.exe", "failure", _SVC, "reset=", "86400", "actions=", "restart/5000"],
         ["netsh", "advfirewall", "firewall", "add", "rule", f"name={_SVC}",
          "dir=in", "action=allow", "protocol=TCP", f"localport={port}"],
         ["icacls", data_dir, "/inheritance:r",

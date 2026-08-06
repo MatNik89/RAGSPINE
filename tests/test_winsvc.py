@@ -10,6 +10,22 @@ def test_service_commands_shapes():
     assert any("failure" in f for f in flat)
     assert any("advfirewall" in f and "8443" in f for f in flat)
     assert any("icacls" in f and "C:/data" in f for f in flat)
+    # Provjeri sc.exe tokenizaciju: ključ= i vrijednost kao odvojeni elementi
+    create_cmd = cmds[0]
+    assert "binPath=" in create_cmd
+    binpath_idx = create_cmd.index("binPath=")
+    assert create_cmd[binpath_idx + 1] == "C:/rs/ragspine.exe serve"
+    assert "obj=" in create_cmd
+    obj_idx = create_cmd.index("obj=")
+    assert create_cmd[obj_idx + 1] == "NT AUTHORITY\\LocalService"
+
+
+def test_service_commands_spaced_paths():
+    """Spaced paths trebaju biti dio vrijednosti, ne kao odvojeni elementi."""
+    cmds = winsvc.service_commands("C:/Program Files/rs.exe", "C:/data", 8443)
+    create_cmd = cmds[0]
+    binpath_idx = create_cmd.index("binPath=")
+    assert create_cmd[binpath_idx + 1] == "C:/Program Files/rs.exe serve"
 
 
 def test_install_service_windows_executes_all(monkeypatch):
