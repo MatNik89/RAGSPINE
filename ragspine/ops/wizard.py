@@ -487,6 +487,23 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         out(f"Otvori u pregledniku: {url}")
 
 
+def page_upgrade(spine, cfg, *, input_fn=input, out=print) -> bool:
+    """Postojeća baza bez setup_complete flaga (instalacija prije wizarda):
+    spec traži „detektiraj, ponudi migraciju, ne novi setup". Migracija =
+    preuzmi postojeću konfiguraciju (shema je ista, nema podataka za seljenje).
+    True = preuzeto (pozivatelj označava setup dovršenim), False = normalni wizard."""
+    tui.print_header("Postojeća baza otkrivena", out=out)
+    render_summary(spine, cfg, out=out)
+    out("")
+    # Default „da" samo za klasičnu legacy instalaciju (admin je okidač u run();
+    # model+host potvrđuju da je sustav bio konfiguriran, ne napola postavljen).
+    default = bool(spine.get_override("model", "model")
+                   and spine.get_override("net", "host"))
+    return tui.prompt_yes_no(
+        "Preuzmi postojeće postavke i označi setup dovršenim? (ne = prođi setup)",
+        default=default, input_fn=input_fn, out=out)
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")

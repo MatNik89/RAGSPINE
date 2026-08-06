@@ -693,3 +693,47 @@ def test_launch_now_edge_oserror_ne_rusi(tmp_path, monkeypatch):
     assert "Server pokrenut" in text
     assert "Otvori ručno u pregledniku" in text
     assert "192.168.1.7:8443" in text
+
+
+def _legacy_spine(tmp_path):
+    """Baza kakvu ostavi instalacija prije wizarda: admin + model + mreža."""
+    s = init_spine(str(tmp_path / "t.db"))
+    firstrun.create_first_owner(s, "admin", "lozinka123")
+    s.set_override("model", "model", "qwen2.5:7b")
+    s.set_override("net", "host", "192.168.1.7")
+    return s
+
+
+class _UpgCfg:
+    db_path = ""
+    data_dir = ""
+
+
+def test_page_upgrade_da_vraca_true(tmp_path):
+    s = _legacy_spine(tmp_path)
+    lines = []
+    ok = wizard.page_upgrade(s, _UpgCfg(), input_fn=_reader("d"), out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert "Postojeća baza" in text
+    assert "qwen2.5:7b" in text          # render_summary je prikazan
+
+
+def test_page_upgrade_ne_vraca_false(tmp_path):
+    s = _legacy_spine(tmp_path)
+    ok = wizard.page_upgrade(s, _UpgCfg(), input_fn=_reader("n"), out=lambda *_: None)
+    assert ok is False
+
+
+def test_page_upgrade_default_da_kad_je_sve_postavljeno(tmp_path):
+    s = _legacy_spine(tmp_path)
+    # prazan unos = default; admin+model+host postavljeni → default da
+    ok = wizard.page_upgrade(s, _UpgCfg(), input_fn=_reader(""), out=lambda *_: None)
+    assert ok is True
+
+
+def test_page_upgrade_default_ne_kad_fali_model(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    firstrun.create_first_owner(s, "admin", "lozinka123")   # samo admin, bez modela/mreže
+    ok = wizard.page_upgrade(s, _UpgCfg(), input_fn=_reader(""), out=lambda *_: None)
+    assert ok is False
