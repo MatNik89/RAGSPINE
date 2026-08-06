@@ -1,4 +1,4 @@
-# RAGSPINE — pocetni setup za Windows (PowerShell 5.1+ i 7+).
+﻿# RAGSPINE — pocetni setup za Windows (PowerShell 5.1+ i 7+).
 # Pokreni iz korijena repoa:   .\install.ps1
 # Ako PowerShell blokira skriptu:  powershell -ExecutionPolicy Bypass -File .\install.ps1
 # Idempotentno: ponovno pokretanje ne razbija postojeci install.
