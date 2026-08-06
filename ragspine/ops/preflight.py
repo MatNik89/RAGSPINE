@@ -226,8 +226,10 @@ def llmfit_models(cfg=None) -> list[dict] | None:
     sortirane po score-u. None kad llmfit nije dostupan ili izlaz ne valja."""
     import json
     try:
-        rc, out, _err = run_isolated([sys.executable, "-m", "llmfit", "--json"],
-                                     timeout=60)
+        # PATH binary prvo; `python -m llmfit` wrapper traži binary u sysconfig scripts putanji pa puca za pip --user instalacije.
+        exe = shutil.which("llmfit")
+        cmd = [exe, "--json"] if exe else [sys.executable, "-m", "llmfit", "--json"]
+        rc, out, _err = run_isolated(cmd, timeout=60)
         if rc != 0:
             return None
         data = json.loads(out)

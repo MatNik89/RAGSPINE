@@ -205,6 +205,38 @@ def test_llmfit_models_none_on_garbage(monkeypatch):
     assert pf.llmfit_models() is None
 
 
+def test_llmfit_models_uses_which_when_available(monkeypatch):
+    # When llmfit binary is on PATH, use it directly
+    captured_cmd = []
+
+    def capture_run_isolated(cmd, timeout=60):
+        captured_cmd.append(cmd)
+        return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
+
+    monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
+    monkeypatch.setattr(pf.shutil, "which", lambda x: "/x/llmfit" if x == "llmfit" else None)
+
+    rows = pf.llmfit_models()
+    assert rows is not None
+    assert captured_cmd[0] == ["/x/llmfit", "--json"]
+
+
+def test_llmfit_models_fallback_to_python_m_when_which_fails(monkeypatch):
+    # When which("llmfit") returns None, fall back to python -m wrapper
+    captured_cmd = []
+
+    def capture_run_isolated(cmd, timeout=60):
+        captured_cmd.append(cmd)
+        return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
+
+    monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
+    monkeypatch.setattr(pf.shutil, "which", lambda x: None)
+
+    rows = pf.llmfit_models()
+    assert rows is not None
+    assert captured_cmd[0] == [pf.sys.executable, "-m", "llmfit", "--json"]
+
+
 def test_summary_models_have_llmfit_shape(monkeypatch, cfg):
     # Shape guard: summary()["models"] rows must contain llmfit keys (not old model_fits keys)
     models = [_lm("hf/a", "a:7b", score=60.0), _lm("hf/b", "b:3b", score=50.0)]
