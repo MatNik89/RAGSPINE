@@ -40,11 +40,21 @@ def generate_self_signed(out_dir: str, ips: list[str],
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
     )
-    key_p.write_bytes(key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption()))
-    os.chmod(key_p, 0o600)
+    # Kreiraj key.pem s 0600 dozvolama od početka — bez prozora gdje je dostupan drugima.
+    # O_EXCL traži postojeću datoteku; ako se pojavi u međuvremenu, ponytail:
+    # pretpostavljamo single-writer (setup wizard/CLI nije paralelno).
+    try:
+        fd = os.open(str(key_p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption()))
+    except FileExistsError:
+        # Cert i key se pojavili između idempotency-check i kreiranja — vrati postojeće.
+        if cert_p.exists() and key_p.exists():
+            return str(cert_p), str(key_p)
+        raise
     cert_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     return str(cert_p), str(key_p)
 
