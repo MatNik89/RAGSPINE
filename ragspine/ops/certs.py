@@ -12,14 +12,31 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 
 
+def _warn_if_san_stale(cert_p: Path, ips: list[str], *, out=print) -> None:
+    """Upozori (ne regeneriraj — trust je možda već instaliran na klijentima)
+    kad postojeći cert ne pokriva traženi IP (stroj je promijenio adresu)."""
+    try:
+        cert = x509.load_pem_x509_certificate(cert_p.read_bytes())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        existing = {str(ip) for ip in san.get_values_for_type(x509.IPAddress)}
+    except Exception:
+        return
+    missing = [i for i in ips if i not in existing]
+    if missing:
+        out(f"⚠ Postojeći certifikat ne pokriva IP {', '.join(missing)} "
+            f"(SAN sadrži: {', '.join(sorted(existing)) or 'ništa'}). "
+            f"Ako se adresa promijenila, obriši {cert_p.parent} pa ponovi setup za novi certifikat.")
+
+
 def generate_self_signed(out_dir: str, ips: list[str],
                          hostnames: list[str] | None = None,
-                         days: int = 3650) -> tuple[str, str]:
+                         days: int = 3650, *, out=print) -> tuple[str, str]:
     """Generiraj (ili vrati postojeći) cert.pem + key.pem sa SAN unosima."""
-    out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
-    cert_p, key_p = out / "cert.pem", out / "key.pem"
+    out_dir_p = Path(out_dir)
+    out_dir_p.mkdir(parents=True, exist_ok=True)
+    cert_p, key_p = out_dir_p / "cert.pem", out_dir_p / "key.pem"
     if cert_p.exists() and key_p.exists():
+        _warn_if_san_stale(cert_p, ips, out=out)
         return str(cert_p), str(key_p)
 
     key = ec.generate_private_key(ec.SECP256R1())

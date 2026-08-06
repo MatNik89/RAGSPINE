@@ -52,6 +52,23 @@ def test_trust_command_prints_fingerprint(tmp_path, monkeypatch, capsys):
         set_config(None)
 
 
+def test_generate_warns_on_stale_san(tmp_path):
+    """Nalaz e: nakon promjene IP-a stroja, postojeći cert ima stari SAN —
+    upozori umjesto tihe regeneracije (trust je možda već instaliran)."""
+    c1, k1 = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"])
+    lines = []
+    c2, k2 = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.99"], out=lines.append)
+    assert (c1, k1) == (c2, k2)                      # ne regenerira automatski
+    assert any("10.0.0.99" in l for l in lines)
+
+
+def test_generate_no_warning_when_san_covers_ip(tmp_path):
+    c1, _ = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"])
+    lines = []
+    certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"], out=lines.append)
+    assert lines == []
+
+
 def test_generate_recovers_from_orphan_key(tmp_path):
     """Ako ostane samo key.pem od crasha, regenerira se s novim certom."""
     # Simuliraj crash: kreiraj samo key.pem bez certa
