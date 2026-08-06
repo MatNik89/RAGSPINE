@@ -137,3 +137,41 @@ def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
     assert got == cfg.embed_model          # fallback na default
     assert calls == ["BAAI/bge-m3", cfg.embed_model]
     set_config(None)
+
+
+class _FakeRes:
+    def __init__(self, text):
+        self.text = text
+        self.model = "test-model"
+
+
+def test_self_test_ok_on_nonempty_answer(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard, "_llm_complete", lambda spine, cfg, prompt: _FakeRes("OK RAGSPINE"))
+    lines = []
+    assert wizard.self_test(s, None, input_fn=_reader(), out=lines.append) is True
+    assert not any("upozorenje" in l.lower() for l in lines)
+
+
+def test_self_test_soft_warns_on_wrong_text(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard, "_llm_complete", lambda spine, cfg, prompt: _FakeRes("bok!"))
+    lines = []
+    assert wizard.self_test(s, None, input_fn=_reader(), out=lines.append) is True
+    assert any("upozorenje" in l.lower() for l in lines)
+
+
+def test_self_test_retries_then_user_gives_up(tmp_path, monkeypatch):
+    s = init_spine(str(tmp_path / "t.db"))
+    calls = []
+
+    def _fail(spine, cfg, prompt):
+        calls.append(1)
+        raise wizard.LLMUnavailable("hladno")
+
+    monkeypatch.setattr(wizard, "_llm_complete", _fail)
+    # dva puta "da, pokusaj ponovno", pa "ne" -> False; ukupno 3 poziva LLM-a
+    ok = wizard.self_test(s, None, input_fn=_reader("da", "da", "ne"),
+                          out=lambda *_: None)
+    assert ok is False
+    assert len(calls) == 3

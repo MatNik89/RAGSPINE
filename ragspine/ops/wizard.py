@@ -1,7 +1,10 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
 P1: Stranica 1 (preduvjeti) + Stranica 2 (operater). Ostale stranice u P2-P4."""
 import dataclasses
+import re
+import time
 
+from ragspine.core.llm import LLMError, LLMUnavailable
 from ragspine.ops import preflight, tui, wizard_state
 from ragspine.web import firstrun
 
@@ -72,6 +75,47 @@ def _download_embed(cfg):
     """Indirekcija radi testabilnosti (embed vuce fastembed tek pri pozivu)."""
     from ragspine.rag import embed
     return embed.download_model(cfg)
+
+
+_SELF_TEST_PROMPT = "Odgovori točno: OK RAGSPINE"
+
+
+def _llm_complete(spine, cfg, prompt: str):
+    """Indirekcija radi testabilnosti; LLMClient ima vlastiti timeout (120 s)
+    koji pokriva i cold-load vecih modela."""
+    from ragspine.business import model_settings
+    from ragspine.core.llm import LLMClient
+    return LLMClient(model_settings.apply(spine, cfg)).complete(
+        [{"role": "user", "content": prompt}], max_tokens=20)
+
+
+def self_test(spine, cfg, *, input_fn=input, out=print, retries: int = 3) -> bool:
+    """Kratki test odabranog modela. Uspjeh = ne-prazan odgovor unutar timeouta.
+    Regex "OK RAGSPINE" = soft-check (upozorenje). Kvar ne rusi setup."""
+    for attempt in range(1, retries + 1):
+        out(f"Self-test modela (pokusaj {attempt}/{retries}; prvi odziv zna trajati i minutu)...")
+        t0 = time.monotonic()
+        try:
+            res = _llm_complete(spine, cfg, _SELF_TEST_PROMPT)
+        except (LLMError, LLMUnavailable, Exception) as e:
+            out(f"  ✗ {e}")
+            if attempt < retries and tui.prompt_yes_no(
+                    "Pokusaj ponovno?", default=True, input_fn=input_fn, out=out):
+                continue
+            return False
+        text = (getattr(res, "text", "") or "").strip()
+        if not text:
+            out("  ✗ prazan odgovor")
+            if attempt < retries and tui.prompt_yes_no(
+                    "Pokusaj ponovno?", default=True, input_fn=input_fn, out=out):
+                continue
+            return False
+        elapsed = time.monotonic() - t0
+        out(f"  ✓ model odgovara ({elapsed:.1f} s)")
+        if not re.search(r"OK RAGSPINE", text, re.IGNORECASE):
+            out("  ⚠ upozorenje: odgovor ne sadrzi 'OK RAGSPINE' — model radi, ali slabo slijedi upute.")
+        return True
+    return False
 
 
 def choose_embed_model(state: dict, default_model: str) -> str:
