@@ -698,7 +698,9 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(429, "previše upita — pričekajte minutu")
 
     @app.post("/chat")
-    def chat(body: ChatBody, actor: Actor = Depends(require_actor)):
+    def chat(body: ChatBody, actor: Actor = Depends(require_actor_web)):
+        # require_actor_web: prima i cookie i Bearer — web UI šalje cookie
+        # (E2E nalaz: require_actor je samo-Bearer pa je web chat uvijek 401).
         _chat_gate(actor)
         return _answer(body.q, actor, fresh=body.fresh)
 

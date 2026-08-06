@@ -80,3 +80,15 @@ def test_chat_is_stateful_by_default(spine, cfg, monkeypatch):
     c.post("/chat", json={"q": "obriši sve iz baze"},
            headers={"Authorization": f"Bearer {tok}"})
     assert calls == [False]
+
+
+def test_chat_radi_s_cookiejem_iz_web_prijave(spine, cfg):
+    """Web UI šalje /chat s cookiejem (credentials: same-origin), bez Bearer
+    headera — E2E nalaz sa stroja Nick: require_actor (samo Bearer) vraćao 401
+    svakom prijavljenom korisniku web chata."""
+    from ragspine.web.deps import COOKIE_NAME
+    c = _client(spine, cfg)
+    tok = _token(c, spine)
+    c.cookies.set(COOKIE_NAME, tok)
+    r = c.post("/chat", json={"q": "obriši sve iz baze"})
+    assert r.status_code == 200 and r.json()["lane"] == "reject"
