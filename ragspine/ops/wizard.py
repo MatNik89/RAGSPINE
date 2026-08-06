@@ -8,6 +8,7 @@ import re
 import shutil
 import sys
 import time
+import types
 from pathlib import Path
 
 from ragspine.core.llm import LLMError, LLMUnavailable
@@ -307,6 +308,68 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
+# Stranica 5 (spec): uloga (folders.role string) → naziv za prompt.
+_MAPE_ULOGE = [
+    ("klijenti", "Klijenti"),
+    ("propisi", "Propisi"),
+    ("skener", "Zajednički skenovi"),
+    ("program", "Knjigovodstveni program"),
+]
+
+
+def _net_use_hint(unc: str) -> str:
+    """`net use` komanda za SMB prijavu; `*` = net.exe sam pita lozinku (ne
+    završi u argv/process-listi), /persistent:no = bez naslijeđenih mapiranja.
+    ponytail: DPAPI spremanje SMB kredencijala = backlog; do tada admin
+    komandu pokreće ručno, wizard lozinke ne dira."""
+    share = "\\".join(unc.split("\\")[:4])   # \\server\share (bez podmapa)
+    return f"net use {share} /user:DOMENA\\korisnik * /persistent:no"
+
+
+def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
+    """Stranica 5: mrežne mape po ulogama (UNC putanje), preskočivo.
+    Test pristupa ide kao trenutni korisnik (servisni račun ne postoji —
+    wrapper backlog, v. winsvc); registracija ide u istu folders tablicu
+    koju koristi web Postavke → Mrežne mape."""
+    from ragspine.business import folders
+    tui.print_header("5/6  Mape / mrežni pogoni", out=out)
+    if not tui.prompt_yes_no("Poveži mrežne mape sada? (kasnije: Postavke → Mrežne mape)",
+                             default=True, input_fn=input_fn, out=out):
+        return True
+    registered = []
+    for role, naziv in _MAPE_ULOGE:
+        while True:
+            path = tui.prompt_text(
+                f"{naziv} — UNC putanja (\\\\server\\share\\...; prazno = preskoči)",
+                input_fn=input_fn, out=out)
+            if not path:
+                break
+            if re.match(r"^[A-Za-z]:", path):
+                out("  ⚠ Slovo pogona (npr. Z:) servisni račun ne vidi — koristi UNC putanju.")
+            if not os.path.isdir(path):
+                out(f"  ✗ Nedostupno: {path}")
+                out(f"    Ako share traži prijavu, u drugom prozoru pokreni: {_net_use_hint(path)}")
+                if tui.prompt_yes_no("  Pokušaj ponovno?", default=True,
+                                     input_fn=input_fn, out=out):
+                    continue
+                break
+            root = os.path.realpath(path)
+            try:
+                folders.register(spine, types.SimpleNamespace(mount_roots=[root]),
+                                 path, role, label=naziv, user="setup")
+            except ValueError as e:
+                out(f"  ✗ {e}")
+                break
+            out(f"  ✓ {naziv}: {path}")
+            registered.append(root)
+            break
+    if registered:
+        out("")
+        out("Da web sučelje (i budući servis) vidi ove mape, postavi env varijablu:")
+        out(f"  RAGSPINE_MOUNT_ROOTS={','.join(registered)}")
+    return True
+
+
 def run(spine, cfg, *, input_fn=input, out=print) -> None:
     if wizard_state.is_complete(spine):
         out("Setup je već dovršen. Za ponovno: `ragspine setup --reset`.")
@@ -334,6 +397,11 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na mreži. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 4)
+        if stage < 5:
+            if not page_mape(spine, cfg, input_fn=input_fn, out=out):
+                out("Setup prekinut na mapama. Pokreni ponovno za nastavak.")
+                return
+            wizard_state.set_stage(spine, 5)
     except (EOFError, KeyboardInterrupt):
         # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
         # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
@@ -343,8 +411,7 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup zahtijeva interaktivni terminal. Pokreni `ragspine setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
-    # P3 pokriva stranice 1-4; mark_complete se pomiče dalje kako stranice
-    # 5-6 stižu u P4 (poziv ide iza ZADNJE implementirane stranice).
+    # Stranica 6 (sažetak) stiže u sljedećem tasku; mark_complete ide iza
+    # ZADNJE implementirane stranice.
     wizard_state.mark_complete(spine)
-    out("P3 gotov: preduvjeti + operater + model + mreža/HTTPS. Setup je dovršen — web sučelje je dostupno.")
-    out("Stranice 5-6 (mape, sažetak) slijede u P4.")
+    out("Setup dovršen: preduvjeti + operater + model + mreža + mape. Sažetak (6/6) slijedi.")

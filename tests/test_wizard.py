@@ -55,6 +55,57 @@ def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
     assert any("zauzet" in l.lower() for l in lines)
 
 
+def test_page_mape_preskok(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    ok = wizard.page_mape(s, None, input_fn=_reader("n"), out=lambda *_: None)
+    assert ok is True
+    from ragspine.business import folders
+    assert folders.list_folders(s) == []
+
+
+def test_page_mape_registrira_mapu(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    d = tmp_path / "klijenti"
+    d.mkdir()
+    # "d" (poveži), putanja za Klijente, prazno za preostale 3 uloge
+    lines = []
+    ok = wizard.page_mape(s, None, input_fn=_reader("d", str(d), "", "", ""),
+                          out=lines.append)
+    assert ok is True
+    from ragspine.business import folders
+    rows = folders.list_folders(s)
+    assert len(rows) == 1 and rows[0]["role"] == "klijenti"
+    assert any("RAGSPINE_MOUNT_ROOTS" in l for l in lines)
+
+
+def test_page_mape_nedostupna_pa_odustane(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    bad = str(tmp_path / "nema")
+    # "d", nepostojeća putanja, "n" (ne pokušava ponovno), prazno za ostale 3
+    lines = []
+    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad, "n", "", "", ""),
+                          out=lines.append)
+    assert ok is True
+    assert any("net use" in l for l in lines)
+    from ragspine.business import folders
+    assert folders.list_folders(s) == []
+
+
+def test_page_mape_upozorava_na_slovo_pogona(tmp_path):
+    s = init_spine(str(tmp_path / "t.db"))
+    # "d", drive-letter putanja (ne postoji na Linuxu), "n", prazno za ostale 3
+    lines = []
+    wizard.page_mape(s, None, input_fn=_reader("d", "Z:\\skenovi", "n", "", "", ""),
+                     out=lines.append)
+    assert any("Slovo pogona" in l for l in lines)
+
+
+def test_net_use_hint_iz_unc_putanje():
+    hint = wizard._net_use_hint(r"\\nas\ured\klijenti\2026")
+    assert r"net use \\nas\ured" in hint
+    assert "*" in hint and "/persistent:no" in hint
+
+
 def test_render_preflight_blocks_on_fail():
     reqs = [
         {"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""},
@@ -178,21 +229,22 @@ def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: True)
+    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
-    assert ws.get_stage(spine) == 4
+    assert ws.get_stage(spine) == 5
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
 
 
-def test_run_reaches_stage4_and_completes(tmp_path, monkeypatch):
+def test_run_reaches_stage5_and_completes(tmp_path, monkeypatch):
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
-    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza"):
+    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape"):
         monkeypatch.setattr(wizard, p, lambda *a, **k: True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ws.get_stage(s) == 4
+    assert ws.get_stage(s) == 5
     assert ws.is_complete(s) is True
 
 
@@ -216,14 +268,15 @@ def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: False)
+    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
     assert ws.get_stage(s) == 3          # stranice 1-3 prosle
     assert ws.is_complete(s) is False    # mreza otkazana -> nije complete
 
 
 def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
-    """Napomena (Task 5 P3): otkad run() ima stage 4 (page_mreza), resume od
-    stage 2 pokreće i model I mreža stranicu (ne samo model) — ran ima oba."""
+    """Napomena (Task 1 P4): otkad run() ima stage 5 (page_mape), resume od
+    stage 2 pokreće model, mreža I mape stranice — ran ima sve tri."""
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
@@ -233,8 +286,9 @@ def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: ran.append("p2") or True)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: ran.append("p3") or True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: ran.append("p4") or True)
+    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: ran.append("p5") or True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ran == ["p3", "p4"]
+    assert ran == ["p3", "p4", "p5"]
     assert ws.is_complete(s) is True
 
 
