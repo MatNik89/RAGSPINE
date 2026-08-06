@@ -23,6 +23,7 @@ def _reset_llmfit_cache():
     yield
     preflight._llmfit_cache = None
 
+
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
     monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))

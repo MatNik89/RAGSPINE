@@ -347,10 +347,16 @@ def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
             if not path:
                 break
             if re.match(r"^[A-Za-z]:", path):
+                # ponytail: upozorenje ne blokira jer os.path.realpath na Windowsu
+                # mapped-drive obično razriješi u UNC; blokada bi lažno odbila valjane
+                # konfiguracije (do tada admin koristi mapped drive, što je OK).
                 out("  ⚠ Slovo pogona (npr. Z:) servisni račun ne vidi — koristi UNC putanju.")
             if not os.path.isdir(path):
                 out(f"  ✗ Nedostupno: {path}")
-                out(f"    Ako share traži prijavu, u drugom prozoru pokreni: {_net_use_hint(path)}")
+                if path.startswith("\\\\"):
+                    out(f"    Ako share traži prijavu, u drugom prozoru pokreni: {_net_use_hint(path)}")
+                else:
+                    out("    Putanja nije UNC (\\\\server\\share\\...) — provjeri tipfeler.")
                 if tui.prompt_yes_no("  Pokušaj ponovno?", default=True,
                                      input_fn=input_fn, out=out):
                     continue

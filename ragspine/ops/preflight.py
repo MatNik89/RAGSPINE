@@ -232,6 +232,9 @@ _LLMFIT_MAX_ROWS = 12
 # llmfit subprocess je spor (~sekunde); wizard i web preflight ga zovu više
 # puta u procesu. Keš po procesu; None (neuspjeh) se NE kešira da
 # retry-nakon-installa proradi. Testovi resetiraju kroz conftest.
+# Napomena: uspješan-ali-prazan rezultat (llmfit radi, 0 modela prođe filter)
+# kešira se zauvijek — bezopasno, jer retry grana u wizardu gleda PATH
+# (dostupnost llmfita), ne sadržaj liste.
 _llmfit_cache: list[dict] | None = None
 
 

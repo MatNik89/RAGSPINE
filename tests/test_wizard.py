@@ -80,15 +80,30 @@ def test_page_mape_registrira_mapu(tmp_path):
 
 def test_page_mape_nedostupna_pa_odustane(tmp_path):
     s = init_spine(str(tmp_path / "t.db"))
-    bad = str(tmp_path / "nema")
-    # "d", nepostojeća putanja, "n" (ne pokušava ponovno), prazno za ostale 3
+    # UNC putanja — trebala bi biti nedostupna i očekujemo net use hint
+    bad_unc = r"\\nas\share\nema"
+    # "d", nepostojeća UNC putanja, "n" (ne pokušava ponovno), prazno za ostale 3
     lines = []
-    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad, "n", "", "", ""),
+    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad_unc, "n", "", "", ""),
                           out=lines.append)
     assert ok is True
     assert any("net use" in l for l in lines)
     from ragspine.business import folders
     assert folders.list_folders(s) == []
+
+
+def test_page_mape_ne_unc_putanja_nema_net_use(tmp_path):
+    """Ne-UNC (npr. /nema/takve/mape) nepostojeća putanja — očekuj 'nije UNC',
+    NEMA 'net use' hint-a."""
+    s = init_spine(str(tmp_path / "t.db"))
+    bad_local = "/nema/takve/mape"
+    lines = []
+    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad_local, "n", "", "", ""),
+                          out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert "nije UNC" in text
+    assert "net use" not in text.lower()
 
 
 def test_page_mape_upozorava_na_slovo_pogona(tmp_path):
