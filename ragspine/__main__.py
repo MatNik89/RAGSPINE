@@ -295,6 +295,27 @@ def _cmd_browser(args) -> int:
     return 0
 
 
+def _cmd_trust(args) -> int:
+    from ragspine.config import get_config
+    from ragspine.core.spine import init_spine
+    from ragspine.ops import certs
+
+    cfg = get_config()
+    spine = init_spine(cfg.db_path)
+    cert = spine.get_override("net", "cert_path") or ""
+    if not cert or not Path(cert).exists():
+        print("Nema certifikata — pokreni `ragspine setup` (stranica Mreža) da ga generiraš.")
+        return 1
+    print(f"Javni certifikat: {cert}")
+    print(f"SHA256 fingerprint: {certs.fingerprint_sha256(cert)}")
+    print("")
+    print("Instalacija na klijentima (SAMO cert.pem — key.pem se nikad ne dijeli):")
+    print("  Windows: dupli klik na cert.pem → Instaliraj → 'Pouzdana izdavačka tijela'")
+    print("           (ili GPO distribucija ako postoji AD domena).")
+    print("  Provjeri fingerprint prije instalacije — mora se podudarati s gornjim.")
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ragspine")
     sub = p.add_subparsers(dest="cmd")
@@ -302,6 +323,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("serve").set_defaults(func=_cmd_serve)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
+    sub.add_parser("trust").set_defaults(func=_cmd_trust)
     _setup = sub.add_parser("setup")
     _setup.add_argument("--download-models", action="store_true",
                         help="povuci embedding model (aktivira vektorsku pretragu)")
