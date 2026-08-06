@@ -289,7 +289,7 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     cert_ip = lan if bind == "0.0.0.0" else bind
     cert_dir = str(Path(getattr(cfg, "data_dir", ".")) / "certs")
     cert, key = certs.generate_self_signed(cert_dir, ips=[cert_ip],
-                                           hostnames=["ragspine.local"])
+                                           hostnames=["ragspine.local"], out=out)
     out(f"HTTPS certifikat: {cert}")
     out(f"  SHA256: {certs.fingerprint_sha256(cert)}")
     out("  Na klijente ga instaliraj naredbom: ragspine trust")

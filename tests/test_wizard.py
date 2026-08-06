@@ -15,8 +15,8 @@ def _mreza_mocks(monkeypatch, tmp_path):
     monkeypatch.setattr(wizard.preflight, "system_state",
                         lambda c=None: {"ip_mode": "static"})
     monkeypatch.setattr(wizard.certs, "generate_self_signed",
-                        lambda d, ips, hostnames=None: (str(tmp_path / "cert.pem"),
-                                                        str(tmp_path / "key.pem")))
+                        lambda d, ips, hostnames=None, out=print: (str(tmp_path / "cert.pem"),
+                                                                   str(tmp_path / "key.pem")))
     monkeypatch.setattr(wizard.certs, "fingerprint_sha256", lambda p: "AA:BB")
 
 
@@ -275,9 +275,8 @@ def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
     assert ws.is_complete(s) is False    # mreza otkazana -> nije complete
 
 
-def test_run_resume_from_stage2_runs_only_model_page(tmp_path, monkeypatch):
-    """Napomena (Task 2 P4): otkad run() ima stage 6 (page_gotovo), resume od
-    stage 2 pokreće model, mreža, mape I gotovo stranice — ran ima sve četiri."""
+def test_run_resume_from_stage2_runs_pages_3_to_6(tmp_path, monkeypatch):
+    """Resume od stage 2 pokreće stranice 3-6 (model, mreža, mape, sažetak) — ne ponavlja 1-2."""
     from ragspine.core.spine import init_spine
     from ragspine.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))

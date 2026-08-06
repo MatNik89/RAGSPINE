@@ -8,7 +8,7 @@ from ragspine.core import security
 
 # Prijedlog uloga (role je slobodan string — dodaje se po potrebi, kao vrste obveza).
 # 'propisi' = jedna glavna mapa; podmape (Zakoni/Pravilnici/Uredbe...) daju vrstu+autoritet.
-ROLES = ("propisi", "klijenti", "ostalo", "skener")
+ROLES = ("propisi", "klijenti", "ostalo", "skener", "program")
 
 
 def _under_a_root(rp: str, roots: list[str]) -> bool:

@@ -1,6 +1,7 @@
 import pytest
 
-from ragspine.ops import preflight as pf, wizard_state as ws
+from ragspine.ops import preflight as pf
+from tests.conftest import complete_setup
 
 # Sačuvana referenca na pravu funkciju PRIJE nego je autouse fixture prekrije
 # (Nalaz #3, P2b review) — dedicirani llmfit_models/summary testovi je zovu
@@ -78,7 +79,7 @@ def _admin_client(spine, cfg):
     from ragspine.web.deps import add_user
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")           # prvi login → owner default orga
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     return c, {"Authorization": f"Bearer {tok}"}
 

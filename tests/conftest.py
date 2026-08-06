@@ -24,3 +24,11 @@ def cfg(tmp_path, monkeypatch):
 @pytest.fixture
 def spine(tmp_path):
     return Spine(str(tmp_path / "t.db"))
+
+
+def complete_setup(spine):
+    """Gatekeeper drži web na /ui/setup dok setup wizard ne završi — testovi
+    koji gađaju API/UI rute ovim označe setup dovršenim (jedno mjesto za
+    incantation umjesto raspršenih wizard_state.mark_complete poziva)."""
+    from ragspine.ops import wizard_state
+    wizard_state.mark_complete(spine)

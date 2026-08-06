@@ -4,7 +4,7 @@ from ragspine.business import model_settings
 from ragspine.config import get_config
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
-from ragspine.ops import wizard_state as ws
+from tests.conftest import complete_setup
 
 
 def _client(spine, cfg):
@@ -13,7 +13,7 @@ def _client(spine, cfg):
 
 def _token(c, spine):
     add_user(spine, "ana", "tajna")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     return c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
 
 

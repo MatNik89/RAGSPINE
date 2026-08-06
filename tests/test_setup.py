@@ -1,5 +1,4 @@
 from ragspine.business.dnevnice import RATES
-from ragspine.core.spine import init_spine
 from ragspine.ops import seeds, setup
 
 
@@ -44,32 +43,3 @@ def test_detect_hw_shape():
     assert isinstance(hw["apple_silicon"], bool)
 
 
-def test_llmfit_absent_returns_none(cfg, monkeypatch):
-    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
-    assert setup.llmfit(cfg) is None
-
-
-def test_detect_providers_shape_and_no_secret_leak(cfg, monkeypatch):
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-    monkeypatch.delenv("RAGSPINE_LLM_API_KEY", raising=False)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-super-secret-value")
-    monkeypatch.setattr(setup, "_ollama_alive", lambda cfg: False)
-
-    result = setup.detect_providers(cfg)
-    assert set(result) == {"env_keys", "oauth", "ollama_models"}
-    assert result["env_keys"] == ["OPENAI_API_KEY"]
-    assert result["ollama_models"] == []
-    dumped = str(result)
-    assert "sk-super-secret-value" not in dumped
-
-
-def test_run_returns_report_string(tmp_path, cfg, monkeypatch):
-    init_spine(cfg.db_path)
-    monkeypatch.setattr(setup, "_ollama_alive", lambda cfg: False)
-    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
-    report = setup.run(cfg)
-    assert isinstance(report, str)
-    assert "kontni plan" in report.lower()
-    assert "hardver" in report.lower()

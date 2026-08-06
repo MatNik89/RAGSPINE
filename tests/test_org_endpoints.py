@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from ragspine.knowledge import wiki
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
-from ragspine.ops import wizard_state as ws
+from tests.conftest import complete_setup
 
 
 def _client(spine, cfg):
@@ -13,7 +13,7 @@ def _client(spine, cfg):
 
 def _tok(c, spine, username, password="pw", role="radnik"):
     add_user(spine, username, password, role)
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     return c.post("/auth/login", json={"username": username, "password": password}).json()["token"]
 
 

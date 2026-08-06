@@ -39,9 +39,9 @@ def test_discover_and_commit_endpoints(spine, tmp_path):
 
 
 def test_uvoz_page_renders(spine, cfg):
-    from ragspine.ops import wizard_state as ws
+    from tests.conftest import complete_setup
     add_user(spine, "ana", "pw")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c = TestClient(create_app(spine, cfg))
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]
     c.cookies.set("ragspine_token", tok)

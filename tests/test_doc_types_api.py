@@ -2,12 +2,12 @@ from fastapi.testclient import TestClient
 
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
-from ragspine.ops import wizard_state as ws
+from tests.conftest import complete_setup
 
 
 def _client(spine, cfg):
     add_user(spine, "ana", "tajna")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c = TestClient(create_app(spine, cfg))
     tok = c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
     return c, {"Authorization": f"Bearer {tok}"}

@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 
 from ragspine.core import optional, security
+from ragspine.core.subproc import run_isolated
 from ragspine.docs.ingest import ingest_text
 
 _log = logging.getLogger(__name__)
@@ -128,7 +129,6 @@ def ocr_page_tesseract(png: bytes, cfg) -> str:
     if not tesseract_available():
         return ""
     langs = getattr(cfg, "ocr_langs", "hrv+eng") or "hrv+eng"
-    from ragspine.core.subproc import run_isolated
     tmp = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:

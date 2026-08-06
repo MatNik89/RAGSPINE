@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from ragspine.business import dashboard
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
-from ragspine.ops import wizard_state as ws
+from tests.conftest import complete_setup
 
 
 def _client(spine, cfg):
@@ -14,7 +14,7 @@ def _client(spine, cfg):
 
 def _token(c, spine):
     add_user(spine, "ana", "tajna")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     return c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
 
 
@@ -197,7 +197,7 @@ def test_ui_obavijesti_authed(spine, cfg):
 
 def test_ui_obavijesti_no_auth_redirects(spine, cfg):
     add_user(spine, "_o", "pw")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c = _client(spine, cfg)
     r = c.get("/ui/obavijesti", follow_redirects=False)
     assert r.status_code == 303
@@ -256,7 +256,7 @@ def test_ui_dokumenti_authed(spine, cfg):
 
 def test_ui_dokumenti_no_auth_redirects(spine, cfg):
     add_user(spine, "_o", "pw")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c = _client(spine, cfg)
     r = c.get("/ui/dokumenti", follow_redirects=False)
     assert r.status_code == 303

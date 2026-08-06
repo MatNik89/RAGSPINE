@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from ragspine.business import obveze
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
-from ragspine.ops import wizard_state as ws
+from tests.conftest import complete_setup
 
 
 def _seed(spine):
@@ -49,7 +49,7 @@ def _client(spine, cfg):
 
 def _token(c, spine):
     add_user(spine, "ana", "tajna")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     return c.post("/auth/login", json={"username": "ana", "password": "tajna"}).json()["token"]
 
 
@@ -79,7 +79,7 @@ def test_obveze_via_cookie_only(spine, cfg):
     _seed(spine)
     c = _client(spine, cfg)
     add_user(spine, "ana", "tajna")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c.post("/auth/login", json={"username": "ana", "password": "tajna"})
     assert "ragspine_token" in c.cookies  # persisted on the client's cookie jar
     r = c.get("/obveze?kind=PDV&period=2026-07")  # no Authorization header
@@ -89,7 +89,7 @@ def test_obveze_via_cookie_only(spine, cfg):
 
 def test_obveze_no_auth_redirects_to_login(spine, cfg):
     add_user(spine, "_o", "pw")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     c = _client(spine, cfg)
     r = c.get("/obveze", follow_redirects=False)
     assert r.status_code == 303

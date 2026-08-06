@@ -74,7 +74,6 @@ def _vram_gb() -> float:
     """VRAM iz nvidia-smi memory.total (parsanje naziva GPU-a je nepouzdano —
     Codex nalaz). 0 ako nema NVIDIA GPU-a."""
     try:
-        from ragspine.core.subproc import run_isolated
         rc, out, _err = run_isolated(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"], timeout=5)
         if rc == 0 and out.strip():
@@ -384,7 +383,6 @@ def requirements(cfg=None) -> list[dict]:
     langs_ok = False
     if tess:
         try:
-            from ragspine.core.subproc import run_isolated
             rc, tout, terr = run_isolated(["tesseract", "--list-langs"], timeout=5)
             blob = f"{tout}\n{terr}".lower()
             langs_ok = "hrv" in blob and "eng" in blob

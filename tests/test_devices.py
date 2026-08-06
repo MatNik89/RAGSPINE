@@ -209,12 +209,12 @@ def test_api_devices_admin_gate_and_scan(spine, cfg, device_server):
     from fastapi.testclient import TestClient
     from ragspine.web.api import create_app
     from ragspine.web.deps import add_user
-    from ragspine.ops import wizard_state as ws
+    from tests.conftest import complete_setup
 
     c = TestClient(create_app(spine, cfg))
     assert c.get("/devices").status_code in (401, 403)  # prije logina
     add_user(spine, "gazda", "pw")
-    ws.mark_complete(spine)  # gatekeeper drži na /ui/setup dok wizard ne završi
+    complete_setup(spine)
     owner = c.post("/auth/login", json={"username": "gazda", "password": "pw"}).json()["token"]
     add_user(spine, "boris", "pw")
     worker = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
