@@ -63,21 +63,21 @@ async function load(){
   if(d.models && d.models.length > 0) {
     d.models.forEach(function(m){
       var tr=document.createElement('tr');
-      // Pill: Good/Marginal/Too Tight
+      // Oznaka: Good/Marginal/Too Tight
       var info = PILL[m.fit_label] || ['?',''];
       var td_pill=document.createElement('td'); td_pill.className='st '+info[1];
       td_pill.textContent = info[0];
       tr.appendChild(td_pill);
-      // Model name (ollama_name)
+      // Naziv modela (ollama_name)
       cell(tr, m.ollama_name);
       // Parametri
       cell(tr, m.params);
-      // Best quant + memory
+      // Kvantizacija + memorija
       var memory_text = '~' + m.memory_gb.toFixed(1) + ' GB';
       cell(tr, (m.best_quant || '—') + ' (' + memory_text + ')');
       // Brzina
       cell(tr, '~' + Math.round(m.tps) + ' tok/s');
-      // Use case
+      // Namjena
       cell(tr, m.use_case);
       mb.appendChild(tr);
     });
@@ -127,9 +127,9 @@ def preflight_page() -> str:
 </div>
 
 <div class="card">
-  <h2>Lokalni modeli \\u2014 koji stanu (po kvantizaciji)</h2>
-  <p class="muted">Kompresija (kvantizacija) smanjuje model: ista pamet, manje memorije.
-     \\u26a1 = mo\\u017ee na GPU (br\\u017ee). Preporuka = najkvalitetnija koja stane.</p>
+  <h2>Lokalni modeli \\u2014 rangirano po llmfit score-u</h2>
+  <p class="muted">llmfit mjeri tvoje ra\\u010dunalo i za svaki model ra\\u010duna kvantizaciju
+     koja stane, o\\u010dekivanu brzinu (tok/s) i ocjenu. Prvi red \\u2014 najbolji.</p>
   <table><tbody id="models"></tbody></table>
   <p id="models-note" class="muted" style="margin-top:8px"></p>
 </div>

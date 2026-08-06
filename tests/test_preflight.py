@@ -2,6 +2,11 @@ import pytest
 
 from ragspine.ops import preflight as pf, wizard_state as ws
 
+# Sačuvana referenca na pravu funkciju PRIJE nego je autouse fixture prekrije
+# (Nalaz #3, P2b review) — dedicirani llmfit_models/summary testovi je zovu
+# izravno da izbjegnu stvarni subprocess poziv, a ostali testovi ne trebaju znati za nju.
+_real_llmfit_models = pf.llmfit_models
+
 
 @pytest.fixture(autouse=True)
 def _no_live_network(monkeypatch):
@@ -11,6 +16,10 @@ def _no_live_network(monkeypatch):
     # monkeypatch.setattr (izvršava se poslije, pa pobjeđuje).
     monkeypatch.setattr(pf, "ollama_ready", lambda url=None: (True, "servis radi"))
     monkeypatch.setattr(pf, "internet_ok", lambda *a, **k: True)
+    # llmfit_models() inače šalje pravi subprocess (8 MB JSON, ovisan o stroju) —
+    # zamijeni ga praznom listom; dedicirani testovi ispod vraćaju pravu funkciju
+    # preko _real_llmfit_models (Nalaz #3, P2b review).
+    monkeypatch.setattr(pf, "llmfit_models", lambda cfg=None: [])
 
 
 def test_internet_is_warn_not_fail(monkeypatch):
@@ -183,8 +192,9 @@ def test_llmfit_models_filters_sorts_caps(monkeypatch):
         _lm("hf/d", "d:14b", fit="Too Tight"),         # ne stane -> van
         _lm("hf/e", "e:7b", cat="Reasoning", score=90.0),
     ] + [_lm(f"hf/x{i}", f"x{i}:1b", score=float(i)) for i in range(15)]
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
     monkeypatch.setattr(pf, "run_isolated",
-                        lambda cmd, timeout=60: (0, _llmfit_json(models), ""))
+                        lambda cmd, timeout=60, **kw: (0, _llmfit_json(models), ""))
     rows = pf.llmfit_models()
     assert rows is not None
     assert len(rows) == 12                              # cap
@@ -196,12 +206,14 @@ def test_llmfit_models_filters_sorts_caps(monkeypatch):
 
 
 def test_llmfit_models_none_when_binary_fails(monkeypatch):
-    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60: (1, "", "boom"))
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60, **kw: (1, "", "boom"))
     assert pf.llmfit_models() is None
 
 
 def test_llmfit_models_none_on_garbage(monkeypatch):
-    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60: (0, "nije json", ""))
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60, **kw: (0, "nije json", ""))
     assert pf.llmfit_models() is None
 
 
@@ -209,12 +221,14 @@ def test_llmfit_models_uses_which_when_available(monkeypatch):
     # When llmfit binary is on PATH, use it directly
     captured_cmd = []
 
-    def capture_run_isolated(cmd, timeout=60):
+    def capture_run_isolated(cmd, timeout=60, **kw):
         captured_cmd.append(cmd)
         return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
 
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
     monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
     monkeypatch.setattr(pf.shutil, "which", lambda x: "/x/llmfit" if x == "llmfit" else None)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 0})  # bez --ram šuma
 
     rows = pf.llmfit_models()
     assert rows is not None
@@ -225,12 +239,14 @@ def test_llmfit_models_fallback_to_python_m_when_which_fails(monkeypatch):
     # When which("llmfit") returns None, fall back to python -m wrapper
     captured_cmd = []
 
-    def capture_run_isolated(cmd, timeout=60):
+    def capture_run_isolated(cmd, timeout=60, **kw):
         captured_cmd.append(cmd)
         return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
 
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
     monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
     monkeypatch.setattr(pf.shutil, "which", lambda x: None)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 0})  # bez --ram šuma
 
     rows = pf.llmfit_models()
     assert rows is not None
@@ -240,8 +256,9 @@ def test_llmfit_models_fallback_to_python_m_when_which_fails(monkeypatch):
 def test_summary_models_have_llmfit_shape(monkeypatch, cfg):
     # Shape guard: summary()["models"] rows must contain llmfit keys (not old model_fits keys)
     models = [_lm("hf/a", "a:7b", score=60.0), _lm("hf/b", "b:3b", score=50.0)]
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
     monkeypatch.setattr(pf, "run_isolated",
-                        lambda cmd, timeout=60: (0, _llmfit_json(models), ""))
+                        lambda cmd, timeout=60, **kw: (0, _llmfit_json(models), ""))
     s = pf.summary(cfg)
     assert "models" in s
     assert len(s["models"]) > 0
@@ -256,3 +273,58 @@ def test_summary_models_have_llmfit_shape(monkeypatch, cfg):
         assert "role" not in m, "Old model_fits key 'role' should not exist"
         assert "quants" not in m, "Old model_fits key 'quants' should not exist"
         assert "tight_quant" not in m, "Old model_fits key 'tight_quant' should not exist"
+
+
+def test_llmfit_models_passes_ram_ukupno(monkeypatch):
+    # Nalaz #1: sizing mora ići po UKUPNOM RAM-u, ne trenutno slobodnom —
+    # inače na opterećenom stroju llmfit sve modele vidi kao "Too Tight".
+    captured_cmd = []
+
+    def capture_run_isolated(cmd, timeout=60, **kw):
+        captured_cmd.append(cmd)
+        return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
+
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 16.0})
+
+    rows = pf.llmfit_models()
+    assert rows is not None
+    assert ["--ram", "16G"] == captured_cmd[0][-2:]
+
+
+def test_llmfit_models_no_ram_flag_when_total_unknown(monkeypatch):
+    captured_cmd = []
+
+    def capture_run_isolated(cmd, timeout=60, **kw):
+        captured_cmd.append(cmd)
+        return (0, _llmfit_json([_lm("hf/a", "a:7b")]), "")
+
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "run_isolated", capture_run_isolated)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 0})
+
+    rows = pf.llmfit_models()
+    assert rows is not None
+    assert "--ram" not in captured_cmd[0]
+
+
+def test_llmfit_models_dedups_by_ollama_name(monkeypatch):
+    # Nalaz #2: više HF varijanti zna mapirati na isti Ollama tag — zadrži samo
+    # onu s najvišim score-om (lista je sortirana score desc, prvo pojavljivanje pobjeđuje).
+    models = [
+        _lm("hf/a-low", "a:7b", score=10.0),
+        _lm("hf/a-high", "a:7b", score=90.0),
+        _lm("hf/b", "b:3b", score=50.0),
+    ]
+    monkeypatch.setattr(pf, "llmfit_models", _real_llmfit_models)
+    monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 0})
+    monkeypatch.setattr(pf, "run_isolated",
+                        lambda cmd, timeout=60, **kw: (0, _llmfit_json(models), ""))
+    rows = pf.llmfit_models()
+    assert rows is not None
+    names = [r["ollama_name"] for r in rows]
+    assert names.count("a:7b") == 1
+    assert len(rows) == len(set(names))            # cap broji distinktne modele
+    a_row = next(r for r in rows if r["ollama_name"] == "a:7b")
+    assert a_row["name"] == "hf/a-high"             # veći score pobjeđuje

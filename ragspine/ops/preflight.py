@@ -229,7 +229,18 @@ def llmfit_models(cfg=None) -> list[dict] | None:
         # PATH binary prvo; `python -m llmfit` wrapper traži binary u sysconfig scripts putanji pa puca za pip --user instalacije.
         exe = shutil.which("llmfit")
         cmd = [exe, "--json"] if exe else [sys.executable, "-m", "llmfit", "--json"]
-        rc, out, _err = run_isolated(cmd, timeout=60)
+        # Ukupni RAM (sposobnost namjenskog servera), NE trenutno slobodni —
+        # llmfit inače sizinga po slobodnoj memoriji, pa na opterećenom stroju
+        # (keš, drugi procesi) sve modele vidi kao "Too Tight" i lista je prazna
+        # (Nalaz #1, P2b review). --ram override tjera llmfit da računa po ukupnom.
+        total = system_state(cfg).get("ram_total_gb") or 0
+        if total > 0:
+            cmd = cmd + ["--ram", f"{round(total)}G"]
+        # llmfit-ov Rust alokator povremeno puca (SIGABRT) na zadanom
+        # run_isolated limitu od 512 MB adresnog prostora — mjereno ~50% padova
+        # (nedeterministično, ovisi o rasporedu heapa); 1024 MB je pouzdano u
+        # ponovljenim probama i i dalje daleko ispod stvarnog RAM-a stroja.
+        rc, out, _err = run_isolated(cmd, timeout=60, mem_mb=1024)
         if rc != 0:
             return None
         data = json.loads(out)
@@ -254,7 +265,17 @@ def llmfit_models(cfg=None) -> list[dict] | None:
             "params": m.get("parameter_count") or "",
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
-    return rows[:_LLMFIT_MAX_ROWS]
+    # Dedup po ollama_name: više HF varijanti zna mapirati na isti Ollama tag
+    # (npr. qwen2.5:0.5b, smollm2:135m dvaput u top-12 — Nalaz #2). Lista je već
+    # sortirana po score-u opadajuće, pa prvo pojavljivanje = najbolji score.
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for r in rows:
+        if r["ollama_name"] in seen:
+            continue
+        seen.add(r["ollama_name"])
+        deduped.append(r)
+    return deduped[:_LLMFIT_MAX_ROWS]
 
 
 def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:

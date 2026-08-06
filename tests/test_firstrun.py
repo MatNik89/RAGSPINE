@@ -1,11 +1,19 @@
 """First-run wizard: gatekeeper + kreiranje operatera."""
+import pytest
 from fastapi.testclient import TestClient
 
 from ragspine.core.spine import init_spine
 from ragspine.web.api import create_app
 from ragspine.web.deps import add_user
 from ragspine.web import firstrun
-from ragspine.ops import wizard_state as ws
+from ragspine.ops import preflight, wizard_state as ws
+
+
+@pytest.fixture(autouse=True)
+def _no_live_llmfit(monkeypatch):
+    # /preflight ovdje testira samo gatekeeper/onboarding tijek, ne llmfit —
+    # bez stuba svaki poziv šalje pravi subprocess (8 MB JSON, ovisan o stroju).
+    monkeypatch.setattr(preflight, "llmfit_models", lambda cfg=None: [])
 
 
 def _client(spine, cfg):
