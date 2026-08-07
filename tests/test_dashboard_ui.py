@@ -295,3 +295,11 @@ def test_dashboard_has_ocr_action_js():
     from atlas.web.templates_ui import dashboard_page
     html = dashboard_page()
     assert "/folders/" in html and "/ocr" in html and "OCR-aj mapu" in html
+
+
+def test_dashboard_orientation_empty_state_links_to_mape():
+    """Wizard više ne postavlja mape (stranica mapa uklonjena) — prazno
+    stanje 'Spoji mapu...' mora nuditi klikabilan put do /ui/mape."""
+    from atlas.web.templates_ui import dashboard_page
+    html = dashboard_page()
+    assert "href = '/ui/mape'" in html

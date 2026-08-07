@@ -441,7 +441,14 @@ function renderNotifications(rows) {
 function renderOrientation(orientation) {
   var box = $('orientation-list'); if (!box) return; box.textContent = '';
   var folders = (orientation && orientation.folders) || [];
-  if (!folders.length) { emptyMsg(box, 'Spoji mapu u Postavke → Mrežne mape.'); return; }
+  if (!folders.length) {
+    var p = document.createElement('p'); p.className = 'meta';
+    p.appendChild(document.createTextNode('Spoji mapu u '));
+    var a = document.createElement('a'); a.href = '/ui/mape'; a.textContent = 'Postavke → Mrežne mape';
+    p.appendChild(a); p.appendChild(document.createTextNode('.'));
+    box.appendChild(p);
+    return;
+  }
   folders.forEach(function (f) {
     var row = document.createElement('div'); row.className = 'nrow';
     var chip = document.createElement('span'); chip.className = 'chip'; chip.textContent = f.role;

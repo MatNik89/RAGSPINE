@@ -1,6 +1,6 @@
 """Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
-P2: Stranice 1 (preduvjeti) + 2 (operater) + 3 (model).
-P3: Stranica 4 (mreža/HTTPS/servis). Stranice 5-6 stižu u P4."""
+5 stranica: preduvjeti, operater, model, mreža/HTTPS/servis, gotovo.
+Mrežne mape se ne postavljaju ovdje — Postavke → Mrežne mape (web)."""
 import dataclasses
 import ipaddress
 import os
@@ -10,11 +10,10 @@ import shutil
 import subprocess
 import sys
 import time
-import types
 from pathlib import Path
 
 from atlas.core.llm import LLMError, LLMUnavailable
-from atlas.ops import backup, certs, folder_picker, model_table, preflight, shortcut, tui, tui_curses, winsvc, wizard_state
+from atlas.ops import backup, certs, model_table, preflight, shortcut, tui, tui_curses, winsvc, wizard_state
 from atlas.rag import embed
 from atlas.web import firstrun
 
@@ -37,7 +36,7 @@ def render_preflight(reqs, *, out=print) -> bool:
 
 
 def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
-    tui.print_header("1/6  Preduvjeti", out=out)
+    tui.print_header("1/5  Preduvjeti", out=out)
     while True:
         reqs = preflight.requirements(cfg)
         ok = render_preflight(reqs, out=out)
@@ -82,7 +81,7 @@ def page_operater(spine, *, input_fn=input, out=print) -> bool:
     if not firstrun.needs_onboarding(spine):
         out("Administrator već postoji — preskačem.")
         return True
-    tui.print_header("2/6  Operater (administrator)", out=out)
+    tui.print_header("2/5  Operater (administrator)", out=out)
     while True:
         username = tui.prompt_text("Korisničko ime", input_fn=input_fn, out=out)
         if username:
@@ -181,7 +180,7 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
 def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 3: Ollama spremnost -> llmfit lista -> JEDAN model -> pull -> spremi
     -> embedding -> self-test. Skip-grana vraća True (spec: ne zaglavi)."""
-    tui.print_header("3/6  Model (LLM)", out=out)
+    tui.print_header("3/5  Model (LLM)", out=out)
     url = getattr(cfg, "ollama_url", "http://127.0.0.1:11434")
 
     ok, detail = preflight.ollama_ready(url)
@@ -265,7 +264,7 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 4: bind IP + port, cert/HTTPS, proxy, servis (preskočivo)."""
-    tui.print_header("4/6  Mreža + HTTPS + servis", out=out)
+    tui.print_header("4/5  Mreža + HTTPS + servis", out=out)
     lan = preflight.local_ip()
 
     # 1) bind IP
@@ -340,86 +339,8 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
-# Stranica 5 (spec): uloga (folders.role string) → naziv za prompt.
-_MAPE_ULOGE = [
-    ("klijenti", "Klijenti"),
-    ("propisi", "Propisi"),
-    ("skener", "Zajednički skenovi"),
-    ("program", "Knjigovodstveni program"),
-]
-
-
-def _net_use_hint(unc: str) -> str:
-    """`net use` komanda za SMB prijavu; `*` = net.exe sam pita lozinku (ne
-    završi u argv/process-listi), /persistent:no = bez naslijeđenih mapiranja.
-    ponytail: DPAPI spremanje SMB kredencijala = backlog; do tada admin
-    komandu pokreće ručno, wizard lozinke ne dira."""
-    share = "\\".join(unc.split("\\")[:4])   # \\server\share (bez podmapa)
-    return f"net use {share} /user:DOMENA\\korisnik * /persistent:no"
-
-
-def _drive_warn(path: str) -> bool:
-    """⚠ samo za MAPIRANI MREŽNI pogon (DRIVE_REMOTE=4) — lokalni fiksni
-    disk servis normalno vidi (E2E: D:\\KLIJENTI lažno upozorenje)."""
-    m = re.match(r"^([A-Za-z]:)", path)
-    if not m or os.name != "nt":
-        return False
-    try:
-        import ctypes
-        return ctypes.windll.kernel32.GetDriveTypeW(m.group(1) + "\\") == 4
-    except Exception:
-        return False
-
-
-def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 5: mrežne mape po ulogama (UNC putanje), preskočivo.
-    Test pristupa ide kao trenutni korisnik (servisni račun ne postoji —
-    wrapper backlog, v. winsvc); registracija ide u istu folders tablicu
-    koju koristi web Postavke → Mrežne mape."""
-    from atlas.business import folders
-    tui.print_header("5/6  Mape / mrežni pogoni", out=out)
-    if not tui.prompt_yes_no("Poveži mrežne mape sada? (kasnije: Postavke → Mrežne mape)",
-                             default=True, input_fn=input_fn, out=out):
-        return True
-    registered = []
-    for role, naziv in _MAPE_ULOGE:
-        while True:
-            out(f"{naziv}:")
-            path = folder_picker.pick_folder(input_fn=input_fn, out=out)
-            if not path:
-                break
-            if _drive_warn(path):
-                out("  ⚠ Mapirani mrežni pogon (npr. Z:) servisni račun ne vidi "
-                    "— koristi UNC putanju (\\\\server\\share\\...).")
-            if not os.path.isdir(path):
-                out(f"  ✗ Nedostupno: {path}")
-                if path.startswith("\\\\"):
-                    out(f"    Ako share traži prijavu, u drugom prozoru pokreni: {_net_use_hint(path)}")
-                else:
-                    out("    Putanja nije UNC (\\\\server\\share\\...) — provjeri tipfeler.")
-                if tui.prompt_yes_no("  Pokušaj ponovno?", default=True,
-                                     input_fn=input_fn, out=out):
-                    continue
-                break
-            root = os.path.realpath(path)
-            try:
-                folders.register(spine, types.SimpleNamespace(mount_roots=[root]),
-                                 path, role, label=naziv, user="setup")
-            except ValueError as e:
-                out(f"  ✗ {e}")
-                break
-            out(f"  ✓ {naziv}: {path}")
-            registered.append(root)
-            break
-    if registered:
-        out("")
-        out("Da web sučelje (i budući servis) vidi ove mape, postavi env varijablu:")
-        out(f"  ATLAS_MOUNT_ROOTS={','.join(registered)}")
-    return True
-
-
 def render_summary(spine, cfg, *, out=print) -> None:
-    """Sažetak stranica 1-5: konfigurirano / preskočeno + gdje dodati kasnije."""
+    """Sažetak stranica 1-4: konfigurirano / preskočeno + gdje dodati kasnije."""
     from atlas.business import folders
     admin = "✓ kreiran" if not firstrun.needs_onboarding(spine) else "✗ nije kreiran"
     model = spine.get_override("model", "model") or ""
@@ -438,13 +359,13 @@ def render_summary(spine, cfg, *, out=print) -> None:
         for m in mape:
             out(f"  Mapa [{m['role']}]: {m['path']}")
     else:
-        out("  Mape: — preskočeno (Postavke → Mrežne mape)")
+        out("  Mape: — dodaj nakon prijave (Postavke → Mrežne mape)")
 
 
 def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 6: sažetak + konkretan backup/restore. Uvijek vraća True —
+    """Stranica 5: sažetak + konkretan backup/restore. Uvijek vraća True —
     zadnja stranica ne smije blokirati dovršetak setupa."""
-    tui.print_header("6/6  Gotovo — sažetak i sigurnosne kopije", out=out)
+    tui.print_header("5/5  Gotovo — sažetak i sigurnosne kopije", out=out)
     render_summary(spine, cfg, out=out)
     out("")
     out("Sigurnosne kopije (spremi na vanjski medij/NAS — bez ovoga restore ne vraća sustav):")
@@ -501,8 +422,8 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
     exe = shutil.which("atlas")
     cmd = [exe, "serve"] if exe else [sys.executable, "-m", "atlas", "serve"]
     # folders je fail-closed bez mount_roots (v. business/folders._scoped) — bez ovoga
-    # bi mape registrirane na stranici 5 na happy pathu tiho ne radile. Wizard je
-    # admin-trust kontekst (ista odluka kao registracija kroz SimpleNamespace u page_mape).
+    # bi mape registrirane kroz web Postavke → Mrežne mape na happy pathu tiho ne
+    # radile (upgrade instalacije mogu ih imati čak i bez ove wizard grane).
     from atlas.business import folders
     roots = [m["path"] for m in folders.list_folders(spine)]
     env = None
@@ -582,15 +503,10 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 return
             wizard_state.set_stage(spine, 4)
         if stage < 5:
-            if not page_mape(spine, cfg, input_fn=input_fn, out=out):
-                out("Setup prekinut na mapama. Pokreni ponovno za nastavak.")
-                return
-            wizard_state.set_stage(spine, 5)
-        if stage < 6:
             if not page_gotovo(spine, cfg, input_fn=input_fn, out=out):
                 out("Setup prekinut na sažetku. Pokreni ponovno za nastavak.")
                 return
-            wizard_state.set_stage(spine, 6)
+            wizard_state.set_stage(spine, 5)
     except (EOFError, KeyboardInterrupt):
         # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
         # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
@@ -601,5 +517,5 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
             "stanje je spremljeno — nastavlja gdje je stao.")
         return
     wizard_state.mark_complete(spine)
-    out("✓ Setup dovršen (6/6) — web sučelje je spremno.")
+    out("✓ Setup dovršen (5/5) — web sučelje je spremno.")
     launch_now(spine, cfg, input_fn=input_fn, out=out)

@@ -55,103 +55,6 @@ def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
     assert any("zauzet" in l.lower() for l in lines)
 
 
-def _picker_roots(monkeypatch):
-    from atlas.ops import folder_picker
-    monkeypatch.setattr(folder_picker, "_roots", lambda: ["/fixroot"])
-
-
-def test_page_mape_preskok(tmp_path):
-    s = init_spine(str(tmp_path / "t.db"))
-    ok = wizard.page_mape(s, None, input_fn=_reader("n"), out=lambda *_: None)
-    assert ok is True
-    from atlas.business import folders
-    assert folders.list_folders(s) == []
-
-
-def test_page_mape_registrira_mapu(tmp_path, monkeypatch):
-    _picker_roots(monkeypatch)
-    s = init_spine(str(tmp_path / "t.db"))
-    d = tmp_path / "klijenti"
-    d.mkdir()
-    # "d" (poveži); Klijenti: 3=Ručni upis pa putanja; ostale 3 uloge: 4=Odustani
-    lines = []
-    ok = wizard.page_mape(s, None,
-                          input_fn=_reader("d", "3", str(d), "4", "4", "4"),
-                          out=lines.append)
-    assert ok is True
-    from atlas.business import folders
-    rows = folders.list_folders(s)
-    assert len(rows) == 1 and rows[0]["role"] == "klijenti"
-    assert any("ATLAS_MOUNT_ROOTS" in l for l in lines)
-
-
-def test_page_mape_nedostupna_pa_odustane(tmp_path, monkeypatch):
-    _picker_roots(monkeypatch)
-    s = init_spine(str(tmp_path / "t.db"))
-    bad_unc = r"\\nas\share\nema"
-    # "d"; Klijenti: 3=Ručni upis, nepostojeći UNC, "n" (bez retrya); ostale: 4
-    lines = []
-    ok = wizard.page_mape(s, None,
-                          input_fn=_reader("d", "3", bad_unc, "n", "4", "4", "4"),
-                          out=lines.append)
-    assert ok is True
-    assert any("net use" in l for l in lines)
-    from atlas.business import folders
-    assert folders.list_folders(s) == []
-
-
-def test_page_mape_ne_unc_putanja_nema_net_use(tmp_path, monkeypatch):
-    _picker_roots(monkeypatch)
-    s = init_spine(str(tmp_path / "t.db"))
-    lines = []
-    ok = wizard.page_mape(s, None,
-                          input_fn=_reader("d", "3", "/nema/takve/mape", "n",
-                                           "4", "4", "4"),
-                          out=lines.append)
-    assert ok is True
-    text = "\n".join(lines)
-    assert "nije UNC" in text
-    assert "net use" not in text.lower()
-
-
-def test_page_mape_drive_warn_samo_za_remote(tmp_path, monkeypatch):
-    """E2E nalaz: lokalni fiksni disk (D:\\KLIJENTI) NE dobiva ⚠; upozorenje
-    samo kad _drive_warn kaže DRIVE_REMOTE."""
-    _picker_roots(monkeypatch)
-    s = init_spine(str(tmp_path / "t.db"))
-    monkeypatch.setattr(wizard, "_drive_warn", lambda p: True)
-    lines = []
-    wizard.page_mape(s, None,
-                     input_fn=_reader("d", "3", "Z:\\skenovi", "n", "4", "4", "4"),
-                     out=lines.append)
-    assert any(l.strip().startswith("⚠ Mapirani mrežni pogon") for l in lines)
-
-
-def test_page_mape_lokalni_disk_bez_upozorenja(tmp_path, monkeypatch):
-    _picker_roots(monkeypatch)
-    s = init_spine(str(tmp_path / "t.db"))
-    d = tmp_path / "kl"
-    d.mkdir()
-    monkeypatch.setattr(wizard, "_drive_warn", lambda p: False)
-    lines = []
-    wizard.page_mape(s, None, input_fn=_reader("d", "3", str(d), "4", "4", "4"),
-                     out=lines.append)
-    assert not any(l.strip().startswith("⚠ Mapirani mrežni pogon") for l in lines)
-
-
-def test_drive_warn_ne_windows_uvijek_false():
-    if wizard.os.name == "nt":
-        return
-    assert wizard._drive_warn("Z:\\bilo") is False
-    assert wizard._drive_warn("/posix/putanja") is False
-
-
-def test_net_use_hint_iz_unc_putanje():
-    hint = wizard._net_use_hint(r"\\nas\ured\klijenti\2026")
-    assert r"net use \\nas\ured" in hint
-    assert "*" in hint and "/persistent:no" in hint
-
-
 def test_render_preflight_blocks_on_fail():
     reqs = [
         {"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""},
@@ -268,31 +171,30 @@ def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
 
 
 def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
-    """P4 wizard end-to-end trebao bi dosegnuti stage 6 (page_gotovo) i završiti.
-    page_model/mreza/mape/gotovo su mockani da ne diraju mrežu/Ollama."""
+    """Wizard end-to-end trebao bi dosegnuti stage 5 (page_gotovo) i završiti.
+    page_model/mreza/gotovo su mockani da ne diraju mrežu/Ollama."""
     ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: ok_reqs)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: True)
-    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     lines = []
     wizard.run(spine, cfg, input_fn=_reader("matej", "lozinka12", "lozinka12"), out=lines.append)
-    assert ws.get_stage(spine) == 6
+    assert ws.get_stage(spine) == 5
     assert ws.is_complete(spine) is True
     assert firstrun.needs_setup(spine) is False
 
 
-def test_run_reaches_stage6_and_completes(tmp_path, monkeypatch):
+def test_run_reaches_stage5_and_completes(tmp_path, monkeypatch):
     from atlas.core.spine import init_spine
     from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
-    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape", "page_gotovo"):
+    for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_gotovo"):
         monkeypatch.setattr(wizard, p, lambda *a, **k: True)
     monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ws.get_stage(s) == 6
+    assert ws.get_stage(s) == 5
     assert ws.is_complete(s) is True
 
 
@@ -316,14 +218,13 @@ def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: False)
-    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: True)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
     assert ws.get_stage(s) == 3          # stranice 1-3 prosle
     assert ws.is_complete(s) is False    # mreza otkazana -> nije complete
 
 
-def test_run_resume_from_stage2_runs_pages_3_to_6(tmp_path, monkeypatch):
-    """Resume od stage 2 pokreće stranice 3-6 (model, mreža, mape, sažetak) — ne ponavlja 1-2."""
+def test_run_resume_from_stage2_runs_pages_3_to_5(tmp_path, monkeypatch):
+    """Resume od stage 2 pokreće stranice 3-5 (model, mreža, sažetak) — ne ponavlja 1-2."""
     from atlas.core.spine import init_spine
     from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
@@ -333,11 +234,10 @@ def test_run_resume_from_stage2_runs_pages_3_to_6(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: ran.append("p2") or True)
     monkeypatch.setattr(wizard, "page_model", lambda *a, **k: ran.append("p3") or True)
     monkeypatch.setattr(wizard, "page_mreza", lambda *a, **k: ran.append("p4") or True)
-    monkeypatch.setattr(wizard, "page_mape", lambda *a, **k: ran.append("p5") or True)
-    monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: ran.append("p6") or True)
+    monkeypatch.setattr(wizard, "page_gotovo", lambda *a, **k: ran.append("p5") or True)
     monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
     wizard.run(s, None, input_fn=_reader(), out=lambda *_: None)
-    assert ran == ["p3", "p4", "p5", "p6"]
+    assert ran == ["p3", "p4", "p5"]
     assert ws.is_complete(s) is True
 
 
@@ -760,8 +660,8 @@ def test_render_summary_pokazuje_konfigurirano_i_preskoceno(tmp_path):
     text = "\n".join(lines)
     assert "qwen2.5:7b" in text
     assert "https://192.168.1.7:8443" in text
-    assert "Mape" in text            # preskočeno → uputa na Postavke
-    assert "preskočeno" in text
+    assert "Mape" in text
+    assert "Postavke → Mrežne mape" in text   # bez mapa → uputa gdje ih dodati
 
 
 def test_page_gotovo_backup_da(tmp_path, monkeypatch):
@@ -919,7 +819,7 @@ def test_page_upgrade_default_ne_kad_fali_model(tmp_path):
 
 def _stub_pages(monkeypatch, ran):
     for p in ("page_preduvjeti", "page_operater", "page_model",
-              "page_mreza", "page_mape", "page_gotovo"):
+              "page_mreza", "page_gotovo"):
         monkeypatch.setattr(wizard, p,
                             lambda *a, _p=p, **k: ran.append(_p) or True)
     monkeypatch.setattr(wizard, "launch_now", lambda *a, **k: None)
@@ -966,3 +866,21 @@ def test_run_resume_bez_ponude(tmp_path, monkeypatch):
     wizard.run(s, _UpgCfg(), input_fn=_reader(), out=lambda *_: None)
     assert ponuda == []
     assert "page_operater" in ran and "page_preduvjeti" not in ran
+
+
+def test_run_resume_stara_baza_stage5_ide_na_gotovo(tmp_path, monkeypatch):
+    """Stara baza (prije uklanjanja stranice mapa) sa stage=5 nastavlja na
+    'gotovo' bez pada; stage=4 isto."""
+    for start in (4, 5):
+        s = init_spine(str(tmp_path / f"t{start}.db"))
+        ws.set_stage(s, start)
+        monkeypatch.setattr(wizard, "page_gotovo",
+                            lambda sp, c, input_fn=input, out=print: True)
+        monkeypatch.setattr(wizard, "launch_now",
+                            lambda sp, c, input_fn=input, out=print: None)
+
+        class _Cfg:
+            db_path = str(tmp_path / f"t{start}.db")
+            data_dir = str(tmp_path)
+        wizard.run(s, _Cfg(), input_fn=_reader(), out=lambda *_: None)
+        assert ws.is_complete(s)
