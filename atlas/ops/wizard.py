@@ -395,6 +395,23 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
         "ni uz vraćenu bazu i ključ")
     out("  • Restore provjeri na drugom stroju: atlas restore <putanja do kopije> "
         "(server zaustavljen)")
+    cert_path = spine.get_override("net", "cert_path")
+    if cert_path:
+        host = spine.get_override("net", "host") or "127.0.0.1"
+        port = spine.get_override("net", "port") or "8443"
+        url_host = preflight.local_ip() if host == "0.0.0.0" else host
+        name = _best_name(certs.friendly_names(), url_host)
+        from atlas import config
+        bport = config._env("BOOTSTRAP_PORT", "8080")
+        out("")
+        out("Uputa za radnike (kopiraj u mail):")
+        if bport != "0":
+            out(f"  1. Otvori: http://{name}:{bport}/postavi")
+            out("  2. Klikni \"Preuzmi postavljanje\" pa desni klik na preuzeto →")
+            out("     Pokreni kao administrator → Da")
+            out(f"  3. Ubuduće koristi: https://{name}:{port} (spremi u favorite)")
+        else:
+            out(f"  Ubuduće koristi: https://{name}:{port} (spremi u favorite)")
     if tui.prompt_yes_no("Napravi verificirani snapshot baze sada?", default=True,
                          input_fn=input_fn, out=out):
         try:

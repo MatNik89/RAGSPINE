@@ -713,6 +713,64 @@ def test_page_gotovo_backup_da(tmp_path, monkeypatch):
     assert ok is True and made == [1]
     text = "\n".join(lines)
     assert ".ollama" in text and "secret" in text
+    assert "Uputa za radnike" not in text  # bez certa (net override) — nema upute
+
+
+def test_page_gotovo_bez_certa_nema_upute(tmp_path, monkeypatch):
+    """Bez cert_path overridea (mreža nikad konfigurirana) uputa se ne ispisuje."""
+    s = init_spine(str(tmp_path / "t.db"))
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("n"), out=lines.append)
+    assert ok is True
+    assert "Uputa za radnike" not in "\n".join(lines)
+
+
+def test_page_gotovo_s_certom_ispisuje_uputu(tmp_path, monkeypatch):
+    """S cert_path/host/port overrideima ispisuje sva 3 koraka s pravim imenom i portovima."""
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    s.set_override("net", "cert_path", str(tmp_path / "cert.pem"))
+    monkeypatch.setattr(wizard.certs, "friendly_names",
+                        lambda: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("n"), out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert "Uputa za radnike (kopiraj u mail):" in text
+    assert "1. Otvori: http://nick.fritz.box:8080/postavi" in text
+    assert "2. Klikni" in text and "Pokreni kao administrator" in text
+    assert "3. Ubuduće koristi: https://nick.fritz.box:8443 (spremi u favorite)" in text
+
+
+def test_page_gotovo_bootstrap_port_0_bez_http_koraka(tmp_path, monkeypatch):
+    """ATLAS_BOOTSTRAP_PORT=0 — bootstrap isključen, uputa preskače http korake 1/2."""
+    monkeypatch.setenv("ATLAS_BOOTSTRAP_PORT", "0")
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    s.set_override("net", "cert_path", str(tmp_path / "cert.pem"))
+    monkeypatch.setattr(wizard.certs, "friendly_names",
+                        lambda: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
+
+    class _Cfg:
+        db_path = str(tmp_path / "t.db")
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("n"), out=lines.append)
+    assert ok is True
+    text = "\n".join(lines)
+    assert "Uputa za radnike (kopiraj u mail):" in text
+    assert "http://" not in text
+    assert "https://nick.fritz.box:8443 (spremi u favorite)" in text
 
 
 def test_page_gotovo_backup_greska_ne_rusi(tmp_path, monkeypatch):
