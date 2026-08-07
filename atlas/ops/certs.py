@@ -3,6 +3,7 @@ dependenciju. Javni cert (cert.pem) smije se dijeliti klijentima; key.pem NIKAD.
 Napomena: ako ured ima AD CS/GPO, preferiraj domenski cert (backlog)."""
 import ipaddress
 import os
+import socket
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -10,6 +11,36 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
+
+
+def friendly_names() -> list[str]:
+    """Prijateljska imena za SAN certifikata: hostname, FQDN (DNS sufiks
+    poput fritz.box) ako postoji, hostname.local (mDNS), uvijek + atlas.local
+    (kompatibilnost s već izdanim uputama). Čisti stdlib, bez mreže; bilo
+    koja greška vraća barem ["atlas.local"]."""
+    names: list[str] = []
+    try:
+        host = socket.gethostname().lower()
+        if host:
+            names.append(host)
+            local = f"{host}.local"
+            try:
+                fqdn = socket.getfqdn().lower()
+            except Exception:
+                fqdn = ""
+            if "." in fqdn and fqdn != local:
+                names.append(fqdn)
+            names.append(local)
+    except Exception:
+        pass
+    names.append("atlas.local")
+    seen: set[str] = set()
+    result = []
+    for n in names:
+        if n and n not in seen:
+            seen.add(n)
+            result.append(n)
+    return result
 
 
 def _warn_if_san_stale(cert_p: Path, ips: list[str], *, out=print) -> None:

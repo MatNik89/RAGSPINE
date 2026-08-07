@@ -69,6 +69,25 @@ def test_generate_no_warning_when_san_covers_ip(tmp_path):
     assert lines == []
 
 
+def test_friendly_names_includes_fqdn_suffix(monkeypatch):
+    monkeypatch.setattr(certs.socket, "gethostname", lambda: "Nick")
+    monkeypatch.setattr(certs.socket, "getfqdn", lambda: "nick.fritz.box")
+    assert certs.friendly_names() == ["nick", "nick.fritz.box", "nick.local", "atlas.local"]
+
+
+def test_friendly_names_fqdn_equals_hostname_no_suffix(monkeypatch):
+    monkeypatch.setattr(certs.socket, "gethostname", lambda: "nick")
+    monkeypatch.setattr(certs.socket, "getfqdn", lambda: "nick")
+    assert certs.friendly_names() == ["nick", "nick.local", "atlas.local"]
+
+
+def test_friendly_names_socket_exception_falls_back(monkeypatch):
+    def _boom():
+        raise OSError("no network")
+    monkeypatch.setattr(certs.socket, "gethostname", _boom)
+    assert certs.friendly_names() == ["atlas.local"]
+
+
 def test_generate_recovers_from_orphan_key(tmp_path):
     """Ako ostane samo key.pem od crasha, regenerira se s novim certom."""
     # Simuliraj crash: kreiraj samo key.pem bez certa

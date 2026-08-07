@@ -262,6 +262,18 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
+def _best_name(names: list[str], fallback_ip: str) -> str:
+    """Najbolje ime za prikaz: prava FQDN (točka, nije atlas.local/.local),
+    pa hostname.local, pa fallback_ip."""
+    for n in names:
+        if "." in n and n != "atlas.local" and not n.endswith(".local"):
+            return n
+    for n in names:
+        if n.endswith(".local") and n != "atlas.local":
+            return n
+    return fallback_ip
+
+
 def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 4: bind IP + port, cert/HTTPS, proxy, servis (preskočivo)."""
     tui.print_header("4/5  Mreža + HTTPS + servis", out=out)
@@ -317,18 +329,24 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     # 5) cert
     cert_ip = lan if bind == "0.0.0.0" else bind
     cert_dir = str(Path(getattr(cfg, "data_dir", ".")) / "certs")
+    names = certs.friendly_names()
     cert, key = certs.generate_self_signed(cert_dir, ips=[cert_ip],
-                                           hostnames=["atlas.local"], out=out)
+                                           hostnames=names, out=out)
     out(f"HTTPS certifikat: {cert}")
     out(f"  SHA256: {certs.fingerprint_sha256(cert)}")
-    out("  Na klijente ga instaliraj naredbom: atlas trust")
+    best = _best_name(names, cert_ip)
+    out("  Na OVOM računalu: atlas trust")
+    out(f"  Radnici: nakon pokretanja servera otvore http://{best}:8080/postavi (bootstrap stranica)")
 
     # 6) spremi net postavke
     spine.set_override("net", "host", bind)
     spine.set_override("net", "port", str(port))
     spine.set_override("net", "cert_path", cert)
     spine.set_override("net", "key_path", key)
-    out(f"✓ Server će služiti na https://{cert_ip}:{port}")
+    if best != cert_ip:
+        out(f"✓ Server će služiti na https://{best}:{port} (i https://{cert_ip}:{port})")
+    else:
+        out(f"✓ Server će služiti na https://{cert_ip}:{port}")
 
     # 7) servis (preskočivo; neuspjeh ne ruši stranicu)
     if tui.prompt_yes_no("Instaliraj kao servis (autostart)?", default=False,

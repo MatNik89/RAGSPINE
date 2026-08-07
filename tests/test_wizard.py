@@ -18,6 +18,8 @@ def _mreza_mocks(monkeypatch, tmp_path):
                         lambda d, ips, hostnames=None, out=print: (str(tmp_path / "cert.pem"),
                                                                    str(tmp_path / "key.pem")))
     monkeypatch.setattr(wizard.certs, "fingerprint_sha256", lambda p: "AA:BB")
+    monkeypatch.setattr(wizard.certs, "friendly_names",
+                        lambda: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
 
 
 def test_page_mreza_happy_path_saves_overrides(tmp_path, monkeypatch):
@@ -36,6 +38,38 @@ def test_page_mreza_happy_path_saves_overrides(tmp_path, monkeypatch):
     assert s.get_override("net", "port") == "8443"
     assert s.get_override("net", "cert_path").endswith("cert.pem")
     assert s.get_override("net", "key_path").endswith("key.pem")
+
+
+def test_page_mreza_prints_fqdn_and_postavi_uputa(tmp_path, monkeypatch):
+    from atlas.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    _mreza_mocks(monkeypatch, tmp_path)
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "", "", "ne"),
+                           out=lines.append)
+    assert ok is True
+    assert any("https://nick.fritz.box:8443" in l for l in lines)
+    assert any("/postavi" in l for l in lines)
+    assert any("atlas trust" in l for l in lines)
+    assert not any("Na klijente ga instaliraj naredbom" in l for l in lines)
+
+
+def test_best_name_prefers_real_fqdn():
+    names = ["nick", "nick.fritz.box", "nick.local", "atlas.local"]
+    assert wizard._best_name(names, "192.168.1.7") == "nick.fritz.box"
+
+
+def test_best_name_falls_back_to_hostname_local():
+    names = ["nick", "nick.local", "atlas.local"]
+    assert wizard._best_name(names, "192.168.1.7") == "nick.local"
+
+
+def test_best_name_falls_back_to_ip():
+    names = ["atlas.local"]
+    assert wizard._best_name(names, "192.168.1.7") == "192.168.1.7"
 
 
 def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
