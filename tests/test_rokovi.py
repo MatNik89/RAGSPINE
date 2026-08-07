@@ -37,8 +37,8 @@ def test_generate_materialises_and_shifts(spine):
     assert added > 0
     dates = {(r["kind"], r["due"]) for r in
              spine.read().execute("SELECT kind, due FROM deadline_dates").fetchall()}
-    # PDV 20.8. je četvrtak -> ostaje
-    assert ("PDV", "2026-08-20") in dates
+    # PDV od 2026.: zadnji dan mjeseca — 31.8. je ponedjeljak -> ostaje
+    assert ("PDV", "2026-08-31") in dates
     # TZ 15.8. = subota+blagdan -> pomaknuto na 17.8.
     assert ("TZ", "2026-08-17") in dates
     assert ("TZ", "2026-08-15") not in dates
@@ -74,3 +74,35 @@ def test_rokovi_job_registered(spine, cfg):
     sched = Scheduler(spine, cfg)
     jobs.register_defaults(sched)
     assert "rokovi" in {j.name for j in sched.jobs}
+
+
+def test_pdv_rok_2026_zadnji_dan_mjeseca():
+    """Od 1.1.2026. PDV/ZP/PDV-S obrasci se predaju do ZADNJEG dana mjeseca
+    (izmjene Zakona o PDV-u), ne do 20. — pravilo monthly:31 se clampa na
+    kraj mjeseca (veljača 28., travanj 30.)."""
+    assert rokovi.due_for_month("monthly:31", 2026, 2) == date(2026, 2, 28)
+    assert rokovi.due_for_month("monthly:31", 2026, 4) == date(2026, 4, 30)
+    assert rokovi.due_for_month("monthly:31", 2026, 8) == date(2026, 8, 31)
+
+
+def test_migracija_pdv_rok_na_kraj_mjeseca(tmp_path):
+    """Postojeća baza sa starim default pravilom monthly:20 za PDV/PDV-S/ZP
+    dobije monthly:31 pri otvaranju (zakonska promjena 2026)."""
+    from ragspine.core.spine import init_spine
+    db = str(tmp_path / "t.db")
+    s1 = init_spine(db)
+    with s1.write() as c:
+        c.execute("INSERT OR REPLACE INTO obligation_types(kind,label,rule,frequency,applies_to,sort,active) "
+                  "VALUES('PDV','PDV','monthly:20','monthly','pdv',10,1)")
+        c.execute("INSERT OR REPLACE INTO deadlines(kind,rule,description) VALUES('PDV','monthly:20','x')")
+        c.execute("INSERT OR REPLACE INTO deadlines(kind,rule,description) VALUES('ZP','monthly:20','x')")
+    s2 = init_spine(db)
+    r = s2.read()
+    assert r.execute("SELECT rule FROM obligation_types WHERE kind='PDV'").fetchone()["rule"] == "monthly:31"
+    assert r.execute("SELECT rule FROM deadlines WHERE kind='PDV'").fetchone()["rule"] == "monthly:31"
+    assert r.execute("SELECT rule FROM deadlines WHERE kind='ZP'").fetchone()["rule"] == "monthly:31"
+    # tuđa custom vrijednost se NE dira
+    with s2.write() as c:
+        c.execute("UPDATE obligation_types SET rule='monthly:25' WHERE kind='PDV'")
+    s3 = init_spine(db)
+    assert s3.read().execute("SELECT rule FROM obligation_types WHERE kind='PDV'").fetchone()["rule"] == "monthly:25"

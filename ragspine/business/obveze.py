@@ -8,7 +8,9 @@
 # ostaju. (kind, label, rule, frequency, applies_to, sort, active)
 # active=0 znači: postoji u registru, ali nije tab dok ga radnik ne uključi.
 DEFAULT_TYPES = [
-    ("PDV", "PDV", "monthly:20", "monthly", "pdv", 10, 1),
+    # PDV: od 1.1.2026. rok predaje = ZADNJI dan mjeseca (izmjene Zakona o
+    # PDV-u; bilo 20.) — monthly:31 se clampa na kraj mjeseca u due_for_month.
+    ("PDV", "PDV", "monthly:31", "monthly", "pdv", 10, 1),
     ("JOPPD", "JOPPD", "monthly:15", "monthly", "employees", 20, 1),
     ("DOH", "Prijava poreza na dohodak (DOH)", "yearly:02-28", "yearly", "dohodak", 30, 0),
     ("PO-SD", "Paušalno izvješće (PO-SD)", "yearly:01-15", "yearly", "pausal", 40, 0),

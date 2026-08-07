@@ -6,12 +6,12 @@
 from datetime import date, timedelta
 
 RULES: list[dict] = [
-    {"kind": "PDV", "rule": "monthly:20", "description": "PDV obrazac do 20. u mjesecu za prethodni"},
+    {"kind": "PDV", "rule": "monthly:31", "description": "PDV obrazac do zadnjeg dana u mjesecu za prethodni (od 2026.)"},
     {"kind": "JOPPD", "rule": "monthly:15", "description": "JOPPD obrazac (pojednostavljeno: na dan isplate, rok 15. u mjesecu)"},
     {"kind": "DOH", "rule": "yearly:02-28", "description": "Prijava poreza na dohodak (DOH)"},
     {"kind": "PD", "rule": "yearly:04-30", "description": "Prijava poreza na dobit (PD)"},
-    {"kind": "PDV-S", "rule": "monthly:20", "description": "Zbirna prijava PDV-S do 20. u mjesecu"},
-    {"kind": "ZP", "rule": "monthly:20", "description": "Zbirna prijava ZP do 20. u mjesecu"},
+    {"kind": "PDV-S", "rule": "monthly:31", "description": "Zbirna prijava PDV-S do zadnjeg dana u mjesecu (od 2026.)"},
+    {"kind": "ZP", "rule": "monthly:31", "description": "Zbirna prijava ZP do zadnjeg dana u mjesecu (od 2026.)"},
     {"kind": "OPZ-STAT", "rule": "quarterly:20", "description": "OPZ-STAT statističko izvješće, kvartalno do 20."},
     {"kind": "TZ", "rule": "monthly:15", "description": "Turistička zajednica - mjesečna članarina do 15."},
     {"kind": "GFI", "rule": "yearly:04-30", "description": "Godišnji financijski izvještaj (GFI)"},

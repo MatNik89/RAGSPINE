@@ -169,6 +169,19 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
 
 
+def _migrate_pdv_rok_2026(conn: sqlite3.Connection) -> None:
+    """Izmjene Zakona o PDV-u od 1.1.2026.: rok predaje PDV/PDV-S/ZP obrazaca
+    pomaknut s 20. u mjesecu na ZADNJI dan mjeseca (monthly:31 se clampa na
+    kraj mjeseca). Mijenja SAMO stari default 'monthly:20' — admin-prilagođena
+    pravila se ne diraju."""
+    conn.execute(
+        "UPDATE obligation_types SET rule='monthly:31' "
+        "WHERE kind='PDV' AND rule='monthly:20'")
+    conn.execute(
+        "UPDATE deadlines SET rule='monthly:31' "
+        "WHERE kind IN ('PDV','PDV-S','ZP') AND rule='monthly:20'")
+
+
 def _migrate_setup_complete_for_upgrades(conn: sqlite3.Connection) -> None:
     """Nadogradnja postojećih instalacija prije setup-wizarda (feat/setup-wizard-design):
     ako baza već ima barem jednog korisnika a setup_complete flag nije postavljen,
@@ -244,6 +257,7 @@ class Spine:
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
             _migrate_setup_complete_for_upgrades(c)
+            _migrate_pdv_rok_2026(c)
         # DB drži sav klijentski PII + pbkdf2 hasheve lozinki — 0600 da drugi
         # lokalni korisnici hosta ne mogu čitati (chmod no-op na Windowsu).
         for p in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):
