@@ -70,7 +70,7 @@ $('t-save').addEventListener('click', async function(){
   var res = await fetch('/folder-architecture/template', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({office: csv($('t-office').value), client_subdirs: csv($('t-client').value)})});
-  if(!res.ok){ var e = await res.json().catch(function(){return {};}); alert('Gre\\u0161ka: '+(e.detail||res.status)); return; }
+  if(!res.ok){ var e = await res.json().catch(function(){return {};}); toast('Gre\\u0161ka: '+(e.detail||res.status), 'bad'); return; }
   load();
 });
 

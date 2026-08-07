@@ -127,6 +127,15 @@ table.ledger tbody tr:nth-child(even){background:var(--surface-2)}
 .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
 .btn-danger{background:var(--bad);color:#fff}
 
+/* toasts */
+#toasts{position:fixed;right:1rem;bottom:1rem;z-index:100;display:flex;
+  flex-direction:column;gap:.5rem;max-width:min(380px,90vw)}
+.toast{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--muted);
+  border-radius:8px;padding:.6rem .9rem;font-size:.88rem;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+.toast.ok{border-left-color:var(--ok)}
+.toast.warn{border-left-color:var(--warn)}
+.toast.bad{border-left-color:var(--bad)}
+
 /* chips */
 .chip{display:inline-block;font-size:.75rem;padding:.15rem .55rem;border-radius:6px;
   font-family:var(--font-mono);font-variant-numeric:tabular-nums;
@@ -174,7 +183,10 @@ form.stack{display:flex;flex-direction:column;gap:.5rem;max-width:520px}
 .cal-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:.9rem}
 .cal-month{font-size:1.25rem;font-weight:700;letter-spacing:-.01em}
 .cal-legend{display:flex;gap:.9rem;font-size:.72rem;color:var(--muted)}
-.cal-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.3rem;vertical-align:1px}
+.cal-legend .g{font-family:var(--font-mono);font-weight:700;margin-right:.3rem}
+.cal-legend .g.bad{color:var(--bad)}
+.cal-legend .g.warn{color:var(--warn)}
+.cal-legend .g.ok{color:var(--ok)}
 .dow{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
 .dow span{font-size:.66rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-left:2px}
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
@@ -299,6 +311,25 @@ function toggleTheme() {
 })();
 """
 
+_TOAST_JS = """
+function toast(text, kind) {           // kind: 'ok' | 'warn' | 'bad'
+  var box = document.getElementById('toasts');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'toasts';
+    box.setAttribute('role', 'status');
+    box.setAttribute('aria-live', 'polite');
+    document.body.appendChild(box);
+  }
+  var t = document.createElement('div');
+  t.className = 'toast ' + (kind || '');
+  t.textContent = text;
+  box.appendChild(t);
+  setTimeout(function () { t.remove(); }, 5000);
+}
+window.toast = toast;
+"""
+
 
 def page_shell(title: str, body_html: str, active: str = "") -> str:
     title_e = html.escape(title)
@@ -319,6 +350,7 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 </head>
 <body>
 <script>{_THEME_INIT_JS}</script>
+<script>{_TOAST_JS}</script>
 <div class="layout">
 <aside class="sidebar" aria-label="Glavna navigacija">
 <span class="brand">ATLAS</span>
@@ -341,6 +373,7 @@ def page_shell(title: str, body_html: str, active: str = "") -> str:
 _DASHBOARD_JS = """
 function $(id) { return document.getElementById(id); }
 function setNum(id, value) { $(id).textContent = String(value); }
+var GLYPH = { bad: '●', warn: '▲', ok: '✓' };
 function emptyMsg(container, text) {
   const p = document.createElement('p'); p.className = 'meta'; p.textContent = text;
   container.appendChild(p);
@@ -382,7 +415,7 @@ function renderCalendar(cal) {
     (byDay[d] || []).forEach(function (e) {
       const ev = document.createElement('span');
       ev.className = 'cal-ev ' + (e.state || '');
-      ev.textContent = e.label; ev.title = e.label;
+      ev.textContent = (GLYPH[e.state] || '') + ' ' + e.label; ev.title = e.label;
       cell.appendChild(ev);
     });
     grid.appendChild(cell);
@@ -418,7 +451,8 @@ function renderUnsentByClient(groups, total) {
     const kinds = document.createElement('span'); kinds.className = 'ukinds';
     (g.kinds || []).forEach(function (k) {
       const chip = document.createElement('span');
-      chip.className = 'chip ' + (k.state || 'warn'); chip.textContent = k.kind;
+      chip.className = 'chip ' + (k.state || 'warn');
+      chip.textContent = (GLYPH[k.state || 'warn'] || '') + ' ' + k.kind;
       kinds.appendChild(chip);
     });
     row.appendChild(kinds);
@@ -533,9 +567,9 @@ def dashboard_page() -> str:
     <div class="cal-head">
       <div class="cal-month" id="cal-month">—</div>
       <div class="cal-legend">
-        <span><i style="background:var(--bad)"></i>kasni</span>
-        <span><i style="background:var(--warn)"></i>ovaj tjedan</span>
-        <span><i style="background:var(--ok)"></i>predstoji</span>
+        <span><b class="g bad">●</b>kasni</span>
+        <span><b class="g warn">▲</b>ovaj tjedan</span>
+        <span><b class="g ok">✓</b>predstoji</span>
       </div>
     </div>
     <div class="dow"><span>Pon</span><span>Uto</span><span>Sri</span><span>Čet</span><span>Pet</span><span>Sub</span><span>Ned</span></div>
@@ -713,7 +747,7 @@ def _pending_rows_html(pending_rows: list[dict]) -> str:
 _UPUTE_JS = """
 async function post(url) {
   const res = await fetch(url, { method: 'POST', credentials: 'same-origin' });
-  if (!res.ok) { alert('Greška: ' + res.status); return null; }
+  if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return null; }
   return res.json();
 }
 
@@ -750,8 +784,8 @@ async function uploadImage(id) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename: file.name, data_base64: data_base64, caption: '' }),
   });
-  if (!res.ok) { alert('Greška: ' + res.status); return; }
-  alert('Slika učitana.');
+  if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return; }
+  toast('Slika učitana.', 'ok');
 }
 
 document.getElementById('sop-form').addEventListener('submit', async function (e) {
@@ -769,7 +803,7 @@ document.getElementById('sop-form').addEventListener('submit', async function (e
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) { alert('Greška: ' + res.status); return; }
+  if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return; }
   location.reload();
 });
 """
@@ -1129,7 +1163,7 @@ $('note-form').addEventListener('submit', async function (e) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ client_id: CLIENT_ID, body: body }),
   });
-  if (!res.ok) { alert('Greška: ' + res.status); return; }
+  if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return; }
   $('note-body').value = '';
   loadKarton();
 });
@@ -1145,7 +1179,7 @@ $('doc-upload').addEventListener('click', async function () {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ filename: file.name, data_base64: data_base64 }),
   });
-  if (!res.ok) { alert('Greška: ' + res.status); return; }
+  if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return; }
   input.value = '';
   loadKarton();
 });

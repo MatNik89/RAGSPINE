@@ -76,7 +76,7 @@ async function addManual(){
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({kind: $('m-kind').value, name: $('m-name').value.trim(),
                           url: $('m-url').value.trim()})});
-  if(!res.ok){ var e = await res.json().catch(function(){return {};}); alert('Gre\\u0161ka: '+(e.detail||res.status)); return; }
+  if(!res.ok){ var e = await res.json().catch(function(){return {};}); toast('Gre\\u0161ka: '+(e.detail||res.status), 'bad'); return; }
   $('m-name').value=''; $('m-url').value='';
   loadDevices();
 }

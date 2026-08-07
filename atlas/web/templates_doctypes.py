@@ -81,10 +81,10 @@ async function saveType(){
     fields: readFields(), active: $('d-active').checked?1:0,
     sort: Number($('d-sort').value)||100,
   };
-  if(!payload.key){ alert('\\u0160ifra je obavezna.'); return; }
+  if(!payload.key){ toast('\\u0160ifra je obavezna.', 'bad'); return; }
   var res = await fetch('/doc-types', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-  if(!res.ok){ var e = await res.json().catch(function(){return {};}); alert('Gre\\u0161ka: '+(e.detail||res.status)); return; }
+  if(!res.ok){ var e = await res.json().catch(function(){return {};}); toast('Gre\\u0161ka: '+(e.detail||res.status), 'bad'); return; }
   resetForm(); loadTypes();
 }
 

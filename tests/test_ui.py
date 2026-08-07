@@ -217,3 +217,37 @@ def test_design_system_ekrani_bez_hardkodiranih_boja():
             "#9B2C2C", "#2F7D4F", "#B45309",
         }
         assert hits <= allowed, f"{name}: hardkodirane boje {hits - allowed}"
+
+
+# --- ui-nalazi-2026-08-07.md, drugi krug (B3 glifovi + B4 toast) --------
+
+
+def test_dashboard_legenda_ima_glifove():
+    """B3: legenda kalendara je bila gola obojena točka — kasni/ovaj tjedan/
+    predstoji se nisu razlikovali bez boje. Boja nikad sama: glif + riječ."""
+    from atlas.web.templates_ui import dashboard_page
+    html_out = dashboard_page()
+    assert "●" in html_out
+    assert "▲" in html_out
+    assert "✓" in html_out
+
+
+def test_nema_alert_poziva_u_templatima():
+    """B4: alert() blokira karticu i zamrzava svaki E2E/browser-bridge tijek
+    koji na njega naiđe. Zamijenjeno toast() helperom — ovaj test čuva 0."""
+    import pathlib
+
+    web_dir = pathlib.Path(__file__).resolve().parent.parent / "atlas" / "web"
+    for f in web_dir.glob("templates_*.py"):
+        text = f.read_text(encoding="utf-8")
+        assert "alert(" not in text, f"{f.name}: alert() se vratio"
+
+
+def test_toast_definiran_prije_upotrebe_u_page_shell():
+    """B4: toast() mora biti definiran PRIJE bilo koje stranične skripte koja
+    ga zove — helper ide u shared JS koji page_shell uvijek uključuje."""
+    from atlas.web.templates_ui import dashboard_page
+    html_out = dashboard_page()
+    assert html_out.index("function toast(") < html_out.index("loadDashboard();")
+    assert "box.id = 'toasts'" in html_out
+    assert "aria-live" in html_out

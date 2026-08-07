@@ -63,7 +63,7 @@ async function onToggle(cb) {
   cb.disabled = true;
   var ok = await postMark(id, sent);
   cb.disabled = false;
-  if (!ok) { cb.checked = !sent; alert('Greška pri spremanju. Pokušajte ponovno.'); return; }
+  if (!ok) { cb.checked = !sent; toast('Greška pri spremanju. Pokušajte ponovno.', 'bad'); return; }
   row.className = 'oblig-row ' + (sent ? 'ok' : 'bad');
   var status = row.querySelector('.ostatus');
   status.textContent = sent ? 'Predano' : 'Nije predano';
@@ -222,10 +222,10 @@ async function saveType(){
     applies_to: $('t-applies').value, active: $('t-active').checked?1:0,
     sort: Number($('t-sort').value)||100,
   };
-  if(!payload.kind){ alert('Šifra (kind) je obavezna.'); return; }
+  if(!payload.kind){ toast('Šifra (kind) je obavezna.', 'bad'); return; }
   var res = await fetch('/obveze/tipovi', {method:'POST', credentials:'same-origin',
     headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
-  if(!res.ok){ var e = await res.json().catch(function(){return {};}); alert('Greška: '+(e.detail||res.status)); return; }
+  if(!res.ok){ var e = await res.json().catch(function(){return {};}); toast('Greška: '+(e.detail||res.status), 'bad'); return; }
   resetForm(); loadTypes();
 }
 
@@ -307,7 +307,7 @@ function renderCampaignResult(data, real) {
 async function runCampaign(really) {
   const subject = document.getElementById('campaign-subject').value.trim();
   const body = document.getElementById('campaign-body').value.trim();
-  if (!subject || !body) { alert('Unesite predmet i tekst poruke.'); return; }
+  if (!subject || !body) { toast('Unesite predmet i tekst poruke.', 'bad'); return; }
   // dry_run defaults true; only false when the "stvarno pošalji" box is checked
   const dry_run = !really;
   try {
@@ -320,11 +320,11 @@ async function runCampaign(really) {
         subject: subject, body: body, dry_run: dry_run,
       }),
     });
-    if (!res.ok) { alert('Greška: ' + res.status); return; }
+    if (!res.ok) { toast('Greška: ' + res.status, 'bad'); return; }
     const data = await res.json();
     renderCampaignResult(data, really);
   } catch (err) {
-    alert('Greška u komunikaciji sa serverom.');
+    toast('Greška u komunikaciji sa serverom.', 'bad');
   }
 }
 
