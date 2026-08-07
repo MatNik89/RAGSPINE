@@ -16,7 +16,8 @@ import time
 import urllib.request
 
 from atlas import config
-from atlas.core.subproc import run_isolated
+from atlas.core.subproc import run_isolated, run_streaming
+from atlas.ops import winpath
 
 # --- stanje računala (cross-OS, bez nove ovisnosti) ---
 
@@ -199,6 +200,8 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
                                  data=json.dumps({"model": name}).encode(),
                                  headers={"Content-Type": "application/json"})
     last_pct = -1
+    stream = out is print and sys.stdout.isatty()
+    step = 1 if stream else 10
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             for raw in r:
@@ -213,12 +216,22 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
                 total, done = ev.get("total"), ev.get("completed")
                 if total and done is not None:
                     pct = int(done * 100 / total)
-                    if pct != last_pct:   # ne spamaj isti postotak
-                        out(f"  {status}: {pct}%")
+                    if pct != last_pct and (pct % step == 0 or pct == 100):
+                        line = f"  {status}: {pct}%"
+                        if stream:
+                            sys.stdout.write("\r" + line + "   ")
+                            sys.stdout.flush()
+                        else:
+                            out(line)
                         last_pct = pct
                 elif status:
+                    if stream and last_pct >= 0:
+                        sys.stdout.write("\n")
+                        last_pct = -1
                     out(f"  {status}")
                 if status == "success":
+                    if stream and last_pct >= 0:
+                        sys.stdout.write("\n")
                     return True
     except Exception as e:
         out(f"Greška pri skidanju modela: {e}")
@@ -392,11 +405,11 @@ def requirements(cfg=None) -> list[dict]:
     out.append({"key": "data_dir", "naziv": "Podatkovna mapa upisiva", "status": _status(writable),
                 "detalj": data_dir, "fix": "provjeri dozvole nad podatkovnom mapom"})
 
-    tess = shutil.which("tesseract")
+    tess = winpath.find_binary("tesseract")
     langs_ok = False
     if tess:
         try:
-            rc, tout, terr = run_isolated(["tesseract", "--list-langs"], timeout=5)
+            rc, tout, terr = run_isolated([tess, "--list-langs"], timeout=5)
             blob = f"{tout}\n{terr}".lower()
             langs_ok = "hrv" in blob and "eng" in blob
         except Exception:
@@ -492,11 +505,71 @@ def summary(cfg=None, reduced: bool = False) -> dict:
 
 WINGET_IDS = {"tesseract": "UB-Mannheim.TesseractOCR", "ollama": "Ollama.Ollama"}
 _WINGET_BIN = {"tesseract": "tesseract", "ollama": "ollama"}
+_WINGET_INFO = {"ollama": "~700 MB, tipično nekoliko minuta",
+                "tesseract": "~60 MB, ispod minute"}
+_TESSDATA_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata/main/{lang}.traineddata"
+
+
+def _dir_writable(d) -> bool:
+    """Stvarna proba upisa (os.access je nepouzdan na Windows ACL)."""
+    import pathlib
+    d = pathlib.Path(d)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        probe = d / ".atlas_write_probe"
+        probe.write_bytes(b"x")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def ensure_traineddata(langs=("hrv", "eng"), *, out=print,
+                       urlopen=urllib.request.urlopen) -> bool:
+    """Osiguraj Tesseract jezike (E2E: UB-Mannheim paket nema hrv).
+    Cilj: tessdata uz exe; bez dozvole (Program Files bez elevacije) →
+    <data_dir>/tessdata + TESSDATA_PREFIX (proces + trajno). TESSDATA_PREFIX
+    je ISKLJUČIV — u fallback mapu se kopiraju i jezici koje primarna već
+    ima, inače bi eng nestao."""
+    from pathlib import Path
+    exe = winpath.find_binary("tesseract")
+    if not exe:
+        return False
+    primary = Path(exe).parent / "tessdata"
+    target = primary if _dir_writable(primary) else Path(config.default_data_dir()) / "tessdata"
+    fallback_mode = target != primary
+    if fallback_mode and not _dir_writable(target):
+        out("  ✗ nijedna tessdata lokacija nije upisiva.")
+        return False
+    target.mkdir(parents=True, exist_ok=True)
+    for lang in langs:
+        fname = f"{lang}.traineddata"
+        if (target / fname).exists():
+            continue
+        if fallback_mode and (primary / fname).exists():
+            shutil.copy2(primary / fname, target / fname)
+            continue
+        out(f"  Skidam {fname} (~15 MB)...")
+        try:
+            with urlopen(_TESSDATA_URL.format(lang=lang), timeout=120) as r:
+                data = r.read()
+            (target / fname).write_bytes(data)
+        except Exception as e:
+            out(f"  ✗ {fname}: {e}")
+            return False
+        out(f"  ✓ {fname} → {target}")
+    if fallback_mode:
+        os.environ["TESSDATA_PREFIX"] = str(target)
+        winpath.persist_user_env("TESSDATA_PREFIX", str(target))
+        out(f"  TESSDATA_PREFIX postavljen: {target}")
+    return True
 
 
 def install_via_winget(key: str, *, out=print) -> bool:
-    """Windows auto-install preko winget allowliste (UAC potvrda iskoči korisniku).
-    Drugi OS: ispiši naredbu i vrati False. Validira binary nakon installa."""
+    """Windows auto-install preko winget allowliste. 'Već instalirano' se
+    prepozna i preskoči (E2E nalaz); izlaz ide UŽIVO (run_streaming);
+    nakon installa PATH refresh iz registryja + poznate lokacije umjesto
+    'restartaj terminal'; tesseract dobiva i hrv/eng jezike."""
     if key not in WINGET_IDS:
         raise ValueError(f"nepoznat paket: {key!r}")
     wid = WINGET_IDS[key]
@@ -506,16 +579,30 @@ def install_via_winget(key: str, *, out=print) -> bool:
         out(f"Auto-install je Windows-only. Ručno: {' '.join(cmd)}")
         out("  (Linux: apt/dnf; macOS: brew — potraži paket u svom package manageru.)")
         return False
-    out(f"Instaliram {wid} — očekuj UAC potvrdu (klikni Da)...")
-    rc, _out_txt, err = run_isolated(cmd, timeout=600)
-    if rc != 0:
-        out(f"winget nije uspio (rc {rc}): {err[:200]}")
+    existing = winpath.find_binary(_WINGET_BIN[key])
+    if existing:
+        out(f"✓ {wid} je već instaliran ({existing}) — preskačem winget.")
+    else:
+        info = _WINGET_INFO.get(key, "")
+        out(f"Instaliram {wid} ({info}) — očekuj UAC potvrdu (klikni Da); "
+            "napredak ispod:")
+        rc = run_streaming(cmd, timeout=900, out=out)
+        if rc != 0:
+            out(f"winget nije uspio (rc {rc}).")
+            return False
+        winpath.refresh_path_from_registry()
+    exe = winpath.find_binary(_WINGET_BIN[key])
+    if not exe:
+        out(f"Instalirano, ali '{_WINGET_BIN[key]}' nije pronađen ni na "
+            "poznatim lokacijama — provjeri instalaciju pa ponovi.")
         return False
     if not shutil.which(_WINGET_BIN[key]):
-        out(f"Instalirano, ali '{_WINGET_BIN[key]}' nije na PATH-u — "
-            "restartaj terminal ili dodaj PATH ručno pa ponovi provjeru.")
+        exe_dir = os.path.dirname(exe)
+        winpath.append_user_path(exe_dir)
+        out(f"  PATH dopunjen: {exe_dir}")
+    if key == "tesseract" and not ensure_traineddata(("hrv", "eng"), out=out):
         return False
-    out(f"✓ {wid} instaliran i dostupan.")
+    out(f"✓ {wid} spreman ({exe}).")
     return True
 
 

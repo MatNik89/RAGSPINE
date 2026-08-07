@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from atlas.ops import preflight as pf
@@ -35,7 +37,10 @@ def test_system_state_has_ip_mode():
 
 
 def test_tesseract_missing_is_fail(monkeypatch):
-    monkeypatch.setattr(pf.shutil, "which", lambda _: None)
+    # winpath.find_binary radi vlastiti shutil.which unutar svog modula —
+    # patchati treba njega, ne pf.shutil (inače stvarni tesseract na
+    # razvojnom stroju "pobjeđuje" monkeypatch — Nalaz zadatka 3).
+    monkeypatch.setattr(pf.winpath, "find_binary", lambda k: None)
     reqs = {r["key"]: r for r in pf.requirements()}
     assert reqs["tesseract"]["status"] == "fail"   # bio "warn"
 
@@ -403,17 +408,63 @@ def test_port_free_windows_skips_reuseaddr(monkeypatch):
     assert pf.socket.SO_REUSEADDR not in calls
 
 
-def test_install_via_winget_windows_path(monkeypatch):
-    calls = []
+def test_install_via_winget_vec_instalirano(monkeypatch):
+    """Postojeća binarka → 'već instalirano', winget se NE zove."""
+    from atlas.ops import winpath
     monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(pf, "run_isolated",
-                        lambda cmd, timeout=60, **kw: calls.append(cmd) or (0, "", ""))
-    monkeypatch.setattr(pf.shutil, "which", lambda name: f"C:/x/{name}.exe")
+    monkeypatch.setattr(winpath, "find_binary", lambda k: r"C:\alat\ollama.exe")
+    monkeypatch.setattr(pf, "run_streaming",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("winget pozvan")))
     lines = []
     assert pf.install_via_winget("ollama", out=lines.append) is True
-    assert calls and calls[0][:4] == ["winget", "install", "--exact", "--id"]
-    assert "Ollama.Ollama" in calls[0]
-    assert any("UAC" in l for l in lines)
+    assert any("već instaliran" in l for l in lines)
+
+
+def test_install_via_winget_streaming_i_najava(monkeypatch, tmp_path):
+    from atlas.ops import winpath
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    exe = tmp_path / "ollama.exe"
+    hits = iter([None, str(exe)])   # prije installa nema, poslije ima
+    monkeypatch.setattr(winpath, "find_binary", lambda k: next(hits, str(exe)))
+    monkeypatch.setattr(winpath, "refresh_path_from_registry", lambda: True)
+    monkeypatch.setattr(winpath, "append_user_path", lambda d: True)
+    monkeypatch.setattr(pf.shutil, "which", lambda k: None)
+    calls = []
+    monkeypatch.setattr(pf, "run_streaming",
+                        lambda cmd, **k: calls.append(cmd) or 0)
+    exe.write_bytes(b"x")
+    lines = []
+    assert pf.install_via_winget("ollama", out=lines.append) is True
+    assert calls and "winget" in calls[0][0]
+    assert any("700 MB" in l for l in lines)      # najava veličine (E2E nalaz)
+
+
+def test_install_via_winget_tesseract_zove_traineddata(monkeypatch, tmp_path):
+    from atlas.ops import winpath
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    exe = tmp_path / "tesseract.exe"
+    exe.write_bytes(b"x")
+    monkeypatch.setattr(winpath, "find_binary", lambda k: str(exe))
+    monkeypatch.setattr(pf.shutil, "which", lambda k: str(exe))
+    called = []
+    monkeypatch.setattr(pf, "ensure_traineddata",
+                        lambda langs=("hrv", "eng"), out=print, urlopen=None:
+                        called.append(langs) or True)
+    assert pf.install_via_winget("tesseract", out=lambda *_: None) is True
+    assert called
+
+
+def test_install_via_winget_binarka_ne_nadjena_nakon_installa(monkeypatch, tmp_path):
+    """Instalacija 'uspije' (rc 0) ali binarka se ne nađe nigdje poznatom —
+    javi grešku umjesto 'restartaj terminal'."""
+    from atlas.ops import winpath
+    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(winpath, "find_binary", lambda k: None)
+    monkeypatch.setattr(pf, "run_streaming", lambda *a, **k: 0)
+    monkeypatch.setattr(winpath, "refresh_path_from_registry", lambda: True)
+    lines = []
+    assert pf.install_via_winget("ollama", out=lines.append) is False
+    assert any("nije pronađen" in l for l in lines)
 
 
 def test_install_via_winget_non_windows_prints_cmd(monkeypatch):
@@ -430,15 +481,6 @@ def test_install_via_winget_non_windows_prints_cmd(monkeypatch):
 def test_install_via_winget_unknown_key():
     with pytest.raises(ValueError):
         pf.install_via_winget("nepoznato")
-
-
-def test_install_via_winget_path_problem(monkeypatch):
-    monkeypatch.setattr(pf.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(pf, "run_isolated", lambda cmd, timeout=60, **kw: (0, "", ""))
-    monkeypatch.setattr(pf.shutil, "which", lambda name: None)   # instaliran ali ne na PATH-u
-    lines = []
-    assert pf.install_via_winget("ollama", out=lines.append) is False
-    assert any("PATH" in l for l in lines)
 
 
 def test_proxy_roundtrip(tmp_path):
@@ -475,3 +517,100 @@ def test_llmfit_models_ne_kesira_neuspjeh(monkeypatch):
     monkeypatch.setattr(pf, "system_state", lambda cfg=None: {"ram_total_gb": 16})
     assert pf.llmfit_models(None) is None    # rc=1 → None, ne kešira se
     assert pf.llmfit_models(None) == []      # sljedeći pokušaj ponovno pokreće
+
+
+def _resp(data: bytes):
+    import io
+
+    class _R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    return _R(data)
+
+
+def test_ensure_traineddata_skida_u_tessdata_uz_exe(tmp_path, monkeypatch):
+    from atlas.ops import winpath
+    exe = tmp_path / "Tesseract-OCR" / "tesseract.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"x")
+    (exe.parent / "tessdata").mkdir()
+    (exe.parent / "tessdata" / "eng.traineddata").write_bytes(b"eng")
+    monkeypatch.setattr(winpath, "find_binary", lambda k: str(exe))
+    urls = []
+    lines = []
+    ok = pf.ensure_traineddata(
+        ("hrv", "eng"), out=lines.append,
+        urlopen=lambda url, timeout=120: urls.append(url) or _resp(b"HRVDATA"))
+    assert ok is True
+    assert (exe.parent / "tessdata" / "hrv.traineddata").read_bytes() == b"HRVDATA"
+    assert len(urls) == 1 and "hrv.traineddata" in urls[0]   # eng već postoji
+
+
+def test_ensure_traineddata_fallback_na_data_dir(tmp_path, monkeypatch):
+    """Program Files bez dozvole → data_dir/tessdata + TESSDATA_PREFIX;
+    eng se KOPIRA iz primarne lokacije (TESSDATA_PREFIX je isključiv)."""
+    from atlas.ops import winpath
+    from atlas import config
+    exe = tmp_path / "pf" / "tesseract.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"x")
+    td = exe.parent / "tessdata"
+    td.mkdir()
+    (td / "eng.traineddata").write_bytes(b"ENG")
+    datadir = tmp_path / "data"
+    datadir.mkdir()
+    monkeypatch.setattr(winpath, "find_binary", lambda k: str(exe))
+    monkeypatch.setattr(config, "default_data_dir", lambda: str(datadir))
+    monkeypatch.setattr(pf, "_dir_writable", lambda d: d != td)
+    persisted = []
+    monkeypatch.setattr(winpath, "persist_user_env",
+                        lambda n, v: persisted.append((n, v)) or True)
+    monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+    ok = pf.ensure_traineddata(
+        ("hrv", "eng"), out=lambda *_: None,
+        urlopen=lambda url, timeout=120: _resp(b"HRV"))
+    assert ok is True
+    dest = datadir / "tessdata"
+    assert (dest / "hrv.traineddata").read_bytes() == b"HRV"
+    assert (dest / "eng.traineddata").read_bytes() == b"ENG"     # kopiran
+    assert os.environ["TESSDATA_PREFIX"] == str(dest)
+    assert ("TESSDATA_PREFIX", str(dest)) in persisted
+
+
+def test_ensure_traineddata_bez_tesseracta(monkeypatch):
+    from atlas.ops import winpath
+    monkeypatch.setattr(winpath, "find_binary", lambda k: None)
+    assert pf.ensure_traineddata(out=lambda *_: None, urlopen=None) is False
+
+
+def test_ensure_traineddata_download_pada(tmp_path, monkeypatch):
+    from atlas.ops import winpath
+    exe = tmp_path / "tesseract.exe"
+    exe.write_bytes(b"x")
+    (tmp_path / "tessdata").mkdir()
+    monkeypatch.setattr(winpath, "find_binary", lambda k: str(exe))
+
+    def _boom(url, timeout=120):
+        raise OSError("mreža pala")
+    ok = pf.ensure_traineddata(("hrv",), out=lambda *_: None, urlopen=_boom)
+    assert ok is False
+
+
+def test_ollama_pull_injektirani_out_svakih_10_posto(monkeypatch):
+    """Injektirani out: redak svakih 10 % (ne 100 redaka spama — E2E nalaz)."""
+    import io, json
+    events = [json.dumps({"status": "pulling", "total": 100, "completed": i}).encode() + b"\n"
+              for i in range(1, 101)]
+    events.append(json.dumps({"status": "success"}).encode() + b"\n")
+    body = io.BytesIO(b"".join(events))
+    body.__enter__ = lambda *a: body
+    body.__exit__ = lambda *a: False
+    monkeypatch.setattr(pf.urllib.request, "urlopen",
+                        lambda req, timeout=30: body)
+    lines = []
+    assert pf.ollama_pull("m", out=lines.append) is True
+    pct_lines = [l for l in lines if "%" in l]
+    assert 9 <= len(pct_lines) <= 12   # ~svakih 10 %, ne 100 redaka
