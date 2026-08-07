@@ -41,6 +41,12 @@ Zadaci redom:
    sam: redoslijed sigurnih koraka; što ostaje kompatibilno zauvijek vs. do
    v2. GitHub repo ime NE diraj bez mene (remote URL se mijenja — to radim
    ja ručno na GitHubu, ti pripremi upute).
+   OBAVEZAN završni korak grane — audit starog imena: (a) `grep -ri ragspine`
+   preko repoa mora dati NULA pogodaka izvan unaprijed popisanih iznimaka
+   (env aliasi za kompatibilnost, povijesni docs/specs/planovi/nalazi, git
+   povijest); (b) trajni test u suiteu koji grepa "ragspine" po KODU (ne
+   docs) i pada ako se ime ikad vrati; (c) popis iznimaka ide u plan grane
+   prije implementacije.
 
 2. TUI face-lift wizarda (druga grana, SDD) — cijeli spec je u
    docs/e2e-nalazi-2026-08-06.md: hermes curses mehanika (strelice, razmak,
