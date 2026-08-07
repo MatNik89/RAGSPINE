@@ -151,3 +151,69 @@ def test_chat_and_upute_functionality_preserved(spine, cfg):
     r_upute = c.get("/ui/upute", headers=_auth(tok))
     assert "/sop" in r_upute.text
     assert "/sop/" in r_upute.text and "image" in r_upute.text
+
+
+# --- ui-nalazi-2026-08-07.md, prvi krug (mehanički) ---------------------
+
+
+def test_container_ne_centrira_se_kao_grid_item():
+    """B1: .container je grid item u .layout — auto-margin ga shrink-wrapa i
+    centrira umjesto da ispuni stupac. .container smije zadržati max-width,
+    ali ne smije nositi margin:0 auto; .layout > .container mora ga razvući."""
+    from atlas.web.templates_ui import CSS_TOKENS
+    assert "margin:0 auto" not in CSS_TOKENS
+    assert ".layout > .container{justify-self:stretch;width:100%;margin-inline:0}" in CSS_TOKENS
+
+
+def test_preflight_bez_literalnih_escapeova():
+    """B2: \\u010d/\\u2014 upisani kao literal u obični string ostaju doslovno
+    u HTML-u (HTML ne poznaje \\u escape). U JS-u (unutar <script>) je ispravno
+    i ostaje netaknuto — provjeravamo samo dio prije prvog <script>."""
+    from atlas.web.templates_preflight import preflight_page
+    html_out = preflight_page()
+    head = html_out.split("<script>")[0]
+    assert "\\u" not in head, "literalni \\u escape iscurio u HTML"
+    assert "Računalo i modeli" in html_out
+    assert "—" in html_out
+
+
+def test_klijenti_ima_poveznicu_na_uvoz():
+    """B8: /ui/klijenti-uvoz je bio dohvatljiv samo upisom URL-a ručno."""
+    from atlas.web.templates_ui import klijenti_page
+    assert 'href="/ui/klijenti-uvoz"' in klijenti_page()
+
+
+def test_svi_active_kljucevi_postoje_u_nav():
+    """B9: page_shell(active=...) uspoređuje s ključevima iz _NAV — svaki
+    active="..." u bilo kojem templates_*.py mora postojati u _NAV, inače
+    sidebar nikad ne označi trenutnu stranicu."""
+    import re
+    import pathlib
+
+    from atlas.web.templates_ui import _NAV
+    kljucevi = {k for k, _, _ in _NAV}
+    web_dir = pathlib.Path(__file__).resolve().parent.parent / "atlas" / "web"
+    for f in web_dir.glob("templates_*.py"):
+        for m in re.finditer(r'active="([a-z\-]+)"', f.read_text(encoding="utf-8")):
+            assert m.group(1) in kljucevi, f"{f.name}: nepoznat active={m.group(1)!r}"
+
+
+def test_design_system_ekrani_bez_hardkodiranih_boja():
+    """B5: setup/preflight/connectors/backup su zaobilazili CSS_TOKENS i
+    hardkodirali Tailwindove default hex boje. Login čeka poseban redizajn
+    i namjerno je izuzet."""
+    import re
+    import pathlib
+
+    web_dir = pathlib.Path(__file__).resolve().parent.parent / "atlas" / "web"
+    for name in ("templates_setup.py", "templates_preflight.py",
+                 "templates_connectors.py", "templates_backup.py"):
+        text = (web_dir / name).read_text(encoding="utf-8")
+        hits = set(re.findall(r'#[0-9a-fA-F]{6}', text))
+        # setup.py redeklarira paletu u svom :root (nema page_shell) —
+        # to su iste vrijednosti kao CSS_TOKENS, ne nove boje.
+        allowed = set() if name != "templates_setup.py" else {
+            "#DBD5C7", "#C7BFAD", "#7A7266", "#FBFAF5",
+            "#9B2C2C", "#2F7D4F", "#B45309",
+        }
+        assert hits <= allowed, f"{name}: hardkodirane boje {hits - allowed}"

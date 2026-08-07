@@ -105,18 +105,18 @@ def preflight_page() -> str:
 <style>
   .k{ color:var(--muted); width:38%; }
   td.st{ text-align:center; font-weight:700; }
-  .st.ok{ color:#16a34a; } .st.warn{ color:#d97706; } .st.fail{ color:#dc2626; }
+  .st.ok{ color:var(--ok); } .st.warn{ color:var(--warn); } .st.fail{ color:var(--bad); }
   .fix{ color:var(--muted); font-size:.85em; }
   .pill{ display:inline-block; padding:2px 6px; border-radius:6px; font-size:.82em; }
-  .pill.ok{ background:#dcfce7; color:#166534; } .pill.warn{ background:#fef9c3; color:#854d0e; }
-  .pill.bad{ background:#fee2e2; color:#991b1b; }
+  .pill.ok{ background:var(--okbg); color:var(--ok); } .pill.warn{ background:var(--warnbg); color:var(--warn); }
+  .pill.bad{ background:var(--badbg); color:var(--bad); }
   table{ width:100%; border-collapse:collapse; } td{ padding:4px 6px; vertical-align:top; }
 </style>
-<h1>Ra\\u010dunalo i modeli</h1>
-<p id="err" style="color:#dc2626"></p>
+<h1>Računalo i modeli</h1>
+<p id="err" style="color:var(--bad)"></p>
 
 <div class="card">
-  <h2>Stanje ra\\u010dunala</h2>
+  <h2>Stanje računala</h2>
   <table><tbody id="state"></tbody></table>
 </div>
 
@@ -127,9 +127,9 @@ def preflight_page() -> str:
 </div>
 
 <div class="card">
-  <h2>Lokalni modeli \\u2014 rangirano po llmfit score-u</h2>
-  <p class="muted">llmfit mjeri tvoje ra\\u010dunalo i za svaki model ra\\u010duna kvantizaciju
-     koja stane, o\\u010dekivanu brzinu (tok/s) i ocjenu. Prvi red \\u2014 najbolji.</p>
+  <h2>Lokalni modeli — rangirano po llmfit score-u</h2>
+  <p class="muted">llmfit mjeri tvoje računalo i za svaki model računa kvantizaciju
+     koja stane, očekivanu brzinu (tok/s) i ocjenu. Prvi red — najbolji.</p>
   <table><tbody id="models"></tbody></table>
   <p id="models-note" class="muted" style="margin-top:8px"></p>
 </div>

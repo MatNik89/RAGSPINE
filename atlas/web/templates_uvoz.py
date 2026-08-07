@@ -88,4 +88,4 @@ uredi ime i akciju po retku, pa uvezi. Ništa se na disku ne mijenja.</p>
   <button type="button" class="btn" id="u-commit" style="display:none;margin-top:.75rem">Uvezi</button>
 </div>
 <script>{_UVOZ_JS}</script>"""
-    return page_shell("Uvoz klijenata", body, active="klijenti-uvoz")
+    return page_shell("Uvoz klijenata", body, active="klijenti")

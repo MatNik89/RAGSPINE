@@ -6,7 +6,7 @@ from atlas.web.templates_ui import page_shell
 _JS = r"""
 function $(id){ return document.getElementById(id); }
 var TYPES = {};
-var STCLR = {connected:'#16a34a', pending:'#d97706', error:'#dc2626', disabled:'#6b7280'};
+var STCLR = {connected:'var(--ok)', pending:'var(--warn)', error:'var(--bad)', disabled:'var(--muted)'};
 var STTXT = {connected:'spojeno', pending:'čeka autorizaciju', error:'greška', disabled:'isključeno'};
 
 async function loadTypes(){
@@ -40,8 +40,8 @@ async function testConn(){
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind:$('kind').value, config:collect()})});
   var j = await res.json().catch(function(){return {};});
   var m=$('form-msg');
-  if(!res.ok){ m.style.color='#dc2626'; m.textContent = j.detail || 'Greška.'; return; }
-  m.style.color = STCLR[j.status]||'#111'; m.textContent = (STTXT[j.status]||j.status) + ' — ' + (j.detail||'');
+  if(!res.ok){ m.style.color='var(--bad)'; m.textContent = j.detail || 'Greška.'; return; }
+  m.style.color = STCLR[j.status]||'var(--text)'; m.textContent = (STTXT[j.status]||j.status) + ' — ' + (j.detail||'');
 }
 
 async function saveConn(){
@@ -51,7 +51,7 @@ async function saveConn(){
     headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind:$('kind').value, name:name, config:collect()})});
   var j = await res.json().catch(function(){return {};});
   if(res.ok){ $('form-msg').textContent='✓ Spremljeno ('+(STTXT[j.status]||j.status)+').'; $('cname').value=''; loadList(); }
-  else { $('form-msg').style.color='#dc2626'; $('form-msg').textContent = j.detail || 'Greška.'; }
+  else { $('form-msg').style.color='var(--bad)'; $('form-msg').textContent = j.detail || 'Greška.'; }
 }
 
 async function loadList(){
@@ -66,7 +66,7 @@ async function loadList(){
     var t2=document.createElement('td'); t2.textContent=r.label; tr.appendChild(t2);
     var t3=document.createElement('td');
     var b=document.createElement('span'); b.textContent=(STTXT[r.status]||r.status)+(r.last_error?(' — '+r.last_error):'');
-    b.style.color=STCLR[r.status]||'#111'; b.style.fontWeight='600'; t3.appendChild(b); tr.appendChild(t3);
+    b.style.color=STCLR[r.status]||'var(--text)'; b.style.fontWeight='600'; t3.appendChild(b); tr.appendChild(t3);
     var t4=document.createElement('td');
     var del=document.createElement('button'); del.className='btn btn-ghost'; del.textContent='Ukloni';
     del.addEventListener('click', function(){
@@ -92,9 +92,9 @@ document.addEventListener('DOMContentLoaded', function(){
 _BODY = """
 <style>
   table{ width:100%; border-collapse:collapse; } td,th{ padding:6px 8px; text-align:left; }
-  th{ color:var(--muted); font-weight:600; border-bottom:1px solid #e5e7eb; }
+  th{ color:var(--muted); font-weight:600; border-bottom:1px solid var(--border); }
   input,select{ display:block; width:100%; max-width:420px; padding:8px; margin:4px 0 10px;
-    border:1px solid #d1d5db; border-radius:8px; box-sizing:border-box; }
+    border:1px solid var(--border-2); border-radius:8px; box-sizing:border-box; }
   label{ font-size:.9em; color:var(--muted); }
 </style>
 <h1>E-pošta i Telegram</h1>

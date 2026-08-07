@@ -44,10 +44,10 @@ document.addEventListener('DOMContentLoaded', function(){
 _BODY = """
 <style>
   table{ width:100%; border-collapse:collapse; } td,th{ padding:6px 8px; text-align:left; }
-  th{ color:var(--muted); font-weight:600; border-bottom:1px solid #e5e7eb; }
+  th{ color:var(--muted); font-weight:600; border-bottom:1px solid var(--border); }
 </style>
 <h1>Sigurnosne kopije</h1>
-<p id="err" style="color:#dc2626"></p>
+<p id="err" style="color:var(--bad)"></p>
 
 <div class="card">
   <p class="muted">Kopija je potpuni, konzistentan snimak baze (svi klijenti, dokumenti,

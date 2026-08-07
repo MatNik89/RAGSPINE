@@ -53,16 +53,20 @@ document.addEventListener('DOMContentLoaded', function(){
 
 _PAGE = """
 <style>
+  /* ponytail: standalone pre-login page — no page_shell/CSS_TOKENS import,
+     so tokens are redeclared here with the same light-theme values. */
+  :root{ --border:#DBD5C7; --border-2:#C7BFAD; --muted:#7A7266; --surface-2:#FBFAF5;
+    --accent:#9B2C2C; --ok:#2F7D4F; --warn:#B45309; --bad:#9B2C2C; }
   body{ font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; }
-  .card{ border:1px solid #e5e7eb; border-radius:12px; padding:20px; margin:16px 0; }
+  .card{ border:1px solid var(--border); border-radius:12px; padding:20px; margin:16px 0; }
   h1{ font-size:1.5rem; } h2{ font-size:1.1rem; margin-top:0; }
-  .mark.ok{ color:#16a34a; } .mark.warn{ color:#d97706; } .mark.fail{ color:#dc2626; }
-  .fix{ color:#6b7280; font-size:.85em; margin:2px 0 8px 18px; }
-  .btn{ padding:8px 16px; border-radius:8px; border:1px solid #d1d5db; background:#f9fafb; cursor:pointer; }
-  .btn.primary{ background:#2563eb; color:#fff; border-color:#2563eb; }
-  input{ display:block; width:100%; padding:8px; margin:6px 0 12px; border:1px solid #d1d5db; border-radius:8px; box-sizing:border-box; }
-  .step{ color:#6b7280; font-size:.85em; }
-  .err{ color:#dc2626; }
+  .mark.ok{ color:var(--ok); } .mark.warn{ color:var(--warn); } .mark.fail{ color:var(--bad); }
+  .fix{ color:var(--muted); font-size:.85em; margin:2px 0 8px 18px; }
+  .btn{ padding:8px 16px; border-radius:8px; border:1px solid var(--border-2); background:var(--surface-2); cursor:pointer; }
+  .btn.primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+  input{ display:block; width:100%; padding:8px; margin:6px 0 12px; border:1px solid var(--border-2); border-radius:8px; box-sizing:border-box; }
+  .step{ color:var(--muted); font-size:.85em; }
+  .err{ color:var(--bad); }
 </style>
 <h1>Dobrodošli u ATLAS</h1>
 <p class="step">Prvo postavljanje — 3 koraka</p>

@@ -55,11 +55,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-sans);min-hei
 a{color:var(--accent)}
 h1{font-size:1.4rem;margin:0 0 .3rem}
 h2{font-size:1.05rem;margin:1.5rem 0 .5rem}
-.container{max-width:1200px;margin:0 auto;padding:1.5rem 1.25rem 3rem}
+.container{max-width:1200px;padding:1.5rem 1.25rem 3rem}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* layout + lijevi sidebar */
 .layout{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+.layout > .container{justify-self:stretch;width:100%;margin-inline:0}
 .sidebar{display:flex;flex-direction:column;gap:.35rem;padding:1rem .75rem;
   background:var(--surface);border-right:1px solid var(--border);position:sticky;top:0;height:100vh;z-index:10}
 .sidebar .brand{font-weight:700;letter-spacing:.02em;color:var(--text);padding:.3rem .6rem .6rem}
@@ -785,7 +786,7 @@ function renderRows(rows) {
   if (!rows.length) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.className = 'meta';
     td.textContent = ALL_CLIENTS.length
       ? 'Nema klijenata koji odgovaraju pretrazi.'
@@ -907,7 +908,7 @@ def klijenti_page() -> str:
 <p class="meta">Svi klijenti ureda — otvori karton za pun pregled.</p>
 <div style="display:flex;gap:.5rem;align-items:center;margin:1rem 0;flex-wrap:wrap">
   <input type="text" id="search" placeholder="Pretraži po imenu ili OIB-u...">
-  <a class="btn" href="/ui/novi-klijent">Dodaj novog klijenta</a><button type="button" class="btn btn-ghost" id="toggle-add">Brzi unos</button>
+  <a class="btn" href="/ui/novi-klijent">Dodaj novog klijenta</a><a class="btn btn-ghost" href="/ui/klijenti-uvoz">Uvezi iz mape</a><button type="button" class="btn btn-ghost" id="toggle-add">Brzi unos</button>
 </div>
 <form id="add-form" class="stack" style="display:none;margin-bottom:1.5rem">
   <label for="f-name">Naziv</label>
