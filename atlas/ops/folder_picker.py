@@ -33,6 +33,22 @@ def _subdirs(path: str) -> list[str]:
         return []
 
 
+def _parent(cur: str, dirname=os.path.dirname) -> str | None:
+    """Roditelj od cur, ili None ako je cur već vrh.
+
+    Na Windows korijenu diska ("C:\\") obični rstrip+dirname vraća
+    drive-relativnu putanju ("C:") jer ntpath.dirname("C:") == "C:" —
+    petlja bi nastavila s drive-relativnim cur (= CWD tog diska) umjesto
+    da izađe. Zato vrh provjeravamo i na stripanom obliku, ne samo na
+    jednakosti s originalnim cur.
+    """
+    stripped = cur.rstrip("\\/")
+    parent = dirname(stripped)
+    if not parent or parent in (cur, stripped):
+        return None
+    return parent
+
+
 def _browse(start: str, *, input_fn, out) -> str | None:
     cur = start
     while True:
@@ -43,8 +59,8 @@ def _browse(start: str, *, input_fn, out) -> str | None:
         if sel == 0:
             return cur
         if sel == 1:
-            parent = os.path.dirname(cur.rstrip("\\/"))
-            if not parent or parent == cur:
+            parent = _parent(cur)
+            if parent is None:
                 return None   # s vrha: izlaz (pozivatelj nudi ponovni ulaz)
             cur = parent
             continue

@@ -4,7 +4,6 @@ import base64
 import json
 import logging
 import os
-import shutil
 import tempfile
 import urllib.error
 import urllib.request
@@ -12,6 +11,7 @@ import urllib.request
 from atlas.core import optional, security
 from atlas.core.subproc import run_isolated
 from atlas.docs.ingest import ingest_text
+from atlas.ops import winpath
 
 _log = logging.getLogger(__name__)
 
@@ -120,13 +120,14 @@ def ocr_page(png: bytes, cfg, transport=None) -> str:
 
 
 def tesseract_available() -> bool:
-    return shutil.which("tesseract") is not None
+    return winpath.find_binary("tesseract") is not None
 
 
 def ocr_page_tesseract(png: bytes, cfg) -> str:
     """Lokalni OCR jedne stranice tesseractom (jezik iz cfg.ocr_langs). Nikad ne
     baca — vrati "" na grešci/nedostupno."""
-    if not tesseract_available():
+    exe = winpath.find_binary("tesseract")
+    if not exe:
         return ""
     langs = getattr(cfg, "ocr_langs", "hrv+eng") or "hrv+eng"
     tmp = None
@@ -134,7 +135,7 @@ def ocr_page_tesseract(png: bytes, cfg) -> str:
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
             f.write(png)
             tmp = f.name
-        rc, out, _err = run_isolated(["tesseract", tmp, "stdout", "-l", langs], timeout=120)
+        rc, out, _err = run_isolated([exe, tmp, "stdout", "-l", langs], timeout=120)
         return out if rc == 0 else ""
     except Exception:
         return ""

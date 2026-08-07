@@ -20,6 +20,8 @@ def _kill_tree(proc) -> None:
         if os.name == "posix" and hasattr(os, "killpg"):
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         elif os.name == "nt":
+            # ubij CIJELO stablo — samo proc.kill() ostavlja unuke koji drže
+            # stdout pipe pa communicate() visi do njihova kraja
             tk = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                                 capture_output=True)
             if tk.returncode != 0:
@@ -66,7 +68,8 @@ def run_streaming(cmd, *, timeout: int = 600, out=print,
     mrtvog ekrana, E2E nalaz). Poštuje \r: na pravom TTY-ju redak se
     osvježava u mjestu; injektirani out dobiva segmente kao retke.
     stdout+stderr spojeni; utf-8 errors=replace. -9 na timeout."""
-    proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                **({"start_new_session": True} if os.name == "posix" else {}))
     timed_out = threading.Event()
 
     def _on_timeout():

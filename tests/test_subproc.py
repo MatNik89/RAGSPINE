@@ -57,6 +57,20 @@ def test_run_streaming_returncode_i_prazni_redci():
     assert lines == ["x"]
 
 
+def test_run_streaming_posix_start_new_session():
+    """Bez vlastite procesne grupe, timeout -> _kill_tree -> killpg ubija i
+    SAM pozivatelja (dokazano: sleep 30s timeout 1s -> SIGKILL vlastitog
+    procesa). start_new_session=True na POSIX-u to sprječava."""
+    if os.name != "posix":
+        return
+    seen = {}
+    def _popen(cmd, **k):
+        seen.update(k)
+        return _FakeProc(b"x\n")
+    run_streaming(["x"], out=lambda *_: None, popen=_popen)
+    assert seen.get("start_new_session") is True
+
+
 def test_run_streaming_utf8_replace():
     lines = []
     run_streaming(["x"], out=lines.append,

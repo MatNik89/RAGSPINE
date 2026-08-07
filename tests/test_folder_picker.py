@@ -1,4 +1,5 @@
 """folder_picker: browsanje kroz numerirani fallback (bez TTY-ja)."""
+import ntpath
 import os
 
 from atlas.ops import folder_picker as fp
@@ -64,6 +65,28 @@ def test_pick_folder_mrezna_lokacija(monkeypatch, tmp_path):
     got = fp.pick_folder(input_fn=_reader("2", r"\\nas\share", "1"),
                          out=lambda *_: None)
     assert got == r"\\nas\share"
+
+
+def test_parent_ntpath_windows_root_izlaz():
+    """C:\\ je vrh — ntpath.dirname("C:") == "C:" (drive-relativno, NE vrh
+    stringa), pa _parent mora prepoznati vrh preko stripanog oblika."""
+    assert fp._parent("C:\\", ntpath.dirname) is None
+
+
+def test_parent_ntpath_unc_root_izlaz():
+    assert fp._parent(r"\\nas\share", ntpath.dirname) is None
+
+
+def test_parent_ntpath_podmapa():
+    assert fp._parent(r"C:\Users\X", ntpath.dirname) == r"C:\Users"
+
+
+def test_pick_folder_posix_vrh_izlaz_bez_lazi_ekrana(monkeypatch):
+    """POSIX vrh: uđi u / pa .. mora izaći odmah (None), bez lažnog
+    među-ekrana koji bi drive-relativni bug proizveo na Windowsu."""
+    monkeypatch.setattr(fp, "_roots", lambda: ["/"])
+    got = fp.pick_folder(input_fn=_reader("1", "2"), out=lambda *_: None)
+    assert got is None
 
 
 def test_pick_folder_status_u_naslovu(tmp_path, monkeypatch):
