@@ -626,15 +626,16 @@ def test_page_gotovo_backup_greska_ne_rusi(tmp_path, monkeypatch):
 def test_page_gotovo_ollama_putanja_windows(tmp_path, monkeypatch):
     """page_gotovo prikazuje putanju za Ollama modele — na Windowsu
     %USERPROFILE%\\.ollama\\models."""
-    from pathlib import PosixPath
+    import types
     s = init_spine(str(tmp_path / "t.db"))
 
     class _Cfg:
         db_path = str(tmp_path / "t.db")
         data_dir = str(tmp_path)
 
-    monkeypatch.setattr(wizard.os, "name", "nt")
-    monkeypatch.setattr(wizard, "Path", PosixPath)
+    # Fake os SAMO u wizard namespaceu — globalni os.name patch na pravom
+    # Windowsu tjera pathlib na PosixPath i ruši pytest repr (INTERNALERROR).
+    monkeypatch.setattr(wizard, "os", types.SimpleNamespace(name="nt"))
     monkeypatch.setattr(wizard.backup, "create_backup",
                         lambda cfg: {"name": "x", "path": str(tmp_path / "x.db"), "size": 7})
     lines = []
@@ -647,15 +648,14 @@ def test_page_gotovo_ollama_putanja_windows(tmp_path, monkeypatch):
 def test_page_gotovo_ollama_putanja_posix(tmp_path, monkeypatch):
     """page_gotovo prikazuje putanju za Ollama modele — na POSIX-u
     ~/.ollama/models."""
-    from pathlib import PosixPath
+    import types
     s = init_spine(str(tmp_path / "t.db"))
 
     class _Cfg:
         db_path = str(tmp_path / "t.db")
         data_dir = str(tmp_path)
 
-    monkeypatch.setattr(wizard.os, "name", "posix")
-    monkeypatch.setattr(wizard, "Path", PosixPath)
+    monkeypatch.setattr(wizard, "os", types.SimpleNamespace(name="posix"))
     monkeypatch.setattr(wizard.backup, "create_backup",
                         lambda cfg: {"name": "x", "path": str(tmp_path / "x.db"), "size": 7})
     lines = []
