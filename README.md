@@ -42,6 +42,9 @@ Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS):
 
 ### Ručna instalacija (bez skripte)
 
+Brže: `uv venv .venv --python 3.12` + `uv pip install -e ".[full]"` umjesto
+`python -m venv` + `pip install` ispod (isti paketi, samo bez uv-a).
+
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Win: .venv\Scripts\Activate.ps1
 pip install -e ".[full]"                          # ".": samo jezgra (degradirano)

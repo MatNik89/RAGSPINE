@@ -11,88 +11,90 @@ if [ ! -f pyproject.toml ]; then
   exit 1
 fi
 
-# --- 1. Python 3.11+ ---
-PY=""
-for cand in python3.13 python3.12 python3.11 python3 python; do
-  if command -v "$cand" >/dev/null 2>&1; then
-    if "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)' 2>/dev/null; then
-      PY="$cand"; break
-    fi
+# --- 0. uv (Astral) — brži Python+venv+paketi; ako ne uspije, pip put ispod NETAKNUT ---
+# ATLAS_NO_UV=1 preskače uv u cijelosti (izlaz za probleme s uv-om).
+UV_BIN=""
+if [ "${ATLAS_NO_UV:-0}" != "1" ]; then
+  if command -v uv >/dev/null 2>&1; then
+    UV_BIN="uv"
+  else
+    export UV_INSTALL_DIR="$HOME/.local/bin"
+    curl -LsSf https://astral.sh/uv/install.sh 2>/dev/null | sh >/dev/null 2>&1 || true
+    export PATH="$UV_INSTALL_DIR:$PATH"
+    command -v uv >/dev/null 2>&1 && UV_BIN="uv"
   fi
-done
-if [ -z "$PY" ]; then
-  echo "GREŠKA: treba Python 3.11+ (nije pronađen). Instaliraj pa ponovi." >&2
-  exit 1
 fi
-echo "✓ Python: $("$PY" --version 2>&1)"
 
-# --- 2. venv ---
-if [ ! -d .venv ]; then
-  "$PY" -m venv .venv
-  echo "✓ Kreiran .venv"
-elif [ ! -x .venv/bin/python ]; then
-  echo "GREŠKA: postojeći .venv je nepotpun/korumpiran (nema .venv/bin/python)." >&2
-  echo "  Obriši ga pa ponovi:  rm -rf .venv && ./install.sh" >&2
-  exit 1
+if [ -n "$UV_BIN" ]; then
+  # --- 1-3. uv put: Python 3.12 + venv + paketi u jednom potezu ---
+  echo "✓ uv pronađen: $(uv --version)"
+  if [ ! -d .venv ]; then
+    uv venv .venv --python 3.12
+    echo "✓ Kreiran .venv (uv)"
+  else
+    echo "✓ .venv već postoji — koristim ga"
+  fi
+  echo "Instaliram ATLAS (.[full]) preko uv-a — može potrajati…"
+  uv pip install --python .venv/bin/python --quiet -e ".[full]"
+  echo "✓ Instalirano (uv)"
 else
-  echo "✓ .venv već postoji — koristim ga"
-fi
-# shellcheck disable=SC1091
-. .venv/bin/activate
+  echo "uv nije dostupan — koristim klasični pip (sporije)"
 
-# --- 3. instalacija ---
-python -m pip install --quiet --upgrade pip
-echo "Instaliram ATLAS (.[full]) — može potrajati…"
-python -m pip install --quiet -e ".[full]"
-echo "✓ Instalirano"
+  # --- 1. Python 3.11+ ---
+  PY=""
+  for cand in python3.13 python3.12 python3.11 python3 python; do
+    if command -v "$cand" >/dev/null 2>&1; then
+      if "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)' 2>/dev/null; then
+        PY="$cand"; break
+      fi
+    fi
+  done
+  if [ -z "$PY" ]; then
+    echo "GREŠKA: treba Python 3.11+ (nije pronađen). Instaliraj pa ponovi." >&2
+    exit 1
+  fi
+  echo "✓ Python: $("$PY" --version 2>&1)"
 
-# --- 4. seed + (opcijski) embedding model ---
-if ! atlas setup >/dev/null 2>&1; then
-  echo "  ⚠ 'atlas setup' (seed baze) nije uspio čist — nastavljam, provjeri kasnije 'atlas doctor'"
+  # --- 2. venv ---
+  if [ ! -d .venv ]; then
+    "$PY" -m venv .venv
+    echo "✓ Kreiran .venv"
+  elif [ ! -x .venv/bin/python ]; then
+    echo "GREŠKA: postojeći .venv je nepotpun/korumpiran (nema .venv/bin/python)." >&2
+    echo "  Obriši ga pa ponovi:  rm -rf .venv && ./install.sh" >&2
+    exit 1
+  else
+    echo "✓ .venv već postoji — koristim ga"
+  fi
+  # shellcheck disable=SC1091
+  . .venv/bin/activate
+
+  # --- 3. instalacija ---
+  python -m pip install --quiet --upgrade pip
+  echo "Instaliram ATLAS (.[full]) — može potrajati…"
+  python -m pip install --quiet -e ".[full]"
+  echo "✓ Instalirano"
 fi
+
+# --- 4. (opcijski) embedding model ---
+# operatera i seed baze kreira "atlas setup" čarobnjak — install.sh ga ne
+# poziva headless, samo priprema okolinu.
 if [ "${ATLAS_SKIP_MODEL:-0}" != "1" ]; then
   echo "Povlačim embedding model (jednokratno ~220MB; preskoči s ATLAS_SKIP_MODEL=1)…"
-  atlas setup --download-models || echo "  (model preskočen/nedostupan — RAG radi degradirano, nastavljam)"
+  .venv/bin/atlas setup --download-models || echo "  (model preskočen/nedostupan — RAG radi degradirano, nastavljam)"
 fi
 
-# --- 5. operater (owner) ---
+# --- 5. gotovo ---
 DATA_DIR="${ATLAS_DATA_DIR:-$HOME/.atlas}"
-OWNER="${1:-}"
-if [ -z "$OWNER" ]; then
-  printf "Korisničko ime operatera (owner) [Enter za preskočiti]: "
-  read -r OWNER || OWNER=""
-fi
-case "$OWNER" in
-  -*) echo "GREŠKA: ime operatera ne smije počinjati s '-' ($OWNER)." >&2; exit 1 ;;
-esac
-if [ -z "$OWNER" ]; then
-  echo "  Operater preskočen — kreiraj kasnije:  atlas auth add <ime>"
-else
-  ERRF="$(mktemp "${TMPDIR:-/tmp}/rs_auth.XXXXXX")"
-  # '--' zaustavlja parsanje opcija (npr. ime '-h' inače pokrene help i lažira uspjeh)
-  if atlas auth add -- "$OWNER" 2>"$ERRF"; then
-    echo "✓ Operater '$OWNER' kreiran"
-  elif grep -qiE "UNIQUE|already|postoji" "$ERRF" 2>/dev/null; then
-    echo "✓ Operater '$OWNER' već postoji — preskačem"
-  else
-    echo "  (kreiranje preskočeno: $(tail -1 "$ERRF" 2>/dev/null))"
-  fi
-  rm -f "$ERRF"
-fi
-
-# --- 6. gotovo ---
-PORT="${ATLAS_PORT:-8400}"
 cat <<EOF
 
 ════════════════════════════════════════════
-✓ ATLAS spreman.  Podaci: $DATA_DIR  (0700)
+✓ Okolina spremna.  Podaci: $DATA_DIR  (0700)
 
-Pokreni server:
-  . .venv/bin/activate && atlas serve
+Dovrši postavljanje čarobnjakom (preduvjeti, operater, model, HTTPS, mape):
+  .venv/bin/atlas setup
 
-Pa otvori:  http://127.0.0.1:$PORT/login
-
-Provjera:   atlas doctor
+Provjera:   .venv/bin/atlas doctor
 Deploy:     docs/DEPLOY_URED.md (KLIJENTI mapa, uređaji, HTTPS, GDPR)
 ════════════════════════════════════════════
 EOF

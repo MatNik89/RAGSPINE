@@ -17,55 +17,91 @@ if (-not (Test-Path "pyproject.toml")) {
   exit 1
 }
 
-# --- 1. Python 3.11+ ---
-function Find-Python {
-  $cands = @(
-    @{ exe = "py";      args = @("-3.13") },
-    @{ exe = "py";      args = @("-3.12") },
-    @{ exe = "py";      args = @("-3.11") },
-    @{ exe = "py";      args = @("-3") },
-    @{ exe = "python";  args = @() },
-    @{ exe = "python3"; args = @() }
-  )
-  # PS 5.1 + EAP=Stop: stderr nativnog programa kroz 2>$null postane
-  # TERMINIRAJUCA greska (py.exe "No suitable Python runtime found" za
-  # neinstaliranu verziju ubije petlju umjesto da proba sljedeceg kandidata)
-  # — zato probe vrtimo pod EAP=Continue (E2E nalaz, stroj Nick).
+# --- 0. uv (Astral) - brzi Python+venv+paketi; ako ne uspije, pip put ispod NETAKNUT ---
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+  Write-Host "uv nije pronaden - pokusavam winget install astral-sh.uv (tiho)..."
+  # PS 5.1 + EAP=Stop: stderr nativnog programa postaje terminirajuca greska
+  # (isti razlog kao u Find-Python nize) — winget install smije tiho pasti.
   $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
   try {
-    foreach ($c in $cands) {
-      if (Get-Command $c.exe -ErrorAction SilentlyContinue) {
-        & $c.exe @($c.args) -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)" 2>$null
-        if ($LASTEXITCODE -eq 0) { return $c }
-      }
-    }
+    winget install --exact --id astral-sh.uv --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
+  } catch {
+    Write-Host "  (winget install uv nije uspio - nastavljam bez uv-a)"
   } finally { $ErrorActionPreference = $eap }
-  return $null
+  # osvjezi PATH u tekucem procesu bez restarta terminala (winget pise u registry)
+  $env:Path = "$([Environment]::GetEnvironmentVariable('Path','Machine'));$([Environment]::GetEnvironmentVariable('Path','User'));$env:Path"
+  $uv = Get-Command uv -ErrorAction SilentlyContinue
 }
-$py = Find-Python
-if ($null -eq $py) {
-  Write-Error "Treba Python 3.11+ (nije pronaden). Instaliraj s python.org pa ponovi."
-  exit 1
-}
-$pyExe = $py.exe; $pyArgs = $py.args
-Write-Host ("✓ Python: " + (& $pyExe @pyArgs --version 2>&1)); Assert-Ok "provjera Pythona"
 
-# --- 2. venv ---
-if (-not (Test-Path ".venv")) {
-  & $pyExe @pyArgs -m venv .venv; Assert-Ok "kreiranje venv-a"
-  Write-Host "✓ Kreiran .venv"
+$venvPy = Join-Path ".venv" "Scripts\python.exe"
+$atlas  = Join-Path ".venv" "Scripts\atlas.exe"
+
+if ($uv) {
+  # --- 1-3. uv put: Python 3.12 + venv + paketi u jednom potezu ---
+  Write-Host ("✓ uv pronaden: " + (& uv --version))
+  if (-not (Test-Path ".venv")) {
+    uv venv .venv --python 3.12; Assert-Ok "uv venv (.venv)"
+    Write-Host "✓ Kreiran .venv (uv)"
+  } else {
+    Write-Host "✓ .venv vec postoji - koristim ga"
+  }
+  Write-Host "Instaliram ATLAS (.[full]) preko uv-a - moze potrajati..."
+  uv pip install --python $venvPy --quiet -e ".[full]"; Assert-Ok "uv pip install (.[full])"
+  Write-Host "✓ Instalirano (uv)"
 } else {
-  Write-Host "✓ .venv vec postoji — koristim ga"
-}
-$venvPy   = Join-Path ".venv" "Scripts\python.exe"
-$atlas = Join-Path ".venv" "Scripts\atlas.exe"
-if (-not (Test-Path $venvPy)) { Write-Error "GRESKA: .venv je nepotpun ($venvPy nedostaje). Obrisi .venv i ponovi."; exit 1 }
+  Write-Host "uv nije dostupan - koristim klasicni pip (sporije)"
 
-# --- 3. instalacija ---
-& $venvPy -m pip install --quiet --upgrade pip; Assert-Ok "nadogradnja pip-a"
-Write-Host "Instaliram ATLAS (.[full]) — moze potrajati…"
-& $venvPy -m pip install --quiet -e ".[full]"; Assert-Ok "instalacija paketa"
-Write-Host "✓ Instalirano"
+  # --- 1. Python 3.11+ ---
+  function Find-Python {
+    $cands = @(
+      @{ exe = "py";      args = @("-3.13") },
+      @{ exe = "py";      args = @("-3.12") },
+      @{ exe = "py";      args = @("-3.11") },
+      @{ exe = "py";      args = @("-3") },
+      @{ exe = "python";  args = @() },
+      @{ exe = "python3"; args = @() }
+    )
+    # PS 5.1 + EAP=Stop: stderr nativnog programa kroz 2>$null postane
+    # TERMINIRAJUCA greska (py.exe "No suitable Python runtime found" za
+    # neinstaliranu verziju ubije petlju umjesto da proba sljedeceg kandidata)
+    # — zato probe vrtimo pod EAP=Continue (E2E nalaz, stroj Nick).
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try {
+      foreach ($c in $cands) {
+        if (Get-Command $c.exe -ErrorAction SilentlyContinue) {
+          & $c.exe @($c.args) -c "import sys; raise SystemExit(0 if sys.version_info[:2] >= (3,11) else 1)" 2>$null
+          if ($LASTEXITCODE -eq 0) { return $c }
+        }
+      }
+    } finally { $ErrorActionPreference = $eap }
+    return $null
+  }
+  $py = Find-Python
+  if ($null -eq $py) {
+    Write-Error "Treba Python 3.11+ (nije pronaden). Instaliraj s python.org pa ponovi."
+    exit 1
+  }
+  $pyExe = $py.exe; $pyArgs = $py.args
+  Write-Host ("✓ Python: " + (& $pyExe @pyArgs --version 2>&1)); Assert-Ok "provjera Pythona"
+
+  # --- 2. venv ---
+  if (-not (Test-Path ".venv")) {
+    & $pyExe @pyArgs -m venv .venv; Assert-Ok "kreiranje venv-a"
+    Write-Host "✓ Kreiran .venv"
+  } else {
+    Write-Host "✓ .venv vec postoji — koristim ga"
+  }
+  if (-not (Test-Path $venvPy)) { Write-Error "GRESKA: .venv je nepotpun ($venvPy nedostaje). Obrisi .venv i ponovi."; exit 1 }
+
+  # --- 3. instalacija ---
+  & $venvPy -m pip install --quiet --upgrade pip; Assert-Ok "nadogradnja pip-a"
+  Write-Host "Instaliram ATLAS (.[full]) — moze potrajati…"
+  & $venvPy -m pip install --quiet -e ".[full]"; Assert-Ok "instalacija paketa"
+  Write-Host "✓ Instalirano"
+}
+
+if (-not (Test-Path $venvPy)) { Write-Error "GRESKA: .venv je nepotpun ($venvPy nedostaje). Obrisi .venv i ponovi."; exit 1 }
 
 # --- 4. (opcijski) embedding model ---
 # operatera i seed baze kreira "atlas setup" carobnjak (stranica 2) — install.ps1
