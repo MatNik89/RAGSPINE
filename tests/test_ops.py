@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from atlas.ops import doctor, health, nis2
 
 
@@ -39,8 +41,11 @@ def test_format_report_is_string(cfg):
     assert "python_version" in report
 
 
-def test_required_ok_ignores_ollama_down(cfg):
+def test_required_ok_ignores_ollama_down(cfg, monkeypatch):
     # ollama unreachable is normal on a cloud-LLM/OAuth host — must not fail the gate.
+    # Disk space is stubbed healthy so this test doesn't flake on a low-disk dev machine
+    # (it tests ollama-vs-gate logic, not the real disk).
+    monkeypatch.setattr(doctor.shutil, "disk_usage", lambda path: SimpleNamespace(total=0, used=0, free=50_000_000_000))
     results = doctor.run(cfg)
     for r in results:
         if r["check"] == "ollama":

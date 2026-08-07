@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from atlas.__main__ import main
 from atlas.ops import doctor
@@ -6,8 +7,11 @@ from atlas.ops import doctor
 def test_doctor_exit_0_despite_ollama_down(tmp_path, monkeypatch, capsys):
     # Ollama unreachable is expected on a non-Ollama (cloud-LLM/OAuth) host and
     # must not hard-fail `atlas doctor`'s exit code.
+    # Disk space is stubbed healthy so this doesn't flake on a low-disk dev machine
+    # (it tests ollama-vs-exit-code logic, not the real disk).
     monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(doctor, "_ollama_alive", lambda cfg: False)
+    monkeypatch.setattr(doctor.shutil, "disk_usage", lambda path: SimpleNamespace(total=0, used=0, free=50_000_000_000))
     assert main(["doctor"]) == 0
 
 def test_auth_add_and_doctor(tmp_path, monkeypatch, capsys):
