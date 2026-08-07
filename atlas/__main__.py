@@ -1,7 +1,6 @@
 """ATLAS CLI entrypoint: python -m atlas <cmd>."""
 import argparse
 import getpass
-import os
 import sys
 from pathlib import Path
 
@@ -86,7 +85,8 @@ def _cmd_auth(args) -> int:
     from atlas.core.spine import init_spine
     from atlas.web.deps import add_user
 
-    pw = os.environ.get("ATLAS_PASS") or getpass.getpass()
+    from atlas import config
+    pw = config._env("PASS") or getpass.getpass()
     spine = init_spine(get_config().db_path)
     add_user(spine, args.user, pw)
     print(args.user)
@@ -259,7 +259,8 @@ def _cmd_reminders(args) -> int:
     if reminders_cmd == "add":
         from atlas.business.nldate import parse_date
 
-        user = os.environ.get("ATLAS_USER", "sustav")
+        from atlas import config
+        user = config._env("USER", "sustav")
         due = parse_date(args.due)
         if due is None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", args.due):
             due = args.due  # already ISO — parse_date only understands NL/dot dates

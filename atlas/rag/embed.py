@@ -1,9 +1,9 @@
 """Optional dense-vector index (fastembed + sqlite-vec). No-op wherever either
 package or the model itself is unavailable — callers never need to branch."""
 import logging
-import os
 from pathlib import Path
 
+from atlas import config
 from atlas.config import get_config
 
 log = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def _get_model():
     cfg = get_config()
     try:
         from fastembed import TextEmbedding
-        local_only = os.environ.get("ATLAS_TEST_EMBED") != "1"
+        local_only = config._env("TEST_EMBED") != "1"
         _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
                                local_files_only=local_only)
     except Exception:

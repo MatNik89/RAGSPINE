@@ -3,6 +3,28 @@ from dataclasses import dataclass
 import os, secrets
 from pathlib import Path
 
+
+def _home() -> str:
+    return os.path.expanduser("~")
+
+
+def _env(name: str, default: str = "") -> str:
+    """ATLAS_<name> primarno; RAGSPINE_<name> je trajni alias."""
+    v = os.environ.get(f"ATLAS_{name}")
+    if v is None:
+        v = os.environ.get(f"RAGSPINE_{name}")  # compat: ragspine env alias
+    return default if v is None else v
+
+
+def default_data_dir() -> str:
+    """~/.atlas; ako ne postoji a stari ~/.ragspine postoji — koristi stari."""
+    new = os.path.join(_home(), ".atlas")
+    legacy = os.path.join(_home(), ".ragspine")  # compat: ragspine data dir
+    if not os.path.exists(new) and os.path.isdir(legacy):
+        return legacy
+    return new
+
+
 @dataclass
 class Config:
     data_dir: str
@@ -32,15 +54,15 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        e = os.environ.get
-        data_dir = os.path.expanduser(e("ATLAS_DATA_DIR", "~/.atlas"))
+        e = _env
+        data_dir = os.path.expanduser(e("DATA_DIR") or default_data_dir())
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         # data_dir drži DB (PII), secret i modele — 0700 (no-op na Windowsu)
         try:
             os.chmod(data_dir, 0o700)
         except OSError:
             pass
-        secret = e("ATLAS_JWT_SECRET", "")
+        secret = e("JWT_SECRET", "")
         if not secret:
             sf = Path(data_dir) / "secret"
             if sf.exists():
@@ -49,34 +71,38 @@ class Config:
                 secret = secrets.token_hex(32)
                 sf.touch(mode=0o600)
                 sf.write_text(secret)
+        default_db = Path(data_dir) / "atlas.db"
+        legacy_db = Path(data_dir) / "ragspine.db"  # compat: ragspine db ime
+        if not default_db.exists() and legacy_db.exists():
+            default_db = legacy_db
         return cls(
             data_dir=data_dir,
-            db_path=e("ATLAS_DB_PATH", str(Path(data_dir) / "atlas.db")),
-            host=e("ATLAS_HOST", "127.0.0.1"), port=int(e("ATLAS_PORT", "8400")),
-            llm_base_url=e("ATLAS_LLM_BASE_URL", ""), llm_api_key=e("ATLAS_LLM_API_KEY", ""),
-            llm_model=e("ATLAS_LLM_MODEL", ""),
-            llm_provider=e("ATLAS_LLM_PROVIDER", ""),
-            anthropic_base_url=e("ATLAS_ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
-            ollama_url=e("ATLAS_OLLAMA_URL", "http://127.0.0.1:11434"),
+            db_path=e("DB_PATH", str(default_db)),
+            host=e("HOST", "127.0.0.1"), port=int(e("PORT", "8400")),
+            llm_base_url=e("LLM_BASE_URL", ""), llm_api_key=e("LLM_API_KEY", ""),
+            llm_model=e("LLM_MODEL", ""),
+            llm_provider=e("LLM_PROVIDER", ""),
+            anthropic_base_url=e("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+            ollama_url=e("OLLAMA_URL", "http://127.0.0.1:11434"),
             # Default = mali multilingual (220MB, dim 384, hrvatski OK) — pouzdano
             # se skida i na slabijoj mreži. Za bolju kvalitetu na jačem hardveru:
             # ATLAS_EMBED_MODEL=intfloat/multilingual-e5-large (2.24GB, dim 1024).
             # embed kod je model-agnostičan (dim iz modela, e5-prefiks uvjetno).
-            ocr_url=e("ATLAS_OCR_URL", ""),
-            ocr_langs=e("ATLAS_OCR_LANGS", "hrv+eng"),
-            embed_model=e("ATLAS_EMBED_MODEL",
+            ocr_url=e("OCR_URL", ""),
+            ocr_langs=e("OCR_LANGS", "hrv+eng"),
+            embed_model=e("EMBED_MODEL",
                           "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"),
-            nas_root=e("ATLAS_NAS_ROOT", ""), imap_host=e("ATLAS_IMAP_HOST", ""),
-            imap_user=e("ATLAS_IMAP_USER", ""), imap_pass=e("ATLAS_IMAP_PASS", ""),
-            jwt_secret=secret, redact_pii=e("ATLAS_REDACT_PII", "0") == "1",
-            https_only=e("ATLAS_HTTPS_ONLY", "0") == "1",
-            egress_allow=[h for h in e("ATLAS_EGRESS_ALLOW", "").split(",") if h],
-            apprise_urls=[u for u in e("ATLAS_APPRISE_URLS", "").split(",") if u],
+            nas_root=e("NAS_ROOT", ""), imap_host=e("IMAP_HOST", ""),
+            imap_user=e("IMAP_USER", ""), imap_pass=e("IMAP_PASS", ""),
+            jwt_secret=secret, redact_pii=e("REDACT_PII", "0") == "1",
+            https_only=e("HTTPS_ONLY", "0") == "1",
+            egress_allow=[h for h in e("EGRESS_ALLOW", "").split(",") if h],
+            apprise_urls=[u for u in e("APPRISE_URLS", "").split(",") if u],
             # Dozvoljeni korijeni mrežnih mapa (SMB mount točke); samo mape ispod
             # ovih smiju se registrirati/čitati. realpath da simlink ne zaobiđe scoping.
             mount_roots=[os.path.realpath(os.path.expanduser(p))
-                         for p in e("ATLAS_MOUNT_ROOTS", "").split(",") if p.strip()],
-            digest_hour=int(e("ATLAS_DIGEST_HOUR", "7")))
+                         for p in e("MOUNT_ROOTS", "").split(",") if p.strip()],
+            digest_hour=int(e("DIGEST_HOUR", "7")))
 
 _cfg: Config | None = None
 def get_config() -> Config:

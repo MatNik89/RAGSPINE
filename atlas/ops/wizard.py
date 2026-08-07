@@ -466,7 +466,8 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
     roots = [m["path"] for m in folders.list_folders(spine)]
     env = None
     if roots:
-        existing = [p for p in os.environ.get("ATLAS_MOUNT_ROOTS", "").split(",") if p.strip()]
+        from atlas import config
+        existing = [p for p in config._env("MOUNT_ROOTS", "").split(",") if p.strip()]
         merged = list(dict.fromkeys(existing + roots))
         env = {**os.environ, "ATLAS_MOUNT_ROOTS": ",".join(merged)}
     try:

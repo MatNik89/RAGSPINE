@@ -15,6 +15,7 @@ import sys
 import time
 import urllib.request
 
+from atlas import config
 from atlas.core.subproc import run_isolated
 
 # --- stanje računala (cross-OS, bez nove ovisnosti) ---
@@ -87,7 +88,7 @@ def system_state(cfg=None) -> dict:
     from atlas.ops import setup
     hw = setup.detect_hw()
     total_ram, free_ram = _mem_gb()
-    data_dir = getattr(cfg, "data_dir", None) or os.path.expanduser("~/.atlas")
+    data_dir = getattr(cfg, "data_dir", None) or config.default_data_dir()
     try:
         disk_free = shutil.disk_usage(data_dir if os.path.isdir(data_dir) else os.path.expanduser("~")).free / 1e9
     except OSError:
@@ -376,7 +377,7 @@ def requirements(cfg=None) -> list[dict]:
                 "status": _status(st["disk_free_gb"] >= _MIN_DISK_GB, warn=st["disk_free_gb"] >= 1),
                 "detalj": f"{st['disk_free_gb']} GB", "fix": "oslobodi prostor (modeli+indeks trebaju mjesta)"})
 
-    data_dir = getattr(cfg, "data_dir", None) or os.path.expanduser("~/.atlas")
+    data_dir = getattr(cfg, "data_dir", None) or config.default_data_dir()
     # stvarni upis+brisanje (os.access W_OK je nepouzdan na Windows ACL — Codex)
     writable = False
     if os.path.isdir(data_dir):
