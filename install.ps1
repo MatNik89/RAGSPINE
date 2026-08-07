@@ -67,42 +67,23 @@ Write-Host "Instaliram ATLAS (.[full]) — moze potrajati…"
 & $venvPy -m pip install --quiet -e ".[full]"; Assert-Ok "instalacija paketa"
 Write-Host "✓ Instalirano"
 
-# --- 4. seed + (opcijski) embedding model ---
-# seed baze; ignoriramo izlazni kod (idempotentno). EAP=Continue iz istog
-# razloga kao u Find-Python (stderr + 2>$null = terminirajuca greska u 5.1).
-$eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-& $atlas setup 2>$null | Out-Null
-$ErrorActionPreference = $eap
+# --- 4. (opcijski) embedding model ---
+# operatera i seed baze kreira "atlas setup" carobnjak (stranica 2) — install.ps1
+# ga ne poziva headless, samo priprema okolinu.
 if ($env:ATLAS_SKIP_MODEL -ne "1") {
   Write-Host "Povlacim embedding model (jednokratno ~220MB; preskoci s `$env:ATLAS_SKIP_MODEL=1)…"
   & $atlas setup --download-models
   if ($LASTEXITCODE -ne 0) { Write-Host "  (model preskocen/nedostupan — RAG radi degradirano, nastavljam)" }
 }
 
-# --- 5. operater (owner) ---
-$owner = if ($args.Count -ge 1) { $args[0] } else { Read-Host "Korisnicko ime operatera (owner) [Enter za preskociti]" }
-if ([string]::IsNullOrWhiteSpace($owner)) {
-  Write-Host "  Operater preskocen — kreiraj kasnije: atlas auth add <ime>"
-} elseif ($owner.StartsWith("-")) {
-  Write-Error "Ime operatera ne smije pocinjati s '-' ($owner)."; exit 1
-} else {
-  # '--' zaustavlja parsanje opcija (npr. ime '-h' inace pokrene help i lazira uspjeh)
-  & $atlas auth add -- $owner
-  if ($LASTEXITCODE -eq 0) { Write-Host "✓ Operater '$owner' kreiran" }
-  else { Write-Host "  (operater '$owner' vec postoji ili nije kreiran — provjeri: atlas auth add <ime>)" }
-}
-
-# --- 6. gotovo ---
+# --- 5. gotovo ---
 $dataDir = if ($env:ATLAS_DATA_DIR) { $env:ATLAS_DATA_DIR } else { Join-Path $env:USERPROFILE ".atlas" }
-$port = if ($env:ATLAS_PORT) { $env:ATLAS_PORT } else { "8400" }
 Write-Host ""
 Write-Host "════════════════════════════════════════════"
-Write-Host "✓ ATLAS spreman.  Podaci: $dataDir"
+Write-Host "✓ Okolina spremna.  Podaci: $dataDir"
 Write-Host ""
-Write-Host "Pokreni server:"
-Write-Host "  .\.venv\Scripts\atlas.exe serve"
-Write-Host ""
-Write-Host "Pa otvori:  http://127.0.0.1:$port/login"
+Write-Host "Dovrši postavljanje čarobnjakom (preduvjeti, operater, model, HTTPS, mape):"
+Write-Host "  .\.venv\Scripts\atlas.exe setup"
 Write-Host ""
 Write-Host "Provjera:   .\.venv\Scripts\atlas.exe doctor"
 Write-Host "Deploy:     docs\DEPLOY_URED.md (KLIJENTI mapa, uredaji, HTTPS, GDPR)"
