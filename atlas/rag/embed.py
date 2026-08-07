@@ -1,6 +1,7 @@
 """Optional dense-vector index (fastembed + sqlite-vec). No-op wherever either
 package or the model itself is unavailable — callers never need to branch."""
 import logging
+import os
 from pathlib import Path
 
 from atlas import config
@@ -52,21 +53,43 @@ def _get_model():
     return _model
 
 
+def _text_embedding_cls():
+    """Indirekcija radi testabilnosti (fastembed je optional dep)."""
+    from fastembed import TextEmbedding
+    return TextEmbedding
+
+
+def supports(model_name: str) -> bool:
+    """Podržava li instalirani fastembed model (E2E: bge-m3 u ponudi, a
+    TextEmbedding ga ne zna → ne nuditi). False na SVAKU grešku — sigurni
+    default je mali model."""
+    try:
+        models = _text_embedding_cls().list_supported_models()
+        return any((m.get("model") if isinstance(m, dict) else str(m)) == model_name
+                   for m in models)
+    except Exception:
+        return False
+
+
 def download_model(cfg=None) -> dict:
     """Eksplicitni warmup: povuci embedding model (jednom, svjesno) da vektorska
     pretraga proradi. Bez ovoga _get_model radi local_files_only i tiho no-op-a.
     Vraća {ok, model, dim} ili {ok:False, error}."""
+    import warnings
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     if not available():
         return {"ok": False, "error": "fastembed/sqlite-vec nisu instalirani (pip install .[full])"}
     if cfg is None:
         cfg = get_config()
     global _model, _model_failed
     try:
-        from fastembed import TextEmbedding
-        _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
-                               local_files_only=False)  # dozvoli download
-        _model_failed = False
-        dim = len(next(iter(_model.embed(["query: test"]))))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")   # mean-pooling/symlink šum pri downloadu/loadu
+            from fastembed import TextEmbedding
+            _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
+                                   local_files_only=False)  # dozvoli download
+            _model_failed = False
+            dim = len(next(iter(_model.embed(["query: test"]))))
     except Exception as e:
         return {"ok": False, "error": f"{type(e).__name__}: {e}", "model": cfg.embed_model}
     return {"ok": True, "model": cfg.embed_model, "dim": dim}

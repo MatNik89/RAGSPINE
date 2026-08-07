@@ -45,3 +45,19 @@ def test_download_model_reports_error(monkeypatch, cfg):
     embed._model_failed = False
     res = embed.download_model()
     assert res["ok"] is False and "nema mreže" in res["error"]
+
+
+def test_supports_pozitivno(monkeypatch):
+    class _TE:
+        @staticmethod
+        def list_supported_models():
+            return [{"model": "BAAI/bge-m3"}, {"model": "mali/model"}]
+    monkeypatch.setattr(embed, "_text_embedding_cls", lambda: _TE)
+    assert embed.supports("BAAI/bge-m3") is True
+    assert embed.supports("nema/toga") is False
+
+
+def test_supports_robustan_na_greske(monkeypatch):
+    monkeypatch.setattr(embed, "_text_embedding_cls",
+                        lambda: (_ for _ in ()).throw(ImportError("nema fastembed")))
+    assert embed.supports("BAAI/bge-m3") is False

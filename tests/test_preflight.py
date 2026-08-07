@@ -653,3 +653,24 @@ def test_ollama_model_size_greska_nula(monkeypatch):
         raise OSError("dolje")
     monkeypatch.setattr(preflight.urllib.request, "urlopen", _boom)
     assert preflight.ollama_model_size("x:y", "http://x") == 0.0
+
+
+def test_requirements_ne_pusta_warnings(monkeypatch, recwarn):
+    """Optional-modul importi (fitz deprecation i sl.) ne smiju curiti u
+    izlaz stranice 1."""
+    import warnings
+    from atlas.ops import preflight
+
+    def _noisy_import(name):
+        warnings.warn("fitz is deprecated", DeprecationWarning)
+        raise ImportError("nema")
+    import importlib
+    monkeypatch.setattr(importlib, "import_module", _noisy_import)
+    monkeypatch.setattr(preflight, "system_state",
+                        lambda c=None: {"python": "3.11", "ram_total_gb": 8,
+                                        "ram_free_gb": 4, "disk_free_gb": 50})
+    monkeypatch.setattr(preflight, "ollama_ready", lambda url: (True, "ok"))
+    monkeypatch.setattr(preflight, "internet_ok", lambda: True)
+    monkeypatch.setattr(preflight.winpath, "find_binary", lambda k: None)
+    preflight.requirements(None)
+    assert len(recwarn) == 0

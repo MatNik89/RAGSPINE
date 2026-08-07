@@ -32,3 +32,16 @@ def test_ocr_langs_default(tmp_path, monkeypatch):
     monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     from atlas.config import Config
     assert Config.from_env().ocr_langs == "hrv+eng"
+
+
+def test_data_dir_normpath_bez_mijesanih_crta(monkeypatch, tmp_path):
+    """E2E kozmetika: 'C:\\Users\\X/.atlas' — normpath izravnava separatore."""
+    for k in ("ATLAS_DATA_DIR", "RAGSPINE_DATA_DIR"):  # compat: ragspine
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path) + "/./poddir")
+    monkeypatch.delenv("ATLAS_JWT_SECRET", raising=False)
+    monkeypatch.delenv("RAGSPINE_JWT_SECRET", raising=False)  # compat: ragspine
+    from atlas import config
+    cfg = config.Config.from_env()
+    assert "/./" not in cfg.data_dir
+    assert cfg.data_dir == os.path.normpath(cfg.data_dir)

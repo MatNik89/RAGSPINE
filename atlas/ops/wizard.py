@@ -15,6 +15,7 @@ from pathlib import Path
 
 from atlas.core.llm import LLMError, LLMUnavailable
 from atlas.ops import backup, certs, folder_picker, model_table, preflight, shortcut, tui, tui_curses, winsvc, wizard_state
+from atlas.rag import embed
 from atlas.web import firstrun
 
 _MIN_PW = 8
@@ -154,9 +155,10 @@ def self_test(spine, cfg, *, input_fn=input, out=print, retries: int = 3) -> boo
 
 
 def choose_embed_model(state: dict, default_model: str) -> str:
-    """bge-m3 kad KOMOTNO stane u ukupni RAM; inače ostavi default (mali)."""
+    """bge-m3 kad KOMOTNO stane u RAM i kad ga fastembed stvarno podržava
+    (E2E: unsupported model ne smije u ponudu); inače mali default."""
     total = state.get("ram_total_gb") or 0.0
-    if preflight.fit_pill(_BGE_M3_GB, total) == "fits":
+    if preflight.fit_pill(_BGE_M3_GB, total) == "fits" and embed.supports(_BGE_M3):
         return _BGE_M3
     return default_model
 
@@ -249,7 +251,7 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
         if procjena:
             linija += f" (procjena {procjena:.1f} GB)"
         if procjena and stvarno > procjena * 1.3:
-            linija = "  ⚠" + linija.removeprefix("  ") + " — veće od procjene!"
+            linija = "  ⚠ " + linija.removeprefix("  ") + " — veće od procjene!"
         out(linija)
 
     emb = setup_embedding(spine, cfg, out=out)

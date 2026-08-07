@@ -456,9 +456,12 @@ def requirements(cfg=None) -> list[dict]:
                 "detalj": "dostupan" if inet_ok else "nema — radi offline s onim što ima",
                 "fix": "spoji mrežu ili koristi --offline s ručno skinutim modelima"})
 
+    import warnings
     for mod, naziv, fix in _OPTIONAL_MODULES:
         try:
-            importlib.import_module(mod)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")   # fitz deprecation i sl. ne u izlaz
+                importlib.import_module(mod)
             present = True
         except Exception:
             present = False

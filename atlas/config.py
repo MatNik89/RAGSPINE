@@ -55,7 +55,7 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         e = _env
-        data_dir = os.path.expanduser(e("DATA_DIR") or default_data_dir())
+        data_dir = os.path.normpath(os.path.expanduser(e("DATA_DIR") or default_data_dir()))
         Path(data_dir).mkdir(parents=True, exist_ok=True)
         # data_dir drži DB (PII), secret i modele — 0700 (no-op na Windowsu)
         try:

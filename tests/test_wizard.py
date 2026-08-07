@@ -439,14 +439,24 @@ def test_launch_now_stvara_precac(tmp_path, monkeypatch):
     assert made and made[0].startswith("https://")
 
 
-def test_choose_embed_model_bge_when_ram_allows():
+def test_choose_embed_model_bge_when_ram_allows(monkeypatch):
+    monkeypatch.setattr(wizard.embed, "supports", lambda m: True)
     st = {"ram_total_gb": 16.0}
     assert wizard.choose_embed_model(st, "mali-default") == "BAAI/bge-m3"
 
 
-def test_choose_embed_model_fallback_on_small_ram():
+def test_choose_embed_model_fallback_on_small_ram(monkeypatch):
+    monkeypatch.setattr(wizard.embed, "supports", lambda m: True)
     st = {"ram_total_gb": 2.0}   # 1.2/2.0 = 60% -> tight, ne "fits"
     assert wizard.choose_embed_model(st, "mali-default") == "mali-default"
+
+
+def test_choose_embed_bge_samo_kad_podrzan(monkeypatch):
+    monkeypatch.setattr(wizard.preflight, "fit_pill", lambda s, t: "fits")
+    monkeypatch.setattr(wizard.embed, "supports", lambda m: True)
+    assert wizard.choose_embed_model({"ram_total_gb": 32}, "d") == wizard._BGE_M3
+    monkeypatch.setattr(wizard.embed, "supports", lambda m: False)
+    assert wizard.choose_embed_model({"ram_total_gb": 32}, "d") == "d"
 
 
 def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
@@ -463,6 +473,7 @@ def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
         return {"ok": True, "model": c.embed_model, "dim": 384}
 
     monkeypatch.setattr(wizard, "_download_embed", _fake_download)
+    monkeypatch.setattr(wizard.embed, "supports", lambda m: True)
     monkeypatch.setattr(wizard.preflight, "system_state",
                         lambda c=None: {"ram_total_gb": 16.0})
     got = wizard.setup_embedding(s, cfg, out=lambda *_: None)
