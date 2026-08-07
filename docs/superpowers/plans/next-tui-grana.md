@@ -28,14 +28,24 @@ nule do prijavljenog admina"), mape isključivo kroz web Postavke →
 Mrežne mape; folder_picker obrisan; dashboard prazno stanje s linkom na
 /ui/mape; legacy resume (stare baze stage 4/5) kompatibilan.
 
-Ostaje:
-1. Cert bootstrap stranica (http://IP:8080/postavi) + prijateljsko ime
-   (fritz.box/mDNS) u SAN + doslovna uputa za radnike na stranici 5/5 +
-   fix upute "trust na klijentima" (CLI tamo ne postoji). Zasebna grana.
-2. NAKON čiste probe: uv migracija install skripti (korisnikov interes
-   2026-08-07) — `winget install astral-sh.uv` pa uv rješava Python +
-   venv + pakete (5-20x brži pip dio; ubija Find-Python cirkus u
-   install.ps1). Ne prije probe — proba validira postojeći pip put.
+Napravljeno u grani cert-bootstrap (41e2cde): prijateljska imena u SAN-u
+(certs.friendly_names + verified_display_host usklađen sa SAN-om
+POSTOJEĆEG certa), HTTP bootstrap server uz serve
+(atlas/web/bootstrap_http.py — /postavi stranica, /postavi-vezu.bat,
+/cert.pem; ATLAS_BOOTSTRAP_PORT, "0"=off), doslovna uputa za radnike na
+stranici 5/5, ispravljena uputa "trust na klijentima".
+
+Napravljeno u grani uv-install (d0d7206): uv primarni put u
+install.ps1/sh (winget/curl bootstrap, uv venv --python 3.12 = kraj
+Find-Python cirkusa; pip fallback netaknut; ATLAS_NO_UV=1 izlaz na oba
+OS-a), install.sh usklađen s wizardom (obrisan headless seed + operater
+sekcija), README ispravljen.
+
+TUI backlog PRAZAN — sve E2E TUI stavke odrađene. Ostaje šire:
+- BRISANJE Nicka + čista E2E proba (čeka korisnikov "kreni s probom").
+- Deferred sitnice iz reviewa (dolje) — uzeti usput.
+- Follow-up ideja iz cert reviewa: SHA256 fingerprint na /postavi
+  stranici (helper postoji) — MITM otvrdnjavanje bootstrapa.
 
 Parkirano iz reviewa tui-facelift-2 i -3 (uzeti usput):
 - Promjena prečac varijante (.lnk ↔ .url) ostavlja stari artefakt na
