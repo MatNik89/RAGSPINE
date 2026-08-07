@@ -22,10 +22,20 @@ fastembed warninzi, embed.supports guard — bge-m3 potvrđeno nepodržan na
 fastembed 0.8.0 pa se više ne nudi). MODEL_CATALOG stavka otpala (ne
 postoji u kodu); getpass za auth add već postojao.
 
+Napravljeno u grani wizard-bez-mapa (11c0ee3, korisnikova odluka
+2026-08-07): stranica mapa VAN iz wizarda — wizard je 5 stranica ("od
+nule do prijavljenog admina"), mape isključivo kroz web Postavke →
+Mrežne mape; folder_picker obrisan; dashboard prazno stanje s linkom na
+/ui/mape; legacy resume (stare baze stage 4/5) kompatibilan.
+
 Ostaje:
 1. Cert bootstrap stranica (http://IP:8080/postavi) + prijateljsko ime
-   (fritz.box/mDNS) u SAN + doslovna uputa za radnike na stranici 6/6 +
+   (fritz.box/mDNS) u SAN + doslovna uputa za radnike na stranici 5/5 +
    fix upute "trust na klijentima" (CLI tamo ne postoji). Zasebna grana.
+2. NAKON čiste probe: uv migracija install skripti (korisnikov interes
+   2026-08-07) — `winget install astral-sh.uv` pa uv rješava Python +
+   venv + pakete (5-20x brži pip dio; ubija Find-Python cirkus u
+   install.ps1). Ne prije probe — proba validira postojeći pip put.
 
 Parkirano iz reviewa tui-facelift-2 i -3 (uzeti usput):
 - Promjena prečac varijante (.lnk ↔ .url) ostavlja stari artefakt na
