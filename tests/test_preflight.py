@@ -614,3 +614,42 @@ def test_ollama_pull_injektirani_out_svakih_10_posto(monkeypatch):
     assert pf.ollama_pull("m", out=lines.append) is True
     pct_lines = [l for l in lines if "%" in l]
     assert 9 <= len(pct_lines) <= 12   # ~svakih 10 %, ne 100 redaka
+
+
+def test_quant_tags_kandidati():
+    from atlas.ops import preflight
+    assert preflight.quant_tags("qwen2.5:7b", "Q4_K_M") == [
+        "qwen2.5:7b-instruct-q4_K_M", "qwen2.5:7b-q4_K_M"]
+
+
+def test_quant_tags_prazno_bez_kvanta_ili_taga():
+    from atlas.ops import preflight
+    assert preflight.quant_tags("qwen2.5:7b", "") == []
+    assert preflight.quant_tags("bezdvotocke", "Q4_K_M") == []
+
+
+def test_ollama_model_size_iz_api_tags(monkeypatch):
+    from atlas.ops import preflight
+    import io, json
+    body = json.dumps({"models": [
+        {"name": "qwen2.5:7b-instruct-q4_K_M", "size": 4_700_000_000},
+        {"name": "phi3:mini", "size": 2_200_000_000}]}).encode()
+
+    class _R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+    monkeypatch.setattr(preflight.urllib.request, "urlopen",
+                        lambda url, timeout=10: _R(body))
+    assert abs(preflight.ollama_model_size("phi3:mini", "http://x") - 2.2) < 0.1
+    assert preflight.ollama_model_size("nema:tag", "http://x") == 0.0
+
+
+def test_ollama_model_size_greska_nula(monkeypatch):
+    from atlas.ops import preflight
+    def _boom(url, timeout=10):
+        raise OSError("dolje")
+    monkeypatch.setattr(preflight.urllib.request, "urlopen", _boom)
+    assert preflight.ollama_model_size("x:y", "http://x") == 0.0

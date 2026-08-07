@@ -224,15 +224,37 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
         return True
     model = names[idx]
 
-    out(f"Skidam {model} (prekid je siguran — nastavlja gdje je stalo)...")
-    if not preflight.ollama_pull(model, url, out=out):
+    row = rows[idx]
+    kandidati = preflight.quant_tags(model, row.get("best_quant", "")) + [model]
+    pulled_tag = None
+    for tag in kandidati:
+        if tag != model:
+            out(f"Skidam {tag} (točan kvant; prekid je siguran — nastavlja gdje je stalo)...")
+        else:
+            out(f"Skidam {model} (prekid je siguran — nastavlja gdje je stalo)...")
+        if preflight.ollama_pull(tag, url, out=out):
+            pulled_tag = tag
+            break
+    if not pulled_tag:
         out("Model nije skinut. Pokreni setup ponovno ili postavi kasnije u Postavkama.")
         return tui.prompt_yes_no("Nastavi setup bez modela?", default=True,
                                  input_fn=input_fn, out=out)
+    if pulled_tag == model and len(kandidati) > 1:
+        out("  ⚠ Registry nema izračunati kvant — skinut zadani tag "
+            "(može biti veći od procjene).")
+    stvarno = preflight.ollama_model_size(pulled_tag, url)
+    if stvarno:
+        procjena = model_table.disk_gb(row.get("params", ""), row.get("best_quant", ""))
+        linija = f"  Stvarna veličina: {stvarno:.1f} GB"
+        if procjena:
+            linija += f" (procjena {procjena:.1f} GB)"
+        if procjena and stvarno > procjena * 1.3:
+            linija = "  ⚠" + linija.removeprefix("  ") + " — veće od procjene!"
+        out(linija)
 
     emb = setup_embedding(spine, cfg, out=out)
     from atlas.business import model_settings
-    model_settings.save(spine, "ollama", model=model, ollama_url=url,
+    model_settings.save(spine, "ollama", model=pulled_tag, ollama_url=url,
                         embed_model=emb or "", user="setup")
     if not self_test(spine, cfg, input_fn=input_fn, out=out):
         out("⚠ Self-test nije prošao — model je spremljen, provjeri ga kasnije u Postavkama.")

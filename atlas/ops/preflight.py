@@ -240,6 +240,32 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
     return False
 
 
+def quant_tags(ollama_name: str, quant: str) -> list[str]:
+    """Kandidat-tagovi s TOČNOM kvantizacijom (E2E BUG: goli tag vuče
+    registry default — tipično veći od llmfit procjene). Konvencije
+    variraju pa lista: '<ime>-instruct-<q>' pa '<ime>-<q>'; pozivatelj
+    doda goli tag kao zadnji fallback."""
+    if not quant or ":" not in ollama_name:
+        return []
+    q = quant[0].lower() + quant[1:]   # Q4_K_M → q4_K_M (ollama stil)
+    return [f"{ollama_name}-instruct-{q}", f"{ollama_name}-{q}"]
+
+
+def ollama_model_size(tag: str, url: str = "http://127.0.0.1:11434") -> float:
+    """Stvarna veličina skinutog modela u GB (GET /api/tags); 0.0 =
+    nepoznato/greška — pozivatelj tada preskače usporedbu."""
+    import json
+    try:
+        with urllib.request.urlopen(f"{url}/api/tags", timeout=10) as r:
+            data = json.loads(r.read())
+        for m in data.get("models", []):
+            if m.get("name") == tag:
+                return round(float(m.get("size", 0)) / 1e9, 1)
+    except Exception:
+        pass
+    return 0.0
+
+
 _LLMFIT_CHAT_CATS = {"Chat", "Coding", "Reasoning", "General"}
 _LLMFIT_MAX_ROWS = 12
 

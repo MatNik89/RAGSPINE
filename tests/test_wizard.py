@@ -594,6 +594,10 @@ def test_page_model_full_happy_path(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
     monkeypatch.setattr(wizard.preflight, "llmfit_models",
                         lambda c=None: _llmfit_rows())
+    # test cilja happy-path oko embed/self-test/spremanja, ne kvant logiku —
+    # quant_tags prazno vraća stari goli-tag put.
+    monkeypatch.setattr(wizard.preflight, "quant_tags", lambda n, q: [])
+    monkeypatch.setattr(wizard.preflight, "ollama_model_size", lambda tag, url: 0.0)
     pulled = []
     monkeypatch.setattr(wizard.preflight, "ollama_pull",
                         lambda name, url=None, out=print: pulled.append(name) or True)
@@ -626,6 +630,9 @@ def test_page_model_tablica_i_kontekst(tmp_path, monkeypatch):
     rows = [{"ollama_name": "qwen2.5:7b", "params": "7B", "best_quant": "Q4_K_M",
              "memory_gb": 5.2, "tps": 11.0, "fit_label": "Good", "use_case": ""}]
     monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda cfg: rows)
+    # test cilja tablicu/kontekst, ne kvant logiku — quant_tags prazno.
+    monkeypatch.setattr(wizard.preflight, "quant_tags", lambda n, q: [])
+    monkeypatch.setattr(wizard.preflight, "ollama_model_size", lambda tag, url: 0.0)
     pulled = []
     monkeypatch.setattr(wizard.preflight, "ollama_pull",
                         lambda m, url, out=print: pulled.append(m) or True)
@@ -643,6 +650,89 @@ def test_page_model_tablica_i_kontekst(tmp_path, monkeypatch):
     assert "Disk" in text            # zaglavlje tablice
     assert "90" in text and "5.5" in text   # kontekst stroja
     assert "RAM, ne disk" in text    # legenda
+
+
+def _model_mocks(monkeypatch):
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url: (True, "ok"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url: "0.5.0")
+    monkeypatch.setattr(wizard.preflight, "ollama_floor_ok", lambda v: True)
+    monkeypatch.setattr(wizard.preflight, "system_state",
+                        lambda c=None: {"ram_total_gb": 8.0, "ram_free_gb": 5.5,
+                                        "disk_free_gb": 90.0})
+    rows = [{"ollama_name": "qwen2.5:7b", "params": "7B", "best_quant": "Q4_K_M",
+             "memory_gb": 5.2, "tps": 11.0, "fit_label": "Good", "use_case": ""}]
+    monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda cfg: rows)
+
+
+def test_page_model_pull_kvant_sufiks_prvi(tmp_path, monkeypatch):
+    """Prvi kandidat s kvant sufiksom uspije → sprema se TAJ tag."""
+    s = init_spine(str(tmp_path / "t.db"))
+    _model_mocks(monkeypatch)
+    pulled = []
+    monkeypatch.setattr(wizard.preflight, "ollama_pull",
+                        lambda m, url, out=print: pulled.append(m) or True)
+    monkeypatch.setattr(wizard.preflight, "ollama_model_size",
+                        lambda tag, url: 3.9)
+    monkeypatch.setattr(wizard, "setup_embedding", lambda s_, c, out=print: "emb")
+    monkeypatch.setattr(wizard, "self_test",
+                        lambda s_, c, input_fn=input, out=print: True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "x"
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader("1"), out=lambda *_: None)
+    assert ok is True
+    assert pulled == ["qwen2.5:7b-instruct-q4_K_M"]
+    assert s.get_override("model", "model") == "qwen2.5:7b-instruct-q4_K_M"
+
+
+def test_page_model_pull_fallback_na_goli_tag(tmp_path, monkeypatch):
+    """Kandidati s kvantom ne postoje → goli tag + ⚠ upozorenje."""
+    s = init_spine(str(tmp_path / "t.db"))
+    _model_mocks(monkeypatch)
+    pulled = []
+
+    def _pull(m, url, out=print):
+        pulled.append(m)
+        return m == "qwen2.5:7b"   # samo goli tag uspije
+    monkeypatch.setattr(wizard.preflight, "ollama_pull", _pull)
+    monkeypatch.setattr(wizard.preflight, "ollama_model_size",
+                        lambda tag, url: 4.7)
+    monkeypatch.setattr(wizard, "setup_embedding", lambda s_, c, out=print: "emb")
+    monkeypatch.setattr(wizard, "self_test",
+                        lambda s_, c, input_fn=input, out=print: True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "x"
+    lines = []
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader("1"), out=lines.append)
+    assert ok is True
+    assert pulled == ["qwen2.5:7b-instruct-q4_K_M", "qwen2.5:7b-q4_K_M",
+                      "qwen2.5:7b"]
+    assert s.get_override("model", "model") == "qwen2.5:7b"
+    text = "\n".join(lines)
+    assert "registry nema izračunati kvant" in text.lower() or "zadani tag" in text
+
+
+def test_page_model_upozorenje_kad_stvarno_vece(tmp_path, monkeypatch):
+    """Stvarna veličina > 1.3 × procjene → ⚠ redak s obje brojke."""
+    s = init_spine(str(tmp_path / "t.db"))
+    _model_mocks(monkeypatch)
+    monkeypatch.setattr(wizard.preflight, "ollama_pull",
+                        lambda m, url, out=print: True)
+    monkeypatch.setattr(wizard.preflight, "ollama_model_size",
+                        lambda tag, url: 9.9)   # procjena ~4.3 GB → 2.3×
+    monkeypatch.setattr(wizard, "setup_embedding", lambda s_, c, out=print: "emb")
+    monkeypatch.setattr(wizard, "self_test",
+                        lambda s_, c, input_fn=input, out=print: True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "x"
+    lines = []
+    wizard.page_model(s, _Cfg(), input_fn=_reader("1"), out=lines.append)
+    assert any("9.9" in l.replace(",", ".") and "⚠" in l for l in lines)
 
 
 def test_render_summary_pokazuje_konfigurirano_i_preskoceno(tmp_path):
