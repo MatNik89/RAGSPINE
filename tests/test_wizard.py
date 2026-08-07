@@ -142,8 +142,8 @@ def test_render_preflight_passes_when_no_fail():
 
 
 def test_page_preduvjeti_offers_winget_install_on_windows(monkeypatch):
-    """Nalaz d: tesseract/ollama fail/warn na Windowsu -> ponudi auto-install
-    preko winget-a; nakon pokušaja ponovno provjeri preduvjete."""
+    """fail na Windowsu → radiolist nudi Auto-instaliraj; nakon pokušaja
+    ponovno provjeri preduvjete."""
     reqs_fail = [{"key": "tesseract", "naziv": "OCR", "status": "fail",
                   "detalj": "nije pronađen", "fix": "winget install ..."}]
     reqs_ok = [{"key": "tesseract", "naziv": "OCR", "status": "ok", "detalj": "ok", "fix": ""}]
@@ -153,22 +153,23 @@ def test_page_preduvjeti_offers_winget_install_on_windows(monkeypatch):
     calls = []
     monkeypatch.setattr(wizard.preflight, "install_via_winget",
                         lambda key, out=print: calls.append(key) or True)
-    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("d"), out=lambda *_: None)
+    # radiolist (fail, Windows): 1=Auto-instaliraj: OCR, 2=Provjeri ponovno, 3=Prekini
+    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("1"), out=lambda *_: None)
     assert ok is True
     assert calls == ["tesseract"]
 
 
 def test_page_preduvjeti_no_winget_offer_on_non_windows(monkeypatch):
-    """Izvan Windowsa auto-install se ne nudi — samo standardni retry prompt."""
+    """Izvan Windowsa nema Auto-instaliraj stavke; Prekini vraća False."""
     reqs_fail = [{"key": "tesseract", "naziv": "OCR", "status": "fail",
                   "detalj": "nije pronađen", "fix": "apt install ..."}]
     monkeypatch.setattr(wizard.preflight, "requirements", lambda cfg: reqs_fail)
     monkeypatch.setattr(wizard.os, "name", "posix")
-    monkeypatch.setattr(wizard.preflight, "install_via_winget",
-                        lambda *a, **k: (_ for _ in ()).throw(
-                            AssertionError("ne smije se zvati izvan Windowsa")))
-    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("ne"), out=lambda *_: None)
+    lines = []
+    # radiolist: 1=Provjeri ponovno, 2=Prekini setup
+    ok = wizard.page_preduvjeti(None, None, input_fn=_reader("2"), out=lines.append)
     assert ok is False
+    assert not any("Auto-instaliraj" in l for l in lines)
 
 
 def test_cmd_setup_seeds_db(tmp_path, monkeypatch):
@@ -469,15 +470,6 @@ def _llmfit_rows():
     ]
 
 
-def test_render_llmfit_models_marks_first_as_recommendation():
-    lines = []
-    names = wizard.render_llmfit_models(_llmfit_rows(), out=lines.append)
-    assert names == ["qwen2.5:7b", "llama3.2:3b"]
-    assert any("PREPORUKA" in l for l in lines)
-    assert any("🟢" in l for l in lines) and any("🟡" in l for l in lines)
-    assert any("tok/s" in l for l in lines)
-
-
 def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
     from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
@@ -570,6 +562,38 @@ def test_page_model_full_happy_path(tmp_path, monkeypatch):
     assert saved["provider"] == "ollama"
     assert saved["model"] == pulled[0]
     assert saved["embed_model"] == "emb-model"
+
+
+def test_page_model_tablica_i_kontekst(tmp_path, monkeypatch):
+    """Stranica 3 ispisuje slobodni RAM/disk i tablicu s Disk stupcem;
+    odabir prvog reda pulla točan model."""
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url: (True, "ok"))
+    monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url: "0.5.0")
+    monkeypatch.setattr(wizard.preflight, "ollama_floor_ok", lambda v: True)
+    monkeypatch.setattr(wizard.preflight, "system_state",
+                        lambda c=None: {"ram_total_gb": 8.0, "ram_free_gb": 5.5,
+                                        "disk_free_gb": 90.0})
+    rows = [{"ollama_name": "qwen2.5:7b", "params": "7B", "best_quant": "Q4_K_M",
+             "memory_gb": 5.2, "tps": 11.0, "fit_label": "Good", "use_case": ""}]
+    monkeypatch.setattr(wizard.preflight, "llmfit_models", lambda cfg: rows)
+    pulled = []
+    monkeypatch.setattr(wizard.preflight, "ollama_pull",
+                        lambda m, url, out=print: pulled.append(m) or True)
+    monkeypatch.setattr(wizard, "setup_embedding", lambda s_, c, out=print: "emb")
+    monkeypatch.setattr(wizard, "self_test",
+                        lambda s_, c, input_fn=input, out=print: True)
+
+    class _Cfg:
+        ollama_url = "http://127.0.0.1:11434"
+        embed_model = "x"
+    lines = []
+    ok = wizard.page_model(s, _Cfg(), input_fn=_reader("1"), out=lines.append)
+    assert ok is True and pulled == ["qwen2.5:7b"]
+    text = "\n".join(lines)
+    assert "Disk" in text            # zaglavlje tablice
+    assert "90" in text and "5.5" in text   # kontekst stroja
+    assert "RAM, ne disk" in text    # legenda
 
 
 def test_render_summary_pokazuje_konfigurirano_i_preskoceno(tmp_path):

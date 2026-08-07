@@ -14,7 +14,7 @@ import types
 from pathlib import Path
 
 from atlas.core.llm import LLMError, LLMUnavailable
-from atlas.ops import backup, certs, preflight, tui, winsvc, wizard_state
+from atlas.ops import backup, certs, model_table, preflight, tui, tui_curses, winsvc, wizard_state
 from atlas.web import firstrun
 
 _MIN_PW = 8
@@ -41,22 +41,36 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
         reqs = preflight.requirements(cfg)
         ok = render_preflight(reqs, out=out)
         # winget auto-install je Windows-only (drugdje ga wizard ne nudi — brief).
-        tried_install = False
-        if os.name == "nt":
-            for r in reqs:
-                if r["key"] in preflight.WINGET_IDS and r["status"] in ("fail", "warn"):
-                    if tui.prompt_yes_no(f"Pokušaj auto-instalaciju ({r['naziv']})?",
-                                         default=False, input_fn=input_fn, out=out):
-                        preflight.install_via_winget(r["key"], out=out)
-                        tried_install = True
-        if tried_install:
-            continue   # ponovno provjeri preduvjete nakon (mogućeg) installa
-        if ok:
+        instalabilni = [r for r in reqs
+                        if os.name == "nt" and r["key"] in preflight.WINGET_IDS
+                        and r["status"] in ("fail", "warn")]
+        if ok and not instalabilni:
             return True
         out("")
-        out("Neki obavezni preduvjeti nedostaju (✗). Popravi ih pa ponovi.")
-        if not tui.prompt_yes_no("Provjeri ponovno?", default=True, input_fn=input_fn, out=out):
+        opcije, akcije = [], []
+        if ok:
+            opcije.append("Nastavi (obavezni preduvjeti ✓)")
+            akcije.append("ok")
+        for r in instalabilni:
+            opcije.append(f"Auto-instaliraj: {r['naziv']}")
+            akcije.append(("winget", r["key"]))
+        opcije.append("Provjeri ponovno")
+        akcije.append("retry")
+        opcije.append("Prekini setup")
+        akcije.append("stop")
+        naslov = ("Neki obavezni preduvjeti nedostaju (✗) — što dalje?"
+                  if not ok else "Preporuke (⚠) — što dalje?")
+        idx = tui_curses.radiolist(naslov, opcije, selected=0,
+                                   cancel_returns=len(akcije) - 1,
+                                   input_fn=input_fn, out=out)
+        akcija = akcije[idx]
+        if akcija == "ok":
+            return True
+        if akcija == "stop":
             return False
+        if isinstance(akcija, tuple):
+            preflight.install_via_winget(akcija[1], out=out)
+        # "retry" i post-install: petlja ponovno provjerava
 
 
 def page_operater(spine, *, input_fn=input, out=print) -> bool:
@@ -162,22 +176,6 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
     return None
 
 
-_PILL_GLYPH = {"Good": "🟢", "Marginal": "🟡", "Too Tight": "🔴"}
-
-
-def render_llmfit_models(rows, *, out=print) -> list[str]:
-    """Ispiši llmfit retke (već filtrirane i sortirane po score-u); vrati
-    ollama imena u prikazanom redoslijedu. Prvi = ⭐ preporuka."""
-    names = []
-    for i, r in enumerate(rows):
-        pill = _PILL_GLYPH.get(r["fit_label"], "?")
-        star = "  ⭐ PREPORUKA" if i == 0 else ""
-        out(f"  {pill} {r['ollama_name']} ({r['params']}, {r['best_quant']} "
-            f"~{r['memory_gb']:.1f} GB, ~{r['tps']:.0f} tok/s) — {r['use_case']}{star}")
-        names.append(r["ollama_name"])
-    return names
-
-
 def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 3: Ollama spremnost -> llmfit lista -> JEDAN model -> pull -> spremi
     -> embedding -> self-test. Skip-grana vraća True (spec: ne zaglavi)."""
@@ -209,11 +207,19 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     if not rows:
         out("llmfit nije dostupan ili nema modela koji stanu — model postavi kasnije u Postavkama.")
         return True
+    st = preflight.system_state(cfg)
+    out(f"Stroj: slobodno ~{st.get('ram_free_gb', '?')} GB RAM / "
+        f"~{st.get('disk_free_gb', '?')} GB diska "
+        f"(ukupno {st.get('ram_total_gb', '?')} GB RAM)")
     out("Modeli za ovaj hardver (llmfit — kvantizacija izračunata po stroju):")
-    names = render_llmfit_models(rows, out=out)
-    choices = names + ["Preskoči — postavi kasnije"]
-    idx = tui.prompt_choice("Odaberi JEDAN model:", choices, default=0,
-                            input_fn=input_fn, out=out)
+    header, lines = model_table.table_rows(rows)
+    names = [r["ollama_name"] for r in rows]
+    items = lines + ["Preskoči — postavi kasnije"]
+    idx = tui_curses.radiolist(
+        "Odaberi JEDAN model (🟢 komotno / 🟡 tijesno — RAM, ne disk):",
+        items, selected=0, header=header,
+        cancel_returns=len(names),          # ESC = preskoči
+        input_fn=input_fn, out=out)
     if idx == len(names):
         return True
     model = names[idx]
