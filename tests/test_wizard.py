@@ -869,13 +869,15 @@ def test_run_resume_bez_ponude(tmp_path, monkeypatch):
 
 
 def test_run_resume_stara_baza_stage5_ide_na_gotovo(tmp_path, monkeypatch):
-    """Stara baza (prije uklanjanja stranice mapa) sa stage=5 nastavlja na
-    'gotovo' bez pada; stage=4 isto."""
+    """Stara baza (prije uklanjanja stranice mapa) sa stage=5 (stara 6-stranična
+    numeracija: prošla stare mape, NE i sažetak) nastavlja na 'gotovo' —
+    page_gotovo se stvarno pozove, ne samo mark_complete na kraju; stage=4 isto."""
     for start in (4, 5):
         s = init_spine(str(tmp_path / f"t{start}.db"))
         ws.set_stage(s, start)
+        called = []
         monkeypatch.setattr(wizard, "page_gotovo",
-                            lambda sp, c, input_fn=input, out=print: True)
+                            lambda sp, c, input_fn=input, out=print: called.append(1) or True)
         monkeypatch.setattr(wizard, "launch_now",
                             lambda sp, c, input_fn=input, out=print: None)
 
@@ -883,4 +885,5 @@ def test_run_resume_stara_baza_stage5_ide_na_gotovo(tmp_path, monkeypatch):
             db_path = str(tmp_path / f"t{start}.db")
             data_dir = str(tmp_path)
         wizard.run(s, _Cfg(), input_fn=_reader(), out=lambda *_: None)
+        assert called == [1], f"page_gotovo nije pozvan za stage={start}"
         assert ws.is_complete(s)

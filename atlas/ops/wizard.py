@@ -472,7 +472,9 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup je već dovršen. Za ponovno: `atlas setup --reset`.")
         return
     stage = wizard_state.get_stage(spine)
-    out(f"ATLAS setup (nastavak od koraka {stage + 1}).")
+    # min(): legacy baza može imati stage=5 (stara 6-stranična numeracija) —
+    # prikaz ne smije obećati nepostojeći "korak 6".
+    out(f"ATLAS setup (nastavak od koraka {min(stage + 1, 5)}).")
     try:
         # Upgrade grana (spec str.1): postojeća baza — korisnici postoje, a
         # setup nikad nije dovršen. Resume (stage>0) nije upgrade slučaj.
@@ -502,7 +504,11 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na mreži. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 4)
-        if stage < 5:
+        # <= ne < : legacy baza sa stage=5 (iz vremena 6 stranica — prošla staru
+        # stranicu mapa, ali NE i sažetak) mora još proći page_gotovo. Novi tok
+        # nikad ne resumira sa stage=5 bez complete flaga — set_stage(5) niže pa
+        # mark_complete izvrše se u istom pozivu, bez povratka između njih.
+        if stage <= 5:
             if not page_gotovo(spine, cfg, input_fn=input_fn, out=out):
                 out("Setup prekinut na sažetku. Pokreni ponovno za nastavak.")
                 return
