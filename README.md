@@ -12,7 +12,8 @@ generira račune i ne šalje JOPPD.
 ## Početni setup (jedan blok po OS-u)
 
 Python 3.11+. Kloniraj repo pa pokreni skriptu za svoj OS — napravi venv,
-instalira sve, povuče embedding model, kreira operatera i ispiše URL.
+instalira sve i povuče embedding model. Postavljanje (operater, model,
+HTTPS, mape) dovršava čarobnjak: `atlas setup`.
 Idempotentno (ponovno pokretanje ne razbija install).
 
 **Windows** (PowerShell, iz korijena repoa):
@@ -28,7 +29,6 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
 Preskoči embedding model (RAG radi degradirano): `ATLAS_SKIP_MODEL=1`.
-Ime operatera kao argument: `./install.sh ana` / `.\install.ps1 ana`.
 
 Nakon setupa:
 

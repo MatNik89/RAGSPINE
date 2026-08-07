@@ -18,20 +18,25 @@ if (-not (Test-Path "pyproject.toml")) {
 }
 
 # --- 0. uv (Astral) - brzi Python+venv+paketi; ako ne uspije, pip put ispod NETAKNUT ---
-$uv = Get-Command uv -ErrorAction SilentlyContinue
-if (-not $uv -and (Get-Command winget -ErrorAction SilentlyContinue)) {
-  Write-Host "uv nije pronaden - pokusavam winget install astral-sh.uv (tiho)..."
-  # PS 5.1 + EAP=Stop: stderr nativnog programa postaje terminirajuca greska
-  # (isti razlog kao u Find-Python nize) — winget install smije tiho pasti.
-  $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
-  try {
-    winget install --exact --id astral-sh.uv --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
-  } catch {
-    Write-Host "  (winget install uv nije uspio - nastavljam bez uv-a)"
-  } finally { $ErrorActionPreference = $eap }
-  # osvjezi PATH u tekucem procesu bez restarta terminala (winget pise u registry)
-  $env:Path = "$([Environment]::GetEnvironmentVariable('Path','Machine'));$([Environment]::GetEnvironmentVariable('Path','User'));$env:Path"
+# $env:ATLAS_NO_UV="1" preskace uv u cijelosti (npr. offline stroj gdje
+# postojeci uv ne moze skinuti lokalni Python 3.12 - jedini izlaz je pip put).
+$uv = $null
+if ($env:ATLAS_NO_UV -ne "1") {
   $uv = Get-Command uv -ErrorAction SilentlyContinue
+  if (-not $uv -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Host "uv nije pronaden - pokusavam winget install astral-sh.uv (tiho)..."
+    # PS 5.1 + EAP=Stop: stderr nativnog programa postaje terminirajuca greska
+    # (isti razlog kao u Find-Python nize) — winget install smije tiho pasti.
+    $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    try {
+      winget install --exact --id astral-sh.uv --accept-package-agreements --accept-source-agreements 2>$null | Out-Null
+    } catch {
+      Write-Host "  (winget install uv nije uspio - nastavljam bez uv-a)"
+    } finally { $ErrorActionPreference = $eap }
+    # osvjezi PATH u tekucem procesu bez restarta terminala (winget pise u registry)
+    $env:Path = "$([Environment]::GetEnvironmentVariable('Path','Machine'));$([Environment]::GetEnvironmentVariable('Path','User'));$env:Path"
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+  }
 }
 
 $venvPy = Join-Path ".venv" "Scripts\python.exe"
