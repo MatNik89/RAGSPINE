@@ -9,7 +9,7 @@ def _home() -> str:
 
 
 def _env(name: str, default: str = "") -> str:
-    """ATLAS_<name> primarno; RAGSPINE_<name> je trajni alias."""
+    """ATLAS_<name> primarno; RAGSPINE_<name> je trajni compat alias."""
     v = os.environ.get(f"ATLAS_{name}")
     if v is None:
         v = os.environ.get(f"RAGSPINE_{name}")  # compat: ragspine env alias
@@ -17,7 +17,7 @@ def _env(name: str, default: str = "") -> str:
 
 
 def default_data_dir() -> str:
-    """~/.atlas; ako ne postoji a stari ~/.ragspine postoji — koristi stari."""
+    """~/.atlas; ako ne postoji a stari ~/.ragspine (compat) postoji — koristi stari."""
     new = os.path.join(_home(), ".atlas")
     legacy = os.path.join(_home(), ".ragspine")  # compat: ragspine data dir
     if not os.path.exists(new) and os.path.isdir(legacy):
