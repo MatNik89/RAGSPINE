@@ -2,7 +2,7 @@
 
 Revizija D-a po korisnikovoj korekciji: **ništa se ne izmišlja u kodu**.
 Stvarni NAS ureda ima mapu `KLIJENTI` (velikim slovima) u kojoj su SVI
-klijenti — RAGSPINE je skenira i **dogovara** strukturu s korisnikom, pa
+klijenti — ATLAS je skenira i **dogovara** strukturu s korisnikom, pa
 dogovor **trajno sprema**.
 
 ## Izvori istine

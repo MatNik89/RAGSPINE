@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "RAGSPINE Bridge",
+  "name": "ATLAS Bridge",
   "version": "1.0",
-  "description": "Polls the RAGSPINE browser bridge and executes browser actions on its behalf.",
+  "description": "Polls the ATLAS browser bridge and executes browser actions on its behalf.",
   "permissions": ["activeTab", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {

@@ -11,7 +11,7 @@ bilo kakvog Windows deploya** (produkcijski PC ureda može biti Windows + SMB NA
    (4 testa). `Č` (Č) puca s cp1252 (Windows default). Uzrok: negdje se
    piše/čita tekst bez `encoding="utf-8"`. **Fix:** svaki `open()`/`read_text`/
    `write_text` s tekstom mora imati `encoding="utf-8"`; provjeriti i subprocess
-   stdout dekodiranje. Grep: `open(` bez encoding u ragspine/.
+   stdout dekodiranje. Grep: `open(` bez encoding u atlas/.
 
 2. **Path separator `\` vs `/`** — `tests/test_onboarding.py`
    (`klijenti\\1_pekara-mlinar` ≠ `klijenti/1_pekara-mlinar`). NAS/folder putevi

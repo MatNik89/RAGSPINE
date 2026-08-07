@@ -1,10 +1,12 @@
-# RAGSPINE
+# ATLAS
+
+*(ranije RAGSPINE)* <!-- compat: staro ime -->
 
 AI asistent za hrvatske knjigovođe: chat s citiranim izvorima (RAG nad
 propisima/dokumentima klijenata), `/obveze` pregled poreznih obveza,
 periodička watchlista NN-a i drugih izvora, kalkulatori (plaća, dnevnice,
 referentne brojke), OCR za skenirane dokumente i Chrome extension bridge za
-poluautomatizaciju webova bez API-ja. **RAGSPINE nije ERP** — ne knjiži, ne
+poluautomatizaciju webova bez API-ja. **ATLAS nije ERP** — ne knjiži, ne
 generira račune i ne šalje JOPPD.
 
 ## Početni setup (jedan blok po OS-u)
@@ -25,14 +27,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 ./install.sh
 ```
 
-Preskoči embedding model (RAG radi degradirano): `RAGSPINE_SKIP_MODEL=1`.
+Preskoči embedding model (RAG radi degradirano): `ATLAS_SKIP_MODEL=1`.
 Ime operatera kao argument: `./install.sh ana` / `.\install.ps1 ana`.
 
 Nakon setupa:
 
 ```bash
-ragspine serve      # → http://127.0.0.1:8400/login
-ragspine doctor     # provjera spremnosti (korisnici, LLM, NAS, dozvole…)
+atlas serve      # → http://127.0.0.1:8400/login
+atlas doctor     # provjera spremnosti (korisnici, LLM, NAS, dozvole…)
 ```
 
 Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS):
@@ -43,9 +45,9 @@ Postavljanje u uredu (KLIJENTI mapa, uređaji, HTTPS):
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Win: .venv\Scripts\Activate.ps1
 pip install -e ".[full]"                          # ".": samo jezgra (degradirano)
-ragspine setup                                    # baza + sjemenke + detekcija
-ragspine auth add ana                             # prvi korisnik (owner)
-ragspine serve
+atlas setup                                    # baza + sjemenke + detekcija
+atlas auth add ana                             # prvi korisnik (owner)
+atlas serve
 ```
 
 `[full]` dodaje `pymupdf`, `fastembed`, `sqlite-vec`, `python-docx`,
@@ -59,26 +61,26 @@ curl -X POST http://127.0.0.1:8400/auth/login \
 
 ## Konfiguracija
 
-Sve preko `RAGSPINE_*` env varijabli (`ragspine/config.py`):
+Sve preko `ATLAS_*` env varijabli (`atlas/config.py`):
 
 | Varijabla | Opis |
 |---|---|
-| `RAGSPINE_DATA_DIR` | korijenski direktorij za bazu i secret (default `~/.ragspine`) |
-| `RAGSPINE_DB_PATH` | putanja SQLite baze (default `<DATA_DIR>/ragspine.db`) |
-| `RAGSPINE_HOST` | bind adresa servera (default `127.0.0.1`) |
-| `RAGSPINE_PORT` | port servera (default `8400`) |
-| `RAGSPINE_LLM_BASE_URL` | OpenAI-kompatibilni LLM endpoint (DeepSeek/Kimi/Ollama/LiteLLM proxy) |
-| `RAGSPINE_LLM_API_KEY` | API ključ za `LLM_BASE_URL` |
-| `RAGSPINE_LLM_MODEL` | naziv modela koji se šalje provideru |
-| `RAGSPINE_ANTHROPIC_BASE_URL` | Anthropic Messages endpoint (default `https://api.anthropic.com`) |
-| `RAGSPINE_OLLAMA_URL` | lokalni Ollama za detekciju/health (default `http://127.0.0.1:11434`) |
-| `RAGSPINE_OCR_URL` | Unlimited-OCR (SGLang/vLLM) HTTP endpoint |
-| `RAGSPINE_EMBED_MODEL` | FastEmbed model za vektorsku pretragu (default `intfloat/multilingual-e5-large`) |
-| `RAGSPINE_NAS_ROOT` | korijen za auto-sort e-računa i bulk ingest (path-sanitiziran) |
-| `RAGSPINE_IMAP_HOST` / `_IMAP_USER` / `_IMAP_PASS` | IMAP izvor za `ingest --imap` |
-| `RAGSPINE_JWT_SECRET` | HS256 tajna (auto-generira se i sprema u `<DATA_DIR>/secret` ako nije postavljena) |
-| `RAGSPINE_REDACT_PII` | `1` = redaktiraj PII (mail/telefon/IBAN/OIB) prije slanja LLM-u |
-| `RAGSPINE_EGRESS_ALLOW` | zarezom odvojen popis hostova izuzet od SSRF blokade privatnih IP-ova |
+| `ATLAS_DATA_DIR` | korijenski direktorij za bazu i secret (default `~/.atlas`) |
+| `ATLAS_DB_PATH` | putanja SQLite baze (default `<DATA_DIR>/atlas.db`) |
+| `ATLAS_HOST` | bind adresa servera (default `127.0.0.1`) |
+| `ATLAS_PORT` | port servera (default `8400`) |
+| `ATLAS_LLM_BASE_URL` | OpenAI-kompatibilni LLM endpoint (DeepSeek/Kimi/Ollama/LiteLLM proxy) |
+| `ATLAS_LLM_API_KEY` | API ključ za `LLM_BASE_URL` |
+| `ATLAS_LLM_MODEL` | naziv modela koji se šalje provideru |
+| `ATLAS_ANTHROPIC_BASE_URL` | Anthropic Messages endpoint (default `https://api.anthropic.com`) |
+| `ATLAS_OLLAMA_URL` | lokalni Ollama za detekciju/health (default `http://127.0.0.1:11434`) |
+| `ATLAS_OCR_URL` | Unlimited-OCR (SGLang/vLLM) HTTP endpoint |
+| `ATLAS_EMBED_MODEL` | FastEmbed model za vektorsku pretragu (default `intfloat/multilingual-e5-large`) |
+| `ATLAS_NAS_ROOT` | korijen za auto-sort e-računa i bulk ingest (path-sanitiziran) |
+| `ATLAS_IMAP_HOST` / `_IMAP_USER` / `_IMAP_PASS` | IMAP izvor za `ingest --imap` |
+| `ATLAS_JWT_SECRET` | HS256 tajna (auto-generira se i sprema u `<DATA_DIR>/secret` ako nije postavljena) |
+| `ATLAS_REDACT_PII` | `1` = redaktiraj PII (mail/telefon/IBAN/OIB) prije slanja LLM-u |
+| `ATLAS_EGRESS_ALLOW` | zarezom odvojen popis hostova izuzet od SSRF blokade privatnih IP-ova |
 
 ## LLM provideri
 
@@ -97,7 +99,7 @@ Sve preko stdlib `urllib` — LiteLLM se nikad ne importira direktno.
 
 ## Spajanje Open WebUI
 
-RAGSPINE izlaže `/v1/chat/completions` i `/v1/models` u OpenAI-kompatibilnom
+ATLAS izlaže `/v1/chat/completions` i `/v1/models` u OpenAI-kompatibilnom
 obliku. U Open WebUI dodaj novi OpenAI-connection:
 
 - **Base URL:** `http://<host>:8400/v1`
@@ -138,7 +140,7 @@ obliku. U Open WebUI dodaj novi OpenAI-connection:
 | python-docx / openpyxl | DOCX/XLSX ingest | ostali formati |
 | Apprise | push notifikacije | notifikacije u bazu + log |
 
-`python -m ragspine doctor` javlja točno što fali.
+`python -m atlas doctor` javlja točno što fali.
 
 ## CLI komande
 
@@ -152,7 +154,7 @@ obliku. U Open WebUI dodaj novi OpenAI-connection:
 | `eval` | pokreni golden-set upita, provjera router lane + retrieval hit |
 | `stats` | interakcije po laneu, cache, top upiti |
 | `reminders [add <text> <due>]` | podsjetnici |
-| `auth add <user>` | novi korisnik (lozinka iz `RAGSPINE_PASS` ili prompt) |
+| `auth add <user>` | novi korisnik (lozinka iz `ATLAS_PASS` ili prompt) |
 | `browser status` | pending komande u browser bridgeu |
 | `watch run` | ručno pokretanje watchliste |
 | `ocr <path>` | OCR nad pojedinim dokumentom |
@@ -167,7 +169,7 @@ Postavljanje u uredu: **[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
   (dokumenti, bilješke, poruke, cjenik, ekstrakcija, obavijesti, isteci) i kroz
   RAG dohvat/keš — restringirani radnik ne dosegne skrivenog klijenta.
 - SSRF guard na vanjskim fetchevima (samo http/https, blokira privatne/loopback/
-  link-local osim `RAGSPINE_EGRESS_ALLOW`) i **LAN guard** na uređajima (samo
+  link-local osim `ATLAS_EGRESS_ALLOW`) i **LAN guard** na uređajima (samo
   privatne adrese; loopback OK, link-local/cloud-metadata/IPv4-mapped odbijeni).
 - Path-traversal zaštita na NAS operacijama; e-račun auto-sort ne pregazi
   postojeći fajl (uniquify).
@@ -178,7 +180,7 @@ Postavljanje u uredu: **[docs/DEPLOY_URED.md](docs/DEPLOY_URED.md)**.
 - **DB + tajna 0600, data_dir 0700**; PII redakcija prije LLM-a kad je uključena.
 - **Brisanje klijentskih podataka nije dostupno** (zakonska retencija); promjene
   su praćene SHA-256 hash-chain auditom (append-only, verifikabilan).
-- v1 je zamišljen za LAN/plaintext: cookie `Secure` + HSTS uz `RAGSPINE_HTTPS_ONLY=1`.
+- v1 je zamišljen za LAN/plaintext: cookie `Secure` + HSTS uz `ATLAS_HTTPS_ONLY=1`.
 
 ## Arhitektura
 
@@ -188,7 +190,7 @@ watchlist i learn upisuju, svaki modul čita override prije hardcoded
 defaulta.
 
 ```
-ragspine/
+atlas/
   core/       spine (baza), llm (provider dispatcher), security (JWT/PII/audit),
               subproc, net (SSRF), optional (degradacija)
   rag/        embed, retrieval (RRF), router, composer, citations, cache,

@@ -1,4 +1,4 @@
-// RAGSPINE Bridge — MV3 service worker.
+// ATLAS Bridge — MV3 service worker.
 // Long-polls GET {server}/browser/cmd, executes the command, POSTs the result
 // to {server}/browser/result. Exponential backoff on fetch errors.
 
@@ -136,7 +136,7 @@ async function loop() {
     backoffMs = success ? MIN_BACKOFF_MS : Math.min(backoffMs * 2, MAX_BACKOFF_MS);
     setTimeout(loop, success ? 0 : backoffMs);
   } catch (err) {
-    console.log("RAGSPINE bridge poll error:", err);
+    console.log("ATLAS bridge poll error:", err);
     await setStatus(`fetch greška: ${err}`);
     backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
     setTimeout(loop, backoffMs);

@@ -2,7 +2,7 @@
 
 Revidirano po korisniku: skeniraju se **svakakvi** dokumenti (tip dokumenta se
 podešava u DODAJ KLIJENTA, piece F). U mreži je **više skenera i pisača** —
-RAGSPINE ih pronađe (discovery), u Postavkama se svi dodaju, a kod svakog
+ATLAS ih pronađe (discovery), u Postavkama se svi dodaju, a kod svakog
 skeniranja/printanja korisnik **bira uređaj**.
 
 ## Sigurnosni model

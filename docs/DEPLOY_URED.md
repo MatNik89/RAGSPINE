@@ -1,4 +1,4 @@
-# RAGSPINE — postavljanje u uredu (LAN), korak po korak
+# ATLAS — postavljanje u uredu (LAN), korak po korak
 
 Vodič za **prvi install u knjigovodstvenom uredu**: lokalni RAG na jednom
 računalu (Raspberry Pi / mini PC), pristup preko LAN-a, jedan install po firmi.
@@ -26,29 +26,29 @@ Skripta kreira operatera; ako ideš ručno, korak 3 niže.
 
 ## 2. Tajne i okolina
 
-RAGSPINE sam generira JWT tajnu (`~/.ragspine/secret`, 0600) pri prvom pokretanju.
+ATLAS sam generira JWT tajnu (`~/.atlas/secret`, 0600) pri prvom pokretanju.
 Za produkciju postavi eksplicitno + zaključaj okolinu:
 
 ```bash
-export RAGSPINE_DATA_DIR=/var/lib/ragspine          # DB + tajna + modeli (chmod 0700 auto)
-export RAGSPINE_JWT_SECRET="$(openssl rand -hex 32)" # ili pusti auto-generiranje
-export RAGSPINE_MOUNT_ROOTS=/mnt/nas                  # dozvoljeni korijeni mrežnih mapa
-export RAGSPINE_HOST=0.0.0.0 RAGSPINE_PORT=8400       # LAN vidljivost
+export ATLAS_DATA_DIR=/var/lib/atlas          # DB + tajna + modeli (chmod 0700 auto)
+export ATLAS_JWT_SECRET="$(openssl rand -hex 32)" # ili pusti auto-generiranje
+export ATLAS_MOUNT_ROOTS=/mnt/nas                  # dozvoljeni korijeni mrežnih mapa
+export ATLAS_HOST=0.0.0.0 ATLAS_PORT=8400       # LAN vidljivost
 ```
 
 - **DB i tajna su 0600, data_dir 0700** — drže sav klijentski PII, pbkdf2
   hasheve i JWT tajnu. Ne stavljaj ih u mapu čitljivu drugim lokalnim korisnicima.
-- `RAGSPINE_MOUNT_ROOTS` je *jedini* korijen ispod kojeg se smiju registrirati/
+- `ATLAS_MOUNT_ROOTS` je *jedini* korijen ispod kojeg se smiju registrirati/
   čitati mape — bez njega su NAS funkcije isključene (sigurno zadano).
 
 ## 3. Operater (admin) i radnici
 
 ```bash
-ragspine auth add ana            # kreira korisnika (upit za lozinku) → prvi je owner
+atlas auth add ana            # kreira korisnika (upit za lozinku) → prvi je owner
 ```
 
 - Prvi korisnik = **owner** (puni pristup). Dodatne radnike dodaje owner kroz UI
-  (Postavke → Radnici) ili `ragspine auth add`.
+  (Postavke → Radnici) ili `atlas auth add`.
 - **Vidljivost klijenata po radniku**: zadano radnik vidi SVE klijente. Za
   ograničenje (radnik vidi samo svoje) — Postavke → Radnici → vidljivost. Tada
   su njegovi RAG upiti, bilješke, obavijesti, e-poruke i kartoni ograničeni na
@@ -57,10 +57,10 @@ ragspine auth add ana            # kreira korisnika (upit za lozinku) → prvi j
 ## 4. KLIJENTI mapa i dogovor strukture
 
 1. Registriraj postojeću NAS mapu `KLIJENTI` kao `role='klijenti'`
-   (Postavke → Mape). Mora ležati ispod `RAGSPINE_MOUNT_ROOTS`.
-2. **Ne nameći strukturu** — dogovori je kroz chat s RAGSPINE-om
+   (Postavke → Mape). Mora ležati ispod `ATLAS_MOUNT_ROOTS`.
+2. **Ne nameći strukturu** — dogovori je kroz chat s ATLAS-om
    (lane „arhitektura", admin-only): npr. „dogovor mape po klijentu: Osobni
-   dokumenti, Ugovori, Izvodi". RAGSPINE pamti dogovoreno i tek onda predlaže/
+   dokumenti, Ugovori, Izvodi". ATLAS pamti dogovoreno i tek onda predlaže/
    kreira mape koje nedostaju.
 3. Otkrivanje postojećih klijenata: Postavke → Uvoz/Otkrivanje (admin-only).
 
@@ -82,7 +82,7 @@ ragspine auth add ana            # kreira korisnika (upit za lozinku) → prvi j
 ## 7. Provjera prije puštanja
 
 ```bash
-ragspine doctor
+atlas doctor
 ```
 
 Mora biti ✓ na: `python_version`, `disk_space`, `db_writable`, `perms` (0600),
@@ -93,7 +93,7 @@ disk-enkripcija za PII at-rest), `nas` (registrirana KLIJENTI mapa), `ollama`/
 ## 8. Mrežna izloženost (bitno za produkciju)
 
 - **HTTPS**: iza reverse-proxyja (Caddy/nginx) na LAN-u. Uz HTTPS uključi
-  `RAGSPINE_HTTPS_ONLY=1` — tada cookie dobiva `Secure` + šalje se HSTS.
+  `ATLAS_HTTPS_ONLY=1` — tada cookie dobiva `Secure` + šalje se HSTS.
 - **Limit veličine tijela**: aplikacija odbija zahtjeve s `Content-Length`
   > 64MB, ali chunked/streaming bez headera hvata tek reverse-proxy — postavi
   `client_max_body_size 64m` (nginx) / ekvivalent.
@@ -103,7 +103,7 @@ disk-enkripcija za PII at-rest), `nas` (registrirana KLIJENTI mapa), `ollama`/
 
 ## 9. Brisanje podataka
 
-RAGSPINE **namjerno nema funkciju brisanja klijentskih podataka**. Knjigovodstvena
+ATLAS **namjerno nema funkciju brisanja klijentskih podataka**. Knjigovodstvena
 dokumentacija podliježe zakonskoj retenciji (Zakon o računovodstvu / porezni
 propisi — čuvanje godinama), pa se podaci klijenata **ne smiju brisati** na
 zahtjev. GDPR pravo na zaborav ne poništava zakonsku obvezu čuvanja.
