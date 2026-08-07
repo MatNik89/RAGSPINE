@@ -13,20 +13,24 @@ Tesseract auto-install s hrv+eng traineddata i TESSDATA_PREFIX fallbackom,
 "već instalirano" prepoznavanje, install.ps1 uskladba, OCR runtime kroz
 find_binary.
 
-Ostaje (redoslijedom prioriteta iz nalaza):
-1. Prečac na radnoj površini (sve platforme): Windows .lnk
-   (msedge/chrome --app=URL) + Start Menu; Linux .desktop; macOS .webloc.
-2. Cert bootstrap stranica (http://IP:8080/postavi) + prijateljsko ime
-   (fritz.box/mDNS) u SAN + doslovna uputa za radnike na stranici 6/6 +
-   fix upute "ragspine trust na klijentima" (CLI tamo ne postoji). Veći
-   komad — može zasebna grana.
-3. Pull s kvant sufiksom (llmfit kvant ≠ registry default) + usporedba
-   stvarne veličine nakon pulla.
-4. bge-m3 feature-detect / fastembed upgrade; MODEL_CATALOG trim na 2-3
-   fallback modela; kozmetika (fitz warning, miješane kose crte, getpass
-   za `atlas auth add`).
+Napravljeno u grani tui-facelift-3 (621fb9e): prečac na radnoj površini
+(atlas/ops/shortcut.py — .lnk app-prozor s .url fallbackom + Start Menu,
+.desktop, .webloc; automatski iz launch_nowa), pull s kvant sufiksom
+(quant_tags kandidati → goli tag + ⚠; ollama_model_size usporedba;
+sprema se stvarni tag), kozmetika (normpath data_dir, prigušeni fitz/
+fastembed warninzi, embed.supports guard — bge-m3 potvrđeno nepodržan na
+fastembed 0.8.0 pa se više ne nudi). MODEL_CATALOG stavka otpala (ne
+postoji u kodu); getpass za auth add već postojao.
 
-Parkirano iz reviewa tui-facelift-2 (uzeti usput):
+Ostaje:
+1. Cert bootstrap stranica (http://IP:8080/postavi) + prijateljsko ime
+   (fritz.box/mDNS) u SAN + doslovna uputa za radnike na stranici 6/6 +
+   fix upute "trust na klijentima" (CLI tamo ne postoji). Zasebna grana.
+
+Parkirano iz reviewa tui-facelift-2 i -3 (uzeti usput):
+- Promjena prečac varijante (.lnk ↔ .url) ostavlja stari artefakt na
+  Desktopu; GNOME "Allow Launching" confirm za .desktop.
+- PS skript bez escapea apostrofa u putanji (degradira na .url).
 - LocalService servis (winsvc) ne vidi HKCU env (TESSDATA_PREFIX/user
   PATH) — riješiti uz WinSW/NSSM wrapper fazu.
 - run_streaming: taskkill-fail grana može ostaviti unuka s pipeom (read
