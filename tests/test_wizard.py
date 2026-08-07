@@ -124,7 +124,7 @@ def test_page_mape_drive_warn_samo_za_remote(tmp_path, monkeypatch):
     wizard.page_mape(s, None,
                      input_fn=_reader("d", "3", "Z:\\skenovi", "n", "4", "4", "4"),
                      out=lines.append)
-    assert any("mrežni pogon" in l for l in lines)
+    assert any(l.strip().startswith("⚠ Mapirani mrežni pogon") for l in lines)
 
 
 def test_page_mape_lokalni_disk_bez_upozorenja(tmp_path, monkeypatch):
@@ -136,7 +136,7 @@ def test_page_mape_lokalni_disk_bez_upozorenja(tmp_path, monkeypatch):
     lines = []
     wizard.page_mape(s, None, input_fn=_reader("d", "3", str(d), "4", "4", "4"),
                      out=lines.append)
-    assert not any("mrežni pogon" in l for l in lines)
+    assert not any(l.strip().startswith("⚠ Mapirani mrežni pogon") for l in lines)
 
 
 def test_drive_warn_ne_windows_uvijek_false():

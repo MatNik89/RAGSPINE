@@ -353,7 +353,7 @@ def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
     wrapper backlog, v. winsvc); registracija ide u istu folders tablicu
     koju koristi web Postavke → Mrežne mape."""
     from atlas.business import folders
-    tui.print_header("5/6  Mape / mrežni resursi", out=out)
+    tui.print_header("5/6  Mape / mrežni pogoni", out=out)
     if not tui.prompt_yes_no("Poveži mrežne mape sada? (kasnije: Postavke → Mrežne mape)",
                              default=True, input_fn=input_fn, out=out):
         return True
