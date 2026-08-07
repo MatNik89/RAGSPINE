@@ -64,3 +64,58 @@ def test_serve_warns_when_cert_key_missing(cfg, monkeypatch, capsys):
     s.set_override("net", "key_path", str(Path(cfg.data_dir) / "nope-key.pem"))
     assert main(["serve"]) == 0
     assert "bez HTTPS" in capsys.readouterr().out
+
+
+def test_serve_starts_bootstrap_when_cert_present(cfg, monkeypatch, capsys):
+    """Kad cert/key postoje (HTTPS aktivan), serve mora pokrenuti bootstrap
+    HTTP server za radnike i ispisati uputu s /postavi adresom."""
+    import uvicorn
+    from atlas.core.spine import init_spine
+    from atlas.web import bootstrap_http
+
+    cert_p = Path(cfg.data_dir) / "cert.pem"
+    key_p = Path(cfg.data_dir) / "key.pem"
+    cert_p.write_text("cert"); key_p.write_text("key")
+
+    calls = {}
+
+    def fake_start(cert, https_url, host, port=8080):
+        calls["args"] = (cert, https_url, host, port)
+        return object()  # ne-None => "uspio"
+
+    monkeypatch.setattr(bootstrap_http, "start_bootstrap_server", fake_start)
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    s = init_spine(cfg.db_path)
+    s.set_override("net", "cert_path", str(cert_p))
+    s.set_override("net", "key_path", str(key_p))
+
+    assert main(["serve"]) == 0
+    assert calls["args"][0] == str(cert_p)
+    assert "https://" in calls["args"][1]
+    out = capsys.readouterr().out
+    assert "Bootstrap za radnike:" in out
+    assert "/postavi" in out
+
+
+def test_serve_bootstrap_port_zero_skips(cfg, monkeypatch, capsys):
+    """ATLAS_BOOTSTRAP_PORT=0 isključuje bootstrap server."""
+    import uvicorn
+    from atlas.core.spine import init_spine
+    from atlas.web import bootstrap_http
+
+    cert_p = Path(cfg.data_dir) / "cert.pem"
+    key_p = Path(cfg.data_dir) / "key.pem"
+    cert_p.write_text("cert"); key_p.write_text("key")
+
+    called = []
+    monkeypatch.setattr(bootstrap_http, "start_bootstrap_server",
+                        lambda *a, **k: called.append(1))
+    monkeypatch.setattr(uvicorn, "run", lambda *a, **k: None)
+    monkeypatch.setenv("ATLAS_BOOTSTRAP_PORT", "0")
+    s = init_spine(cfg.db_path)
+    s.set_override("net", "cert_path", str(cert_p))
+    s.set_override("net", "key_path", str(key_p))
+
+    assert main(["serve"]) == 0
+    assert not called
+    assert "Bootstrap za radnike:" not in capsys.readouterr().out

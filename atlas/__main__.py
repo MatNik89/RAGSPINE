@@ -22,6 +22,28 @@ def _net_overrides(spine, cfg):
     return host, port, cert, key
 
 
+def _start_bootstrap(cert: str, host: str, port: int) -> None:
+    """Bootstrap HTTP server za radnike (uz HTTPS server) — pomoć, ne uvjet:
+    ATLAS_BOOTSTRAP_PORT="0" isključuje, bind greška samo upozori (log)."""
+    from atlas import config
+    from atlas.ops import certs, preflight
+    from atlas.web.bootstrap_http import start_bootstrap_server, best_display_host
+
+    bport_raw = config._env("BOOTSTRAP_PORT", "8080")
+    if bport_raw == "0":
+        return
+    try:
+        bport = int(bport_raw)
+    except ValueError:
+        bport = 8080
+    url_host = preflight.local_ip() if host == "0.0.0.0" else host
+    display = best_display_host(certs.friendly_names(), url_host)
+    https_url = f"https://{display}:{port}"
+    thread = start_bootstrap_server(cert, https_url, host, port=bport)
+    if thread is not None:
+        print(f"Bootstrap za radnike: http://{display}:{bport}/postavi")
+
+
 def _cmd_serve(args) -> int:
     from atlas.config import get_config
     from atlas.core.spine import init_spine
@@ -38,6 +60,8 @@ def _cmd_serve(args) -> int:
             ssl_kw = {"ssl_certfile": cert, "ssl_keyfile": key}
         else:
             print(f"⚠ Cert/key ne postoje ({cert}, {key}) — pokrećem bez HTTPS-a.")
+    if ssl_kw:
+        _start_bootstrap(cert, host, port)
     uvicorn.run(create_app(spine, cfg), host=host, port=port,
                 server_header=False, **ssl_kw)
     return 0
