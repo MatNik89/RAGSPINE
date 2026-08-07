@@ -1,6 +1,6 @@
 import os
-from ragspine.ops import backup
-from ragspine.core.spine import init_spine
+from atlas.ops import backup
+from atlas.core.spine import init_spine
 from tests.conftest import complete_setup
 
 
@@ -14,7 +14,7 @@ def _seed(cfg):
 def test_create_and_verify(cfg):
     _seed(cfg)
     b = backup.create_backup(cfg, stamp="20260805-000001")
-    assert b["name"] == "ragspine-20260805-000001.db"
+    assert b["name"] == "atlas-20260805-000001.db"
     assert os.path.exists(b["path"]) and b["size"] > 0
     if os.name != "nt":
         import stat
@@ -63,7 +63,7 @@ def test_restore_replaces_db(cfg):
     # restore je CLI-operacija dok je server ZAUSTAVLJEN — test koristi zatvorene
     # konekcije (nema živog Spinea koji drži lock)
     import sqlite3
-    from ragspine.core.spine import SCHEMA
+    from atlas.core.spine import SCHEMA
     con = sqlite3.connect(cfg.db_path)
     con.executescript(SCHEMA)
     con.execute("INSERT INTO users(username, pw_hash, role) VALUES('ana','x','owner')")
@@ -92,8 +92,8 @@ def test_restore_rejects_bad_backup(cfg, tmp_path):
 
 def _admin(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     # app I backup moraju dijeliti istu bazu (u produkciji spine = cfg.db_path)
     s = init_spine(cfg.db_path)
     c = TestClient(create_app(s, cfg))
@@ -123,7 +123,7 @@ def test_backup_routes_admin(spine, cfg):
 
 def test_backup_routes_worker_forbidden(spine, cfg):
     c, h = _admin(spine, cfg)
-    from ragspine.web.deps import add_user
+    from atlas.web.deps import add_user
     add_user(init_spine(cfg.db_path), "boris", "pw", "radnik")  # ista baza kao app
     wtok = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
     wh = {"Authorization": f"Bearer {wtok}"}
@@ -131,12 +131,12 @@ def test_backup_routes_worker_forbidden(spine, cfg):
     assert c.get("/backup/list", headers=wh).status_code == 403
 
 
-def test_restore_rejects_non_ragspine_sqlite(cfg, tmp_path):
+def test_restore_rejects_non_atlas_sqlite(cfg, tmp_path):
     _seed(cfg)
     import sqlite3, pytest
     valid = tmp_path / "other.db"
     con = sqlite3.connect(str(valid)); con.execute("CREATE TABLE t(x)"); con.commit(); con.close()
-    with pytest.raises(ValueError):  # valjan sqlite ali nema RAGSPINE shemu
+    with pytest.raises(ValueError):  # valjan sqlite ali nema ATLAS shemu
         backup.restore_backup(cfg, str(valid))
 
 

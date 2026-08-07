@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
-from ragspine.rag import pipeline
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.rag import pipeline
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):
@@ -86,7 +86,7 @@ def test_chat_radi_s_cookiejem_iz_web_prijave(spine, cfg):
     """Web UI šalje /chat s cookiejem (credentials: same-origin), bez Bearer
     headera — E2E nalaz sa stroja Nick: require_actor (samo Bearer) vraćao 401
     svakom prijavljenom korisniku web chata."""
-    from ragspine.web.deps import COOKIE_NAME
+    from atlas.web.deps import COOKIE_NAME
     c = _client(spine, cfg)
     tok = _token(c, spine)
     c.cookies.set(COOKIE_NAME, tok)

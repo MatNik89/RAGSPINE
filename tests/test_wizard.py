@@ -1,7 +1,7 @@
-from ragspine.core.spine import init_spine
-from ragspine.core.security import verify_password
-from ragspine.ops import wizard, wizard_state as ws
-from ragspine.web import firstrun
+from atlas.core.spine import init_spine
+from atlas.core.security import verify_password
+from atlas.ops import wizard, wizard_state as ws
+from atlas.web import firstrun
 
 
 def _reader(*answers):
@@ -21,7 +21,7 @@ def _mreza_mocks(monkeypatch, tmp_path):
 
 
 def test_page_mreza_happy_path_saves_overrides(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     _mreza_mocks(monkeypatch, tmp_path)
 
@@ -39,7 +39,7 @@ def test_page_mreza_happy_path_saves_overrides(tmp_path, monkeypatch):
 
 
 def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     _mreza_mocks(monkeypatch, tmp_path)
     ports = iter([False, True])                     # prvi zauzet, drugi slobodan
@@ -59,7 +59,7 @@ def test_page_mape_preskok(tmp_path):
     s = init_spine(str(tmp_path / "t.db"))
     ok = wizard.page_mape(s, None, input_fn=_reader("n"), out=lambda *_: None)
     assert ok is True
-    from ragspine.business import folders
+    from atlas.business import folders
     assert folders.list_folders(s) == []
 
 
@@ -72,10 +72,10 @@ def test_page_mape_registrira_mapu(tmp_path):
     ok = wizard.page_mape(s, None, input_fn=_reader("d", str(d), "", "", ""),
                           out=lines.append)
     assert ok is True
-    from ragspine.business import folders
+    from atlas.business import folders
     rows = folders.list_folders(s)
     assert len(rows) == 1 and rows[0]["role"] == "klijenti"
-    assert any("RAGSPINE_MOUNT_ROOTS" in l for l in lines)
+    assert any("ATLAS_MOUNT_ROOTS" in l for l in lines)
 
 
 def test_page_mape_nedostupna_pa_odustane(tmp_path):
@@ -88,7 +88,7 @@ def test_page_mape_nedostupna_pa_odustane(tmp_path):
                           out=lines.append)
     assert ok is True
     assert any("net use" in l for l in lines)
-    from ragspine.business import folders
+    from atlas.business import folders
     assert folders.list_folders(s) == []
 
 
@@ -172,12 +172,12 @@ def test_page_preduvjeti_no_winget_offer_on_non_windows(monkeypatch):
 
 
 def test_cmd_setup_seeds_db(tmp_path, monkeypatch):
-    """`ragspine setup` mora i dalje sjati bazu (kontni plan, watch izvori...) —
+    """`atlas setup` mora i dalje sjati bazu (kontni plan, watch izvori...) —
     wizard mijenja UX, ne smije ispustiti staru seeds.all sporednu radnju."""
-    from ragspine.__main__ import main
-    from ragspine.ops import seeds
+    from atlas.__main__ import main
+    from atlas.ops import seeds
 
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     called = []
     monkeypatch.setattr(seeds, "all", lambda spine, year: called.append(year) or {})
     monkeypatch.setattr(wizard, "run", lambda spine, cfg, **kw: None)
@@ -219,7 +219,7 @@ def test_page_operater_skips_when_admin_exists(tmp_path):
 
 
 def test_run_handles_eof_without_traceback(spine, cfg, monkeypatch):
-    """Piped stdin / servis bez terminala (npr. `ragspine setup < /dev/null`)
+    """Piped stdin / servis bez terminala (npr. `atlas setup < /dev/null`)
     ne smije dati traceback — samo kratku uputu; resume ostaje na zadnjem
     dovršenom koraku. Preflight je mockan da ne udara na mrežu (Ollama/net)."""
     ok_reqs = [{"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""}]
@@ -253,8 +253,8 @@ def test_run_success_marks_setup_complete(spine, cfg, monkeypatch):
 
 
 def test_run_reaches_stage6_and_completes(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
-    from ragspine.ops import wizard_state as ws
+    from atlas.core.spine import init_spine
+    from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
     for p in ("page_preduvjeti", "page_operater", "page_model", "page_mreza", "page_mape", "page_gotovo"):
         monkeypatch.setattr(wizard, p, lambda *a, **k: True)
@@ -265,8 +265,8 @@ def test_run_reaches_stage6_and_completes(tmp_path, monkeypatch):
 
 
 def test_run_no_complete_when_model_page_cancelled(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
-    from ragspine.ops import wizard_state as ws
+    from atlas.core.spine import init_spine
+    from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
@@ -277,8 +277,8 @@ def test_run_no_complete_when_model_page_cancelled(tmp_path, monkeypatch):
 
 
 def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
-    from ragspine.ops import wizard_state as ws
+    from atlas.core.spine import init_spine
+    from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard, "page_preduvjeti", lambda *a, **k: True)
     monkeypatch.setattr(wizard, "page_operater", lambda *a, **k: True)
@@ -292,8 +292,8 @@ def test_run_no_complete_when_mreza_page_cancelled(tmp_path, monkeypatch):
 
 def test_run_resume_from_stage2_runs_pages_3_to_6(tmp_path, monkeypatch):
     """Resume od stage 2 pokreće stranice 3-6 (model, mreža, mape, sažetak) — ne ponavlja 1-2."""
-    from ragspine.core.spine import init_spine
-    from ragspine.ops import wizard_state as ws
+    from atlas.core.spine import init_spine
+    from atlas.ops import wizard_state as ws
     s = init_spine(str(tmp_path / "t.db"))
     ws.set_stage(s, 2)
     ran = []
@@ -316,7 +316,7 @@ def test_launch_now_odbijen_ne_pokrece_nista(tmp_path):
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
                       popen=lambda *a, **k: calls.append(a))
     assert calls == []
-    assert any("ragspine serve" in l for l in lines)
+    assert any("atlas serve" in l for l in lines)
 
 
 def test_launch_now_windows_pokrece_serve_i_edge(tmp_path, monkeypatch):
@@ -354,7 +354,7 @@ def test_launch_now_bez_mapa_env_none(tmp_path):
 
 def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path):
     import types
-    from ragspine.business import folders
+    from atlas.business import folders
     s = init_spine(str(tmp_path / "t.db"))
     mapa = tmp_path / "propisi"
     mapa.mkdir()
@@ -365,7 +365,7 @@ def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path):
                       popen=lambda cmd, **k: calls.append(k))
     env = calls[0]["env"]
     assert env is not None
-    assert str(mapa.resolve()) in env["RAGSPINE_MOUNT_ROOTS"].split(",")
+    assert str(mapa.resolve()) in env["ATLAS_MOUNT_ROOTS"].split(",")
 
 
 def test_launch_now_oserror_ne_rusi(tmp_path):
@@ -375,7 +375,7 @@ def test_launch_now_oserror_ne_rusi(tmp_path):
         raise OSError("nema binarke")
     lines = []
     wizard.launch_now(s, None, input_fn=_reader(""), out=lines.append, popen=_boom)
-    assert any("ragspine serve" in l for l in lines)
+    assert any("atlas serve" in l for l in lines)
 
 
 def test_launch_now_eof_tretira_kao_ne(tmp_path):
@@ -401,8 +401,8 @@ def test_choose_embed_model_fallback_on_small_ram():
 
 def test_setup_embedding_falls_back_on_download_error(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
-    from ragspine.config import Config
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    from atlas.config import Config
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     cfg = Config.from_env()
     calls = []
 
@@ -428,7 +428,7 @@ class _FakeRes:
 
 def test_self_test_ok_on_nonempty_answer(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
-    monkeypatch.setattr(wizard, "_llm_complete", lambda spine, cfg, prompt: _FakeRes("OK RAGSPINE"))
+    monkeypatch.setattr(wizard, "_llm_complete", lambda spine, cfg, prompt: _FakeRes("OK ATLAS"))
     lines = []
     assert wizard.self_test(s, None, input_fn=_reader(), out=lines.append) is True
     assert not any("upozorenje" in l.lower() for l in lines)
@@ -479,7 +479,7 @@ def test_render_llmfit_models_marks_first_as_recommendation():
 
 
 def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (False, "nema"))
     monkeypatch.setattr(wizard.preflight, "start_ollama", lambda **k: False)
@@ -489,7 +489,7 @@ def test_page_model_skip_branch_when_ollama_unavailable(tmp_path, monkeypatch):
 
 
 def test_page_model_skip_when_llmfit_unavailable(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
@@ -507,7 +507,7 @@ def test_page_model_skip_when_llmfit_unavailable(tmp_path, monkeypatch):
 def test_page_model_llmfit_missing_declines_install(tmp_path, monkeypatch):
     """Nalaz d: llmfit binary nema na PATH-u -> ponudi pip auto-install; 'ne' ->
     install_llmfit se ne zove."""
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
@@ -527,7 +527,7 @@ def test_page_model_llmfit_missing_declines_install(tmp_path, monkeypatch):
 
 def test_page_model_llmfit_missing_accepts_install(tmp_path, monkeypatch):
     """'da' -> install_llmfit se zove (pip, bez os.name provjere)."""
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
@@ -546,8 +546,8 @@ def test_page_model_llmfit_missing_accepts_install(tmp_path, monkeypatch):
 
 
 def test_page_model_full_happy_path(tmp_path, monkeypatch):
-    from ragspine.core.spine import init_spine
-    from ragspine.business import model_settings
+    from atlas.core.spine import init_spine
+    from atlas.business import model_settings
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.preflight, "ollama_ready", lambda url=None: (True, "radi"))
     monkeypatch.setattr(wizard.preflight, "ollama_version", lambda url=None: "0.6.0")
@@ -620,7 +620,7 @@ def test_page_gotovo_backup_greska_ne_rusi(tmp_path, monkeypatch):
     lines = []
     ok = wizard.page_gotovo(s, _Cfg(), input_fn=_reader("d"), out=lines.append)
     assert ok is True
-    assert any("ragspine backup" in l for l in lines)
+    assert any("atlas backup" in l for l in lines)
 
 
 def test_page_gotovo_ollama_putanja_windows(tmp_path, monkeypatch):

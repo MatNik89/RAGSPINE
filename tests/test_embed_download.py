@@ -1,5 +1,5 @@
-"""ragspine setup --download-models warmup: mockan (bez pravog network downloada)."""
-from ragspine.rag import embed
+"""atlas setup --download-models warmup: mockan (bez pravog network downloada)."""
+from atlas.rag import embed
 
 
 def test_download_model_reports_unavailable_without_deps(monkeypatch):
@@ -16,7 +16,7 @@ def test_download_model_success_path(monkeypatch, cfg):
     class _FakeTE:
         def __init__(self, model, cache_dir=None, local_files_only=False):
             assert local_files_only is False  # download MORA biti dozvoljen
-            assert cache_dir  # RAGSPINE-vlastiti trajni cache
+            assert cache_dir  # ATLAS-vlastiti trajni cache
             self.model = model
 
         def embed(self, texts):

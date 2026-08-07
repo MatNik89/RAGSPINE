@@ -1,4 +1,4 @@
-from ragspine.business import auditlog, notes
+from atlas.business import auditlog, notes
 
 
 def _client(spine, name="Alfa", oib="1"):

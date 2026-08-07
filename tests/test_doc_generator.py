@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.docs import doc_generator as dg
+from atlas.docs import doc_generator as dg
 
 
 def test_fill_template_replaces_placeholders():

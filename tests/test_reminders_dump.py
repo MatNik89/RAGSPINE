@@ -2,9 +2,9 @@ import json
 import os
 from datetime import date, timedelta
 
-from ragspine.business import expiry, kalendar
-from ragspine.ops import jobs, reminders_dump
-from ragspine.ops.scheduler import Scheduler
+from atlas.business import expiry, kalendar
+from atlas.ops import jobs, reminders_dump
+from atlas.ops.scheduler import Scheduler
 
 _TODAY = date(2026, 8, 1)
 

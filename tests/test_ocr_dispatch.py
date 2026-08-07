@@ -1,4 +1,4 @@
-from ragspine.docs import ocr
+from atlas.docs import ocr
 
 
 def test_uses_tesseract_when_enough(cfg, monkeypatch):

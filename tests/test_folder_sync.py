@@ -2,17 +2,17 @@ import os
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import folder_sync, folders
-from ragspine.config import Config, set_config
-from ragspine.rag import authority
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import folder_sync, folders
+from atlas.config import Config, set_config
+from atlas.rag import authority
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _cfg(tmp_path, roots):
     old = dict(os.environ)
-    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "d"),
-                       "RAGSPINE_MOUNT_ROOTS": ",".join(roots)})
+    os.environ.update({"ATLAS_DATA_DIR": str(tmp_path / "d"),
+                       "ATLAS_MOUNT_ROOTS": ",".join(roots)})
     try:
         cfg = Config.from_env()
     finally:
@@ -154,8 +154,8 @@ def test_folders_sync_endpoint_needs_auth(spine, tmp_path):
 
 
 def test_folders_sync_job_registered(spine, cfg):
-    from ragspine.ops import jobs
-    from ragspine.ops.scheduler import Scheduler
+    from atlas.ops import jobs
+    from atlas.ops.scheduler import Scheduler
     sched = Scheduler(spine, cfg)
     jobs.register_defaults(sched)
     assert "folders_sync" in {j.name for j in sched.jobs}

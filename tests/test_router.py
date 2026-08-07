@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.rag.router import route
+from atlas.rag.router import route
 
 
 @pytest.mark.parametrize(

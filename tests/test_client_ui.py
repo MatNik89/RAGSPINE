@@ -2,9 +2,9 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import checklist, expiry as expiry_mod, obveze
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import checklist, expiry as expiry_mod, obveze
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -96,11 +96,11 @@ def test_karton_json_has_expected_keys_and_seeded_data(spine, cfg):
     # go through the real onboarding flow (not a raw INSERT) so nas_folder is
     # properly scoped — otherwise list_documents() would resolve to the
     # shared data_dir root and pick up unrelated files.
-    from ragspine.business import onboarding
+    from atlas.business import onboarding
     cid = onboarding.create_client(
         spine, cfg, {"name": "Beta", "pdv_status": "u sustavu pdv", "pausal_eur": 180}, "ana"
     )["id"]
-    from ragspine.business import notes as notes_mod
+    from atlas.business import notes as notes_mod
     notes_mod.add(spine, cid, "ana", "Prva bilješka")
 
     with spine.write() as c:
@@ -166,7 +166,7 @@ def test_karton_json_best_effort_survives_section_failure(spine, cfg, monkeypatc
 
 def test_karton_json_xss_safe_client_name_and_note(spine, cfg):
     cid = _seed_client(spine, name="<script>alert(1)</script>", oib="22222222222")
-    from ragspine.business import notes as notes_mod
+    from atlas.business import notes as notes_mod
     notes_mod.add(spine, cid, "ana", "<b>bold</b> note")
 
     c = _client(spine, cfg)

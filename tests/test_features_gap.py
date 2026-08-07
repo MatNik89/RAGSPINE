@@ -1,7 +1,7 @@
-from ragspine.knowledge import features
-from ragspine.rag import pipeline
-from ragspine.docs import ingest as ing
-from ragspine.core.llm import LLMClient
+from atlas.knowledge import features
+from atlas.rag import pipeline
+from atlas.docs import ingest as ing
+from atlas.core.llm import LLMClient
 
 
 def _llm(cfg, text):

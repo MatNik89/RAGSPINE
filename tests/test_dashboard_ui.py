@@ -2,9 +2,9 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import dashboard, kalendar, expiry as expiry_mod
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import dashboard, kalendar, expiry as expiry_mod
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -115,7 +115,7 @@ def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
     period = today.strftime("%Y-%m")
 
     # unsent PDV obligation for Alfa this period
-    from ragspine.business import obveze
+    from atlas.business import obveze
     obveze.ensure_period(spine, "PDV", period)
 
     # past-due deadline
@@ -180,7 +180,7 @@ def test_urgency_thresholds():
 
 def test_dashboard_json_xss_safe_client_name(spine, cfg):
     _seed_client(spine, name="<script>alert(1)</script>", oib="22222222222")
-    from ragspine.business import obveze
+    from atlas.business import obveze
     period = date.today().strftime("%Y-%m")
     obveze.ensure_period(spine, "PDV", period)
 
@@ -271,7 +271,7 @@ def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
     monkeypatch.setattr(kalendar, "_today", lambda: today)
     for i in range(12):
         _seed_client(spine, name=f"Klijent{i}", oib=str(10000000000 + i))
-    from ragspine.business import obveze
+    from atlas.business import obveze
     period = today.strftime("%Y-%m")
     obveze.ensure_period(spine, "PDV", period)
 
@@ -283,15 +283,15 @@ def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
 
 
 def test_shell_uses_left_sidebar():
-    from ragspine.web.templates_ui import page_shell
+    from atlas.web.templates_ui import page_shell
     html = page_shell("Test", "<p>x</p>", active="home")
     assert 'class="sidebar"' in html
     assert '<main' in html
-    assert 'RAGSPINE' in html
+    assert 'ATLAS' in html
     assert 'aria-current' in html or 'class="active"' in html
 
 
 def test_dashboard_has_ocr_action_js():
-    from ragspine.web.templates_ui import dashboard_page
+    from atlas.web.templates_ui import dashboard_page
     html = dashboard_page()
     assert "/folders/" in html and "/ocr" in html and "OCR-aj mapu" in html

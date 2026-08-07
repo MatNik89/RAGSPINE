@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import cjenik
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import cjenik
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client_row(spine, name="Alfa", oib="1", pausal_eur=0, pdv_status="nije u pdvu"):

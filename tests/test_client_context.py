@@ -1,7 +1,7 @@
-from ragspine.business import notes, sop
-from ragspine.rag import cache, client_context, pipeline
-from ragspine.docs import ingest as ing
-from ragspine.core.llm import LLMClient
+from atlas.business import notes, sop
+from atlas.rag import cache, client_context, pipeline
+from atlas.docs import ingest as ing
+from atlas.core.llm import LLMClient
 
 
 def _client(spine, name, oib):

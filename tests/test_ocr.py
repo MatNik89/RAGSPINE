@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.core import optional
-from ragspine.docs import ocr
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.core import optional
+from atlas.docs import ocr
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 fitz = optional.need("fitz", "OCR/PDF")
 

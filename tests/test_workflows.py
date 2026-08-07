@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from ragspine.browser import sessions, workflows
+from atlas.browser import sessions, workflows
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "recorder.json").read_text(encoding="utf-8"))
 

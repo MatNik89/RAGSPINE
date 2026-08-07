@@ -1,8 +1,8 @@
 from datetime import date, timedelta
 
-from ragspine.business import expiry, kalendar
-from ragspine.ops import digest
-from ragspine.ops.scheduler import Scheduler
+from atlas.business import expiry, kalendar
+from atlas.ops import digest
+from atlas.ops.scheduler import Scheduler
 
 
 def _client(spine, name, owner=""):
@@ -110,7 +110,7 @@ def test_digest_job_one_digest_regardless_of_users(spine, cfg):
 
 
 def test_register_defaults_includes_digest(spine, cfg):
-    from ragspine.ops import jobs
+    from atlas.ops import jobs
 
     sched = Scheduler(spine, cfg)
     jobs.register_defaults(sched)
@@ -122,9 +122,9 @@ def test_register_defaults_includes_digest(spine, cfg):
 
 
 def test_cli_digest_prints_report(tmp_path, monkeypatch, capsys):
-    from ragspine.__main__ import main
+    from atlas.__main__ import main
 
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     assert main(["digest"]) == 0
     out = capsys.readouterr().out
     assert "Jutarnji pregled" in out

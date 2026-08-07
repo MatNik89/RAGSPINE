@@ -2,10 +2,10 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import dashboard, expiry, kalendar, monthly
-from ragspine.rag import pipeline
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import dashboard, expiry, kalendar, monthly
+from atlas.rag import pipeline
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _seed(spine):
@@ -139,11 +139,11 @@ def test_pipeline_monthly_intent(spine, cfg, monkeypatch):
 
 def test_home_data_has_orientation(spine, tmp_path):
     import os
-    from ragspine.business import dashboard, folders, folder_scan
-    from ragspine.config import Config
+    from atlas.business import dashboard, folders, folder_scan
+    from atlas.config import Config
     old = dict(os.environ)
-    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "data"),
-                       "RAGSPINE_MOUNT_ROOTS": str(tmp_path / "share")})
+    os.environ.update({"ATLAS_DATA_DIR": str(tmp_path / "data"),
+                       "ATLAS_MOUNT_ROOTS": str(tmp_path / "share")})
     try:
         cfg = Config.from_env()
     finally:

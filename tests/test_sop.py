@@ -1,10 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.business import sop
-from ragspine.rag import authority, retrieval
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import sop
+from atlas.rag import authority, retrieval
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):

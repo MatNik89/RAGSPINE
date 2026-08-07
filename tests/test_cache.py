@@ -1,4 +1,4 @@
-from ragspine.rag import cache
+from atlas.rag import cache
 
 def test_roundtrip_and_normalize(spine):
     cache.put(spine, "Koliki je PDV?", "25% [1]")

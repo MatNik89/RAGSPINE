@@ -1,9 +1,9 @@
 # tests/test_winsvc.py  (novi)
-from ragspine.ops import winsvc
+from atlas.ops import winsvc
 
 
 def test_service_commands_shapes():
-    cmds = winsvc.service_commands("C:/rs/ragspine.exe", "C:/data", 8443)
+    cmds = winsvc.service_commands("C:/rs/atlas.exe", "C:/data", 8443)
     assert all(isinstance(c, list) for c in cmds)
     flat = [" ".join(c) for c in cmds]
     assert any("sc.exe" in f and "create" in f and "LocalService" in f for f in flat)
@@ -14,7 +14,7 @@ def test_service_commands_shapes():
     create_cmd = cmds[0]
     assert "binPath=" in create_cmd
     binpath_idx = create_cmd.index("binPath=")
-    assert create_cmd[binpath_idx + 1] == "C:/rs/ragspine.exe serve"
+    assert create_cmd[binpath_idx + 1] == "C:/rs/atlas.exe serve"
     assert "obj=" in create_cmd
     obj_idx = create_cmd.index("obj=")
     assert create_cmd[obj_idx + 1] == "NT AUTHORITY\\LocalService"
@@ -67,11 +67,11 @@ def test_install_service_non_windows_prints_systemd(monkeypatch):
     called = []
     monkeypatch.setattr(winsvc, "run_isolated", lambda *a, **k: called.append(1) or (0, "", ""))
     lines = []
-    assert winsvc.install_service("/usr/bin/ragspine", "/var/rs", 8443, out=lines.append) is False
+    assert winsvc.install_service("/usr/bin/atlas", "/var/rs", 8443, out=lines.append) is False
     assert not called
     assert any("[Unit]" in l or "systemd" in l.lower() for l in lines)
 
 
 def test_systemd_unit_content():
-    u = winsvc.systemd_unit("/usr/bin/ragspine", "/var/rs")
-    assert "[Service]" in u and "Restart=on-failure" in u and "/usr/bin/ragspine serve" in u
+    u = winsvc.systemd_unit("/usr/bin/atlas", "/var/rs")
+    assert "[Service]" in u and "Restart=on-failure" in u and "/usr/bin/atlas serve" in u

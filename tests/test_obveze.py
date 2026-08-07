@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import obveze
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import obveze
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -72,7 +72,7 @@ def test_login_sets_cookie(spine, cfg):
     add_user(spine, "ana", "tajna")
     r = c.post("/auth/login", json={"username": "ana", "password": "tajna"})
     assert r.status_code == 200
-    assert "ragspine_token" in r.cookies
+    assert "atlas_token" in r.cookies
 
 
 def test_obveze_via_cookie_only(spine, cfg):
@@ -81,7 +81,7 @@ def test_obveze_via_cookie_only(spine, cfg):
     add_user(spine, "ana", "tajna")
     complete_setup(spine)
     c.post("/auth/login", json={"username": "ana", "password": "tajna"})
-    assert "ragspine_token" in c.cookies  # persisted on the client's cookie jar
+    assert "atlas_token" in c.cookies  # persisted on the client's cookie jar
     r = c.get("/obveze?kind=PDV&period=2026-07")  # no Authorization header
     assert r.status_code == 200
     assert "Alfa" in r.text

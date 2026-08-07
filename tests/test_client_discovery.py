@@ -1,13 +1,13 @@
 import os
 
-from ragspine.business import client_discovery, folders
-from ragspine.config import Config
+from atlas.business import client_discovery, folders
+from atlas.config import Config
 
 
 def _cfg_roots(tmp_path, roots):
     old = dict(os.environ)
-    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "data"),
-                       "RAGSPINE_MOUNT_ROOTS": ",".join(roots)})
+    os.environ.update({"ATLAS_DATA_DIR": str(tmp_path / "data"),
+                       "ATLAS_MOUNT_ROOTS": ",".join(roots)})
     try:
         return Config.from_env()
     finally:

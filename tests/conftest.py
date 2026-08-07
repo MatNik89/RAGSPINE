@@ -1,13 +1,13 @@
 import pytest
-from ragspine.config import Config, set_config
-from ragspine.core.spine import Spine
+from atlas.config import Config, set_config
+from atlas.core.spine import Spine
 
 
 @pytest.fixture(autouse=True)
 def _reset_embed_globals():
     """embed drži učitani model u modul-globalu; bez reseta procuri između
     testova (npr. fake iz test_embed_download u kasnije retrieval testove)."""
-    from ragspine.rag import embed
+    from atlas.rag import embed
     embed._model = None
     embed._model_failed = False
     yield
@@ -18,7 +18,7 @@ def _reset_embed_globals():
 @pytest.fixture(autouse=True)
 def _reset_llmfit_cache():
     """llmfit keš po procesu ne smije procuriti između testova."""
-    from ragspine.ops import preflight
+    from atlas.ops import preflight
     preflight._llmfit_cache = None
     yield
     preflight._llmfit_cache = None
@@ -26,7 +26,7 @@ def _reset_llmfit_cache():
 
 @pytest.fixture
 def cfg(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     c = Config.from_env(); set_config(c)
     yield c
     set_config(None)
@@ -40,5 +40,5 @@ def complete_setup(spine):
     """Gatekeeper drži web na /ui/setup dok setup wizard ne završi — testovi
     koji gađaju API/UI rute ovim označe setup dovršenim (jedno mjesto za
     incantation umjesto raspršenih wizard_state.mark_complete poziva)."""
-    from ragspine.ops import wizard_state
+    from atlas.ops import wizard_state
     wizard_state.mark_complete(spine)

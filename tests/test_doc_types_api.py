@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -68,7 +68,7 @@ def test_doc_types_field_coercion_and_types(spine, cfg):
 
 
 def test_extract_endpoint(spine, cfg):
-    from ragspine.docs.ingest import ingest_text
+    from atlas.docs.ingest import ingest_text
     c, h = _client(spine, cfg)
     doc_id = ingest_text(spine, "Broj: 12345\nDatum isteka: 01.02.2027\n" * 10,
                          title="osobna.pdf")

@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.business.dnevnice import obracun, RATES
+from atlas.business.dnevnice import obracun, RATES
 
 
 def test_full_and_half_days():

@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import feedback_learn, kategorizacija, knjizenje
-from ragspine.rag import pipeline
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import feedback_learn, kategorizacija, knjizenje
+from atlas.rag import pipeline
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def test_categorize_reprezentacija_half_deductible():

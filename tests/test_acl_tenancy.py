@@ -1,7 +1,7 @@
 import pytest
 
-from ragspine.business import acl, tenancy
-from ragspine.business.acl import Actor, Asset
+from atlas.business import acl, tenancy
+from atlas.business.acl import Actor, Asset
 
 
 def _asset(org=1, owner=10, vis="private", team=None, at="doc", aid=1):

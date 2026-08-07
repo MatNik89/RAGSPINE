@@ -1,9 +1,9 @@
 import pytest
 
-from ragspine.core.llm import LLMError, LLMResult
-from ragspine.rag import selfrag
-from ragspine.rag.retrieval import Hit
-from ragspine.web import websearch
+from atlas.core.llm import LLMError, LLMResult
+from atlas.rag import selfrag
+from atlas.rag.retrieval import Hit
+from atlas.web import websearch
 
 _DDG_HTML = b"""
 <div class="results">

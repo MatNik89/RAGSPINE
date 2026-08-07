@@ -1,7 +1,7 @@
 """Restringirani radnik ne smije vidjeti agregate/imena skrivenih klijenata kroz
 monthly/clarify/sql lane (Codex #2). visible=None → bez filtera (manager)."""
-from ragspine.business import monthly
-from ragspine.rag import clarify, sql_lane
+from atlas.business import monthly
+from atlas.rag import clarify, sql_lane
 
 
 def _clients(spine, *specs):
@@ -70,10 +70,10 @@ def test_clarify_hides_hidden_client_variants(spine):
 
 
 def test_answer_sql_scoped_for_restricted_actor(spine, cfg):
-    from ragspine.rag import pipeline
-    from ragspine.business.acl import Actor
-    from ragspine.business import client_visibility as cv
-    from ragspine.web.deps import add_user
+    from atlas.rag import pipeline
+    from atlas.business.acl import Actor
+    from atlas.business import client_visibility as cv
+    from atlas.web.deps import add_user
     ids = _clients(spine, ("Alfa", "1"), ("Beta", "2"), ("Cezar", "3"))
     add_user(spine, "boris", "pw")
     uid = spine.read().execute("SELECT id FROM users WHERE username='boris'").fetchone()["id"]
@@ -88,7 +88,7 @@ def test_answer_sql_scoped_for_restricted_actor(spine, cfg):
 
 
 def test_monthly_unsent_obveze_scoped(spine):
-    from ragspine.business import obveze
+    from atlas.business import obveze
     ids = _clients(spine, ("Alfa", "1"), ("Beta", "2"))
     with spine.write() as c:
         for cid in (ids["Alfa"], ids["Beta"]):
@@ -102,7 +102,7 @@ def test_monthly_unsent_obveze_scoped(spine):
 
 
 def test_graph_lane_scoped(spine):
-    from ragspine.rag import graphrag
+    from atlas.rag import graphrag
     ids = _clients(spine, ("Alfa", "1"), ("Beta", "2"))
     oib = "12345678903"
     with spine.write() as c:

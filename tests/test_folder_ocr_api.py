@@ -3,17 +3,17 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.business import folders
-from ragspine.config import Config
-from ragspine.docs import ocr
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import folders
+from atlas.config import Config
+from atlas.docs import ocr
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _cfg(tmp_path, share):
     old = dict(os.environ)
-    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "d"),
-                       "RAGSPINE_MOUNT_ROOTS": str(share)})
+    os.environ.update({"ATLAS_DATA_DIR": str(tmp_path / "d"),
+                       "ATLAS_MOUNT_ROOTS": str(share)})
     try:
         return Config.from_env()
     finally:

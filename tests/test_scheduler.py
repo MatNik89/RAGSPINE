@@ -1,9 +1,9 @@
 import datetime
 import threading
 
-from ragspine.config import Config
-from ragspine.core.spine import Spine
-from ragspine.ops.scheduler import Job, Scheduler
+from atlas.config import Config
+from atlas.core.spine import Spine
+from atlas.ops.scheduler import Job, Scheduler
 
 
 class Clock:
@@ -117,19 +117,19 @@ def test_run_exits_promptly_on_stop_event(tmp_path):
 
 
 def test_apprise_urls_and_digest_hour(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RAGSPINE_APPRISE_URLS", "a://x,b://y")
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_APPRISE_URLS", "a://x,b://y")
     cfg = Config.from_env()
     assert cfg.apprise_urls == ["a://x", "b://y"]
     assert cfg.digest_hour == 7
 
 
 def test_digest_hour_env_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("RAGSPINE_DIGEST_HOUR", "9")
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DIGEST_HOUR", "9")
     assert Config.from_env().digest_hour == 9
 
 
 def test_apprise_urls_default_empty(tmp_path, monkeypatch):
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     assert Config.from_env().apprise_urls == []

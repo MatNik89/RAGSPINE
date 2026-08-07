@@ -1,4 +1,4 @@
-from ragspine.rag import sql_lane
+from atlas.rag import sql_lane
 
 def _seed(spine):
     with spine.write() as c:

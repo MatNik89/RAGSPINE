@@ -1,6 +1,6 @@
 from datetime import date
 
-from ragspine.business import obveze, rokovi
+from atlas.business import obveze, rokovi
 
 
 def test_holidays_fixed_and_movable_2026():
@@ -69,8 +69,8 @@ def test_generate_reconciles_legacy_unshifted_date(spine):
 
 
 def test_rokovi_job_registered(spine, cfg):
-    from ragspine.ops import jobs
-    from ragspine.ops.scheduler import Scheduler
+    from atlas.ops import jobs
+    from atlas.ops.scheduler import Scheduler
     sched = Scheduler(spine, cfg)
     jobs.register_defaults(sched)
     assert "rokovi" in {j.name for j in sched.jobs}
@@ -88,7 +88,7 @@ def test_pdv_rok_2026_zadnji_dan_mjeseca():
 def test_migracija_pdv_rok_na_kraj_mjeseca(tmp_path):
     """Postojeća baza sa starim default pravilom monthly:20 za PDV/PDV-S/ZP
     dobije monthly:31 pri otvaranju (zakonska promjena 2026)."""
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     db = str(tmp_path / "t.db")
     s1 = init_spine(db)
     with s1.write() as c:

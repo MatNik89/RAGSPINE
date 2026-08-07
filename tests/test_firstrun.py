@@ -2,11 +2,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.core.spine import init_spine
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
-from ragspine.web import firstrun
-from ragspine.ops import preflight, wizard_state as ws
+from atlas.core.spine import init_spine
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
+from atlas.web import firstrun
+from atlas.ops import preflight, wizard_state as ws
 
 
 @pytest.fixture(autouse=True)

@@ -1,6 +1,6 @@
 """Telegram gateway: split, pairing, auth, handle_update — mockano (bez mreže)."""
-from ragspine.business import telegram_gateway as tg
-from ragspine.web.deps import add_user
+from atlas.business import telegram_gateway as tg
+from atlas.web.deps import add_user
 
 
 class FakeTG:
@@ -11,7 +11,7 @@ class FakeTG:
 def _seed_user(spine, name="ana"):
     add_user(spine, name, "pw")
     uid = spine.read().execute("SELECT id FROM users WHERE username=?", (name,)).fetchone()["id"]
-    from ragspine.business import tenancy
+    from atlas.business import tenancy
     org = tenancy.create_org(spine, "Ured", uid)  # ana owner
     return uid, org
 
@@ -83,7 +83,7 @@ def test_offset_persistence(spine):
 
 def _admin(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
+    from atlas.web.api import create_app
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")
     tok = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]

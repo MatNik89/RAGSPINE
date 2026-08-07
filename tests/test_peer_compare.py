@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import peer_compare
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import peer_compare
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def test_norm_groups_by_kind_numbers_and_dates():

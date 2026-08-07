@@ -1,6 +1,6 @@
 from datetime import date
 
-from ragspine.business import nldate
+from atlas.business import nldate
 
 _NOW = date(2026, 8, 5)  # Wednesday
 

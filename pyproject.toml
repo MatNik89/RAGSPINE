@@ -3,13 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ragspine"
+name = "atlas"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = ["fastapi>=0.110", "uvicorn>=0.29", "pydantic>=2", "python-multipart>=0.0.9", "cryptography", "llmfit>=1.1"]
 
 [project.scripts]
-ragspine = "ragspine.__main__:main"
+atlas = "atlas.__main__:main"
+ragspine = "atlas.__main__:main"  # compat: stari CLI, do v2
 
 [project.optional-dependencies]
 full = ["pymupdf", "fastembed", "sqlite-vec", "python-docx", "openpyxl", "apprise"]
@@ -19,4 +20,4 @@ mail = ["exchangelib", "msal", "requests"]
 testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
-include = ["ragspine*"]
+include = ["atlas*"]

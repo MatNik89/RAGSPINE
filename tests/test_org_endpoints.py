@@ -1,9 +1,9 @@
 """Faza D spojnog tkiva: /org members + /wiki + /skills endpointi i ekrani."""
 from fastapi.testclient import TestClient
 
-from ragspine.knowledge import wiki
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.knowledge import wiki
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -134,7 +134,7 @@ def test_member_cannot_edit_foreign_skill(spine, cfg):
 def test_ui_pages_render(spine, cfg):
     c = _client(spine, cfg)
     tok = _tok(c, spine, "ana")
-    c.cookies.set("ragspine_token", tok)
+    c.cookies.set("atlas_token", tok)
     for path in ("/ui/org", "/ui/wiki", "/ui/skills", "/ui/postavke"):
         r = c.get(path)
         assert r.status_code == 200, path

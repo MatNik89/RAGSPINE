@@ -4,8 +4,8 @@ import os
 
 import pytest
 
-from ragspine.business import folder_architecture as fa
-from ragspine.business import folders, onboarding
+from atlas.business import folder_architecture as fa
+from atlas.business import folders, onboarding
 
 
 def _mk_klijenti(cfg, tmp_path, *clients_with_subdirs):
@@ -106,7 +106,7 @@ def test_onboarding_creates_client_in_registered_klijenti(spine, cfg, tmp_path):
 
 
 def _admin():
-    from ragspine.business.acl import Actor
+    from atlas.business.acl import Actor
     return Actor(user_id=1, org_id=1, role="owner", username="gazda")
 
 
@@ -125,7 +125,7 @@ def test_chat_lane_agreement_saved_and_overview(spine, cfg, tmp_path):
 
 
 def test_chat_lane_requires_admin_and_anchors_commands(spine, cfg, tmp_path):
-    from ragspine.business.acl import Actor
+    from atlas.business.acl import Actor
     # ne-admin: nema spremanja, nema NAS putanja
     out = fa.handle(spine, cfg, "dogovor mape po klijentu: Zlo", llm=None,
                     actor=Actor(user_id=2, org_id=1, role="member", username="boris"))
@@ -139,7 +139,7 @@ def test_chat_lane_requires_admin_and_anchors_commands(spine, cfg, tmp_path):
 
 
 def test_router_routes_to_arhitektura():
-    from ragspine.rag import router
+    from atlas.rag import router
     assert router.route("dogovor mape po klijentu: Ugovori") == "arhitektura"
     assert router.route("arhitektura mapa") == "arhitektura"
     # široki substringovi ne otimaju chat
@@ -150,8 +150,8 @@ def test_router_routes_to_arhitektura():
 
 def test_api_admin_only_and_flow(spine, cfg, tmp_path):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     from tests.conftest import complete_setup
 
     root = _mk_klijenti(cfg, tmp_path, ("PERIĆ PERO", []))

@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.knowledge import skills
+from atlas.knowledge import skills
 
 
 def test_create_and_get(spine):

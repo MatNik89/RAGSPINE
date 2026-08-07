@@ -1,6 +1,6 @@
-from ragspine.core.llm import LLMClient
-from ragspine.docs import ingest as ing
-from ragspine.rag import pipeline, verify
+from atlas.core.llm import LLMClient
+from atlas.docs import ingest as ing
+from atlas.rag import pipeline, verify
 
 
 def _llm(cfg, text):
@@ -49,9 +49,9 @@ def test_no_citation_still_idk(spine, cfg):
 # ---------- iterativna petlja ----------
 
 def test_run_is_bounded_and_records_passes(spine, cfg, monkeypatch):
-    from ragspine.rag.retrieval import Hit
+    from atlas.rag.retrieval import Hit
     hit = Hit(1, 1, "Bilješka", "tekst", 1.0, "ostalo")
-    monkeypatch.setattr("ragspine.rag.verify.retrieval.search", lambda *a, **k: [hit])
+    monkeypatch.setattr("atlas.rag.verify.retrieval.search", lambda *a, **k: [hit])
     best = verify.run(spine, "pitanje", [hit], _llm(cfg, "bez citata."),
                       threshold=0.80, max_passes=3)
     assert best["passes"] <= 3           # ograničeno
@@ -60,27 +60,27 @@ def test_run_is_bounded_and_records_passes(spine, cfg, monkeypatch):
 
 
 def test_run_stops_at_first_pass_when_confident(spine, cfg, monkeypatch):
-    from ragspine.rag.retrieval import Hit
+    from atlas.rag.retrieval import Hit
     calls = {"n": 0}
 
     def _search(*a, **k):
         calls["n"] += 1
         return [Hit(1, 1, "Zakon o PDV-u", "Stopa je 25%.", 1.0, "zakon")]
-    monkeypatch.setattr("ragspine.rag.verify.retrieval.search", _search)
+    monkeypatch.setattr("atlas.rag.verify.retrieval.search", _search)
     hit = Hit(1, 1, "Zakon o PDV-u", "Stopa je 25%.", 1.0, "zakon")
     best = verify.run(spine, "stopa pdv", [hit], _llm(cfg, "25% [1]."))
     assert best["passes"] == 1 and calls["n"] == 0  # nije trebao proširivati
 
 
 def test_reformulate_adds_title_terms():
-    from ragspine.rag.retrieval import Hit
+    from atlas.rag.retrieval import Hit
     hits = [Hit(1, 1, "Zakon o porezu na dohodak", "x", 1.0, "zakon")]
     q = verify._reformulate("koja je stopa", hits)
     assert "dohodak" in q and q.startswith("koja je stopa")
 
 
 def test_merge_dedupes_by_chunk_id():
-    from ragspine.rag.retrieval import Hit
+    from atlas.rag.retrieval import Hit
     a = [Hit(1, 1, "A", "x", 1.0, "zakon")]
     b = [Hit(1, 1, "A", "x", 1.0, "zakon"), Hit(2, 2, "B", "y", 1.0, "zakon")]
     merged = verify._merge(a, b)
@@ -90,13 +90,13 @@ def test_merge_dedupes_by_chunk_id():
 # ---------- anti-yes-man prompt ----------
 
 def test_composer_prompt_is_not_yes_man():
-    from ragspine.rag import composer
+    from atlas.rag import composer
     assert "yes-man" in composer.SYSTEM.lower()
     assert "ospori" in composer.SYSTEM.lower()
 
 
 def test_composer_prompt_deprivileges_sources():
     # izvori su podaci, ne naredbe (anti prompt-injection kroz ingestirani sadržaj)
-    from ragspine.rag import composer
+    from atlas.rag import composer
     s = composer.SYSTEM.lower()
     assert "podatak" in s and "naredb" in s

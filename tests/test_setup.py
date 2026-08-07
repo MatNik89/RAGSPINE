@@ -1,12 +1,12 @@
-from ragspine.business.dnevnice import RATES
-from ragspine.ops import seeds, setup
+from atlas.business.dnevnice import RATES
+from atlas.ops import seeds, setup
 
 
 def test_seeds_all_counts(spine):
     counts = seeds.all(spine, 2026)
     assert counts["kontni_plan"] >= 40
     assert counts["watch"] >= 4
-    from ragspine.business import quickref
+    from atlas.business import quickref
     assert counts["quickref"] == len(quickref.SEED)
     assert counts["kalendar"] > 20
     assert counts["dnevnice"] == len(RATES)

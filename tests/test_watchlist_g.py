@@ -1,8 +1,8 @@
 """Piece G: vlastite ključne riječi + keyword_hit obavijest + Excel izvoz + UI."""
 import pytest
 
-from ragspine.core import optional
-from ragspine.web import watchlist
+from atlas.core import optional
+from atlas.web import watchlist
 
 openpyxl = optional.need("openpyxl", "test xlsx")
 
@@ -61,8 +61,8 @@ def test_export_xlsx_roundtrip(spine, cfg):
 
 def test_api_keywords_upcoming_toggle_page(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
 
     from tests.conftest import complete_setup
 

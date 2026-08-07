@@ -5,11 +5,11 @@ import stat
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.core import lan
-from ragspine.core.spine import Spine
-from ragspine.web import watchlist as w
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.core import lan
+from atlas.core.spine import Spine
+from atlas.web import watchlist as w
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):
@@ -22,7 +22,7 @@ def test_security_headers_present(spine, cfg):
     assert r.headers["X-Frame-Options"] == "DENY"
     assert "frame-ancestors 'none'" in r.headers["Content-Security-Policy"]
     assert r.headers["Referrer-Policy"] == "no-referrer"
-    assert r.headers["Server"] == "RAGSPINE"
+    assert r.headers["Server"] == "ATLAS"
 
 
 def test_oversized_body_rejected(spine, cfg):

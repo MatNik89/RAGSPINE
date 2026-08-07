@@ -5,8 +5,8 @@ import threading
 
 import pytest
 
-from ragspine.business import devices
-from ragspine.core import lan, optional
+from atlas.business import devices
+from atlas.core import lan, optional
 
 fitz = optional.need("fitz", "test PDF")
 
@@ -207,8 +207,8 @@ def test_scan_wrong_kind_rejected(spine, cfg):
 
 def test_api_devices_admin_gate_and_scan(spine, cfg, device_server):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     from tests.conftest import complete_setup
 
     c = TestClient(create_app(spine, cfg))
@@ -274,8 +274,8 @@ def test_escl_cross_origin_location_rejected(device_server, monkeypatch):
 
 def test_print_guarded_by_client_visibility(spine, cfg, tmp_path, device_server):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
 
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "gazda", "pw")

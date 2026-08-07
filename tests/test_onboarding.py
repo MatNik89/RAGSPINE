@@ -4,10 +4,10 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.business import onboarding
-from ragspine.rag import retrieval
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import onboarding
+from atlas.rag import retrieval
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 VALID_OIB = "10000000000"
 BAD_OIB = "12345678901"

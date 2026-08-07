@@ -1,4 +1,4 @@
-from ragspine.business import quickref
+from atlas.business import quickref
 
 
 def test_seed_inserts_all_then_zero(spine):

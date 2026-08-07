@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from ragspine.docs import ingest as ing
-from ragspine.rag import embed, retrieval
+from atlas.docs import ingest as ing
+from atlas.rag import embed, retrieval
 
 
 def _seed(spine):
@@ -42,8 +42,8 @@ def test_empty_query_returns_empty(spine):
 
 
 @pytest.mark.skipif(not embed.available(), reason="fastembed/sqlite_vec nisu instalirani")
-@pytest.mark.skipif(os.environ.get("RAGSPINE_TEST_EMBED") != "1",
-                     reason="postavi RAGSPINE_TEST_EMBED=1 za pravo učitavanje modela (mrežni download)")
+@pytest.mark.skipif(os.environ.get("ATLAS_TEST_EMBED") != "1",
+                     reason="postavi ATLAS_TEST_EMBED=1 za pravo učitavanje modela (mrežni download)")
 def test_vec_path_with_real_model(spine):
     _seed(spine)
     hits = retrieval.search(spine, "PDV stopa")

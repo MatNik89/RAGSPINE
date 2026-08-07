@@ -2,9 +2,9 @@ import threading
 
 from fastapi.testclient import TestClient
 
-from ragspine.browser.bridge import Bridge
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.browser.bridge import Bridge
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def test_enqueue_next_cmd_post_result_roundtrip():

@@ -1,4 +1,4 @@
-from ragspine.web import learn as l
+from atlas.web import learn as l
 
 HTML = b"<html><body>Grad Sisak: stopa prireza 10%. Split 15%.</body></html>"
 

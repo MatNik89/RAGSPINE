@@ -1,5 +1,5 @@
 import time, pytest, hashlib
-from ragspine.core import security as sec
+from atlas.core import security as sec
 
 def test_new_hash_uses_600k_and_verifies():
     h = sec.hash_password("tajna123")

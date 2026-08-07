@@ -1,5 +1,5 @@
-from ragspine.business import sop
-from ragspine.rag import clarify, pipeline
+from atlas.business import sop
+from atlas.rag import clarify, pipeline
 
 
 def _client(spine, name, oib):

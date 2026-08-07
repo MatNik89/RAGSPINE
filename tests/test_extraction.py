@@ -1,8 +1,8 @@
 import pytest
 
-from ragspine.business import doc_registry
-from ragspine.docs import extraction
-from ragspine.docs.ingest import ingest_text
+from atlas.business import doc_registry
+from atlas.docs import extraction
+from atlas.docs.ingest import ingest_text
 
 _OI_FIELDS = [
     {"key": "broj", "label": "Broj", "kind": "text", "expiry": False},
@@ -138,7 +138,7 @@ def test_extract_stores_last_extract(spine, cfg):
 def test_extracted_expiry_reaches_dashboard_with_warn(spine, cfg):
     # rok-alert lanac: ekstrakcija -> expiry_items -> dashboard warn (<=7 dana)
     from datetime import date, timedelta
-    from ragspine.business import dashboard
+    from atlas.business import dashboard
     soon = (date.today() + timedelta(days=5)).strftime("%d.%m.%Y")
     with spine.write() as c:
         cid = c.execute("INSERT INTO clients(name) VALUES('Ana Anić')").lastrowid

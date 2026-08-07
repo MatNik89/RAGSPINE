@@ -1,5 +1,5 @@
-from ragspine.__main__ import main
-from ragspine.ops import evalrun
+from atlas.__main__ import main
+from atlas.ops import evalrun
 
 
 def test_run_returns_expected_keys():
@@ -20,7 +20,7 @@ def test_overall_pass():
 
 
 def test_independent_of_real_db(monkeypatch):
-    monkeypatch.delenv("RAGSPINE_DB_PATH", raising=False)
+    monkeypatch.delenv("ATLAS_DB_PATH", raising=False)
     assert evalrun.run()["pass"] is True
 
 

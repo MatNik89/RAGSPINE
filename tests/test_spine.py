@@ -1,7 +1,7 @@
 import threading
-from ragspine.core.spine import Spine, _ensure_columns
-from ragspine.ops import wizard_state as ws
-from ragspine.web.firstrun import create_first_owner
+from atlas.core.spine import Spine, _ensure_columns
+from atlas.ops import wizard_state as ws
+from atlas.web.firstrun import create_first_owner
 
 def _sp(tmp_path): return Spine(str(tmp_path / "t.db"))
 
@@ -86,7 +86,7 @@ def test_audit(tmp_path):
 
 def test_migration_ne_gazi_resume_kad_stage_red_postoji(tmp_path):
     # wizard pokrenut, ali nedovršen (npr. pad usred wizarda nakon prvog
-    # set_stage): sljedeći ragspine setup u NOVOM procesu (nova Spine/init_spine
+    # set_stage): sljedeći atlas setup u NOVOM procesu (nova Spine/init_spine
     # nad istim db_path) ne smije auto-dovršiti setup — mora ostati resumable.
     db_path = str(tmp_path / "resume.db")
     s1 = Spine(db_path)

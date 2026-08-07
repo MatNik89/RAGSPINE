@@ -1,5 +1,5 @@
 import pytest
-from ragspine.core.llm import LLMClient, detect_provider, LLMUnavailable, LLMError
+from atlas.core.llm import LLMClient, detect_provider, LLMUnavailable, LLMError
 
 def test_detect():
     assert detect_provider("https://api.anthropic.com") == "anthropic"
@@ -38,7 +38,7 @@ def test_openai_malformed_response(cfg):
         r.complete([{"role": "user", "content": "hej"}])
 
 def test_unavailable(cfg, monkeypatch):
-    monkeypatch.setattr("ragspine.core.llm.load_oauth_token", lambda: None)
-    monkeypatch.setattr("ragspine.core.llm._ollama_alive", lambda cfg: False)
+    monkeypatch.setattr("atlas.core.llm.load_oauth_token", lambda: None)
+    monkeypatch.setattr("atlas.core.llm._ollama_alive", lambda cfg: False)
     with pytest.raises(LLMUnavailable):
         LLMClient(cfg).complete([{"role": "user", "content": "x"}])

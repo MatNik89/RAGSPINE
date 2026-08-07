@@ -1,10 +1,10 @@
-from ragspine.core.llm import LLMClient
-from ragspine.core.spine import Spine
-from ragspine.docs import ingest as ing
-from ragspine.rag import authority as auth
-from ragspine.rag import pipeline
-from ragspine.rag import versioning
-from ragspine.rag.retrieval import Hit
+from atlas.core.llm import LLMClient
+from atlas.core.spine import Spine
+from atlas.docs import ingest as ing
+from atlas.rag import authority as auth
+from atlas.rag import pipeline
+from atlas.rag import versioning
+from atlas.rag.retrieval import Hit
 
 ZAKON_HIT = Hit(1, 1, "Zakon o PDV-u", "Stopa je 25%.", 1.0, "zakon")
 SOP_HIT = Hit(2, 2, "Interni SOP za JOPPD", "Rok je 15 dana.", 1.0, "sop")

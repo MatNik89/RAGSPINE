@@ -1,9 +1,9 @@
 import pytest
 
-from ragspine.core.llm import LLMError, LLMResult
-from ragspine.knowledge import features, patterns, translate
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.core.llm import LLMError, LLMResult
+from atlas.knowledge import features, patterns, translate
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from fastapi.testclient import TestClient
 
 
@@ -112,7 +112,7 @@ def test_api_patterns(spine, cfg):
 
 def test_api_translate_bad_lang_400(spine, cfg, monkeypatch):
     c = _client(spine, cfg)
-    from ragspine.web import api as api_mod
+    from atlas.web import api as api_mod
     monkeypatch.setattr(api_mod, "LLMClient", lambda cfg: _FakeLLM(text="Hello"))
     r = c.post("/translate", json={"text": "Bok", "target": "xx"})
     assert r.status_code == 400
@@ -121,7 +121,7 @@ def test_api_translate_bad_lang_400(spine, cfg, monkeypatch):
 def test_api_translate_llm_error_503_scrubbed(spine, cfg, monkeypatch):
     # LLMError body must not leak provider internals ("boom") to the client.
     c = _client(spine, cfg)
-    from ragspine.web import api as api_mod
+    from atlas.web import api as api_mod
     monkeypatch.setattr(api_mod, "LLMClient", lambda cfg: _FakeLLM(raise_error=True))
     r = c.post("/translate", json={"text": "Bok", "target": "en"})
     assert r.status_code == 503

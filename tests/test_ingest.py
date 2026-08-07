@@ -1,5 +1,5 @@
 import pytest
-from ragspine.docs import ingest as ing
+from atlas.docs import ingest as ing
 
 def test_chunker_no_word_split():
     text = " ".join(["riječ%d" % i for i in range(2000)])
@@ -47,13 +47,13 @@ def test_ingest_dedup_lost_race_returns_none(spine, monkeypatch):
 def test_ingest_hooks_only_swallow_importerror(spine, monkeypatch):
     import sys, types
 
-    fake_embed = types.ModuleType("ragspine.rag.embed")
+    fake_embed = types.ModuleType("atlas.rag.embed")
     def _boom(spine, ids):
         raise RuntimeError("bad key")
     fake_embed.index_chunks = _boom
-    fake_rag = types.ModuleType("ragspine.rag")
-    monkeypatch.setitem(sys.modules, "ragspine.rag", fake_rag)
-    monkeypatch.setitem(sys.modules, "ragspine.rag.embed", fake_embed)
+    fake_rag = types.ModuleType("atlas.rag")
+    monkeypatch.setitem(sys.modules, "atlas.rag", fake_rag)
+    monkeypatch.setitem(sys.modules, "atlas.rag.embed", fake_embed)
 
     # a real runtime error from a present embed module must propagate, not
     # be silently swallowed as if the module were merely absent.

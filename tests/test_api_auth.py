@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
-from ragspine.web.api import create_app
-from ragspine.web.deps import COOKIE_NAME, add_user
+from atlas.web.api import create_app
+from atlas.web.deps import COOKIE_NAME, add_user
 
 def _client(spine, cfg):
     return TestClient(create_app(spine, cfg))

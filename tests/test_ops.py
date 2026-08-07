@@ -1,4 +1,4 @@
-from ragspine.ops import doctor, health, nis2
+from atlas.ops import doctor, health, nis2
 
 
 def test_doctor_run_returns_checks(cfg):
@@ -93,7 +93,7 @@ def test_doctor_production_checks_present(cfg):
 
 
 def test_doctor_flags_missing_users(cfg):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     init_spine(cfg.db_path)  # prazna baza, 0 korisnika
     r = next(x for x in doctor.run(cfg) if x["check"] == "korisnici")
     assert r["ok"] is False

@@ -1,4 +1,4 @@
-from ragspine.web import watchlist as w
+from atlas.web import watchlist as w
 
 HTML1 = b"<html><body>Prirez Split iznosi 10%. Stupa na snagu 1.1.2027.</body></html>"
 HTML2 = b"<html><body>Prirez Split iznosi 12%. Stupa na snagu 1.1.2027.</body></html>"

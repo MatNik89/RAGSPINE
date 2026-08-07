@@ -4,12 +4,12 @@ import sys
 
 import ssl
 
-from ragspine.ops import certs
+from atlas.ops import certs
 
 
 def test_generate_and_fingerprint(tmp_path):
     cert, key = certs.generate_self_signed(str(tmp_path), ips=["192.168.1.7"],
-                                           hostnames=["ragspine.local"])
+                                           hostnames=["atlas.local"])
     assert cert.endswith("cert.pem") and key.endswith("key.pem")
     # cert je parsabilan standardnim ssl modulom
     der = ssl.PEM_cert_to_DER_cert(open(cert).read())
@@ -34,11 +34,11 @@ def test_key_file_private(tmp_path):
 
 
 def test_trust_command_prints_fingerprint(tmp_path, monkeypatch, capsys):
-    from ragspine import __main__ as m
-    from ragspine.core.spine import init_spine
-    from ragspine.config import Config, set_config
+    from atlas import __main__ as m
+    from atlas.core.spine import init_spine
+    from atlas.config import Config, set_config
 
-    monkeypatch.setenv("RAGSPINE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     cfg = Config.from_env()
     set_config(cfg)
     try:

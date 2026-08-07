@@ -1,4 +1,4 @@
-from ragspine.business import checklist
+from atlas.business import checklist
 
 
 def _client(spine, **fields):

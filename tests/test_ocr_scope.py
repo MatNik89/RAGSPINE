@@ -2,14 +2,14 @@ import os
 
 import pytest
 
-from ragspine.config import Config
-from ragspine.docs import ocr
+from atlas.config import Config
+from atlas.docs import ocr
 
 
 def _cfg(tmp_path, roots):
     old = dict(os.environ)
-    os.environ.update({"RAGSPINE_DATA_DIR": str(tmp_path / "d"),
-                       "RAGSPINE_MOUNT_ROOTS": ",".join(roots)})
+    os.environ.update({"ATLAS_DATA_DIR": str(tmp_path / "d"),
+                       "ATLAS_MOUNT_ROOTS": ",".join(roots)})
     try:
         return Config.from_env()
     finally:

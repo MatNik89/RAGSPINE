@@ -1,4 +1,4 @@
-from ragspine.knowledge import patterns
+from atlas.knowledge import patterns
 
 
 # --- _keywords ---

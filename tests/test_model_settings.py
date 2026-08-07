@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import model_settings
-from ragspine.config import get_config
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import model_settings
+from atlas.config import get_config
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 

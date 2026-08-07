@@ -1,6 +1,6 @@
-from ragspine.core.spine import init_spine
-from ragspine.ops import wizard_state as ws
-from ragspine.web import firstrun
+from atlas.core.spine import init_spine
+from atlas.ops import wizard_state as ws
+from atlas.web import firstrun
 
 
 def _spine(tmp_path):

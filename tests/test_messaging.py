@@ -2,10 +2,10 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import expiry as expiry_mod
-from ragspine.web import messaging
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import expiry as expiry_mod
+from atlas.web import messaging
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 VALID_OIB = "69435151530"  # validan testni OIB (kontrolna znamenka provjerena)
 

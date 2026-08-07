@@ -4,8 +4,8 @@ LANE_HANDLERS is populated only by import side-effects, and the serve path
 sql_lane/graphrag/websearch modules — only "learn" registered via watchlist.
 
 Runs in a subprocess with a fresh interpreter so no other test's imports can
-mask the bug: importing only ragspine.web.api must be enough to register all
-four lane handlers, exactly as it needs to be at real `ragspine serve` time.
+mask the bug: importing only atlas.web.api must be enough to register all
+four lane handlers, exactly as it needs to be at real `atlas serve` time.
 """
 import subprocess
 import sys
@@ -13,7 +13,7 @@ import sys
 
 def test_all_lanes_registered_by_importing_web_api_alone():
     code = (
-        "import ragspine.web.api, ragspine.rag.pipeline as p\n"
+        "import atlas.web.api, atlas.rag.pipeline as p\n"
         "missing = {'sql', 'web', 'graph', 'learn'} - set(p.LANE_HANDLERS)\n"
         "assert not missing, f'lane handlers missing at serve time: {missing}'\n"
     )

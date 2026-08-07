@@ -1,6 +1,6 @@
-from ragspine.rag import pipeline
-from ragspine.docs import ingest as ing
-from ragspine.core.llm import LLMClient, LLMError
+from atlas.rag import pipeline
+from atlas.docs import ingest as ing
+from atlas.core.llm import LLMClient, LLMError
 
 
 def _llm(cfg, text):
@@ -51,10 +51,10 @@ def test_llm_error_returns_clean_answer_no_raise(spine, cfg):
 
 
 def test_chat_falls_back_to_web_when_irrelevant(spine, cfg, monkeypatch):
-    from ragspine.web import websearch  # noqa: F401  (import registers the "web" lane handler)
+    from atlas.web import websearch  # noqa: F401  (import registers the "web" lane handler)
 
     monkeypatch.setattr(
-        "ragspine.web.websearch.safe_fetch",
+        "atlas.web.websearch.safe_fetch",
         lambda url, **kw: (
             b'<a class="result__a" href="https://example.com/x">X naslov</a>'
             b'<a class="result__snippet">X snippet.</a>'
@@ -78,9 +78,9 @@ def test_prazan_web_ne_zaustavlja_odgovor(spine, cfg, monkeypatch):
     """E2E nalaz (Nick): prazan indeks + web bez rezultata vraćao je doslovno
     "Nema web rezultata." i nikad dolazio do LLM-a. Web handler kod praznog
     rezultata mora vratiti None (ugovor lane handlera) pa pipeline nastavlja."""
-    from ragspine.web import websearch  # noqa: F401  (registrira "web" lane)
+    from atlas.web import websearch  # noqa: F401  (registrira "web" lane)
 
-    monkeypatch.setattr("ragspine.web.websearch.safe_fetch",
+    monkeypatch.setattr("atlas.web.websearch.safe_fetch",
                         lambda url, **kw: b"nista korisno")
     cfg.llm_base_url = "https://api.x.com"; cfg.llm_api_key = "k"; cfg.llm_model = "m"
 

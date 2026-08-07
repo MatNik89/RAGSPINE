@@ -3,16 +3,16 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.business import folders
-from ragspine.config import Config, set_config
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import folders
+from atlas.config import Config, set_config
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
 def _cfg_with_roots(tmp_path, roots):
-    monkey_env = {"RAGSPINE_DATA_DIR": str(tmp_path / "data"),
-                  "RAGSPINE_MOUNT_ROOTS": ",".join(roots)}
+    monkey_env = {"ATLAS_DATA_DIR": str(tmp_path / "data"),
+                  "ATLAS_MOUNT_ROOTS": ",".join(roots)}
     old = dict(os.environ)
     os.environ.update(monkey_env)
     try:
@@ -202,5 +202,5 @@ def test_dashboard_nav_has_postavke_not_mape(spine, tmp_path):
 
 
 def test_skener_is_valid_role():
-    from ragspine.business import folders
+    from atlas.business import folders
     assert "skener" in folders.ROLES

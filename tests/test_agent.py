@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from ragspine.browser import agent
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.browser import agent
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def test_available_false_without_browser_use():

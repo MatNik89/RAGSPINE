@@ -1,7 +1,7 @@
 import json
 
-from ragspine.core.llm import LLMClient
-from ragspine.knowledge import memory_layers as ml
+from atlas.core.llm import LLMClient
+from atlas.knowledge import memory_layers as ml
 
 
 def _llm(cfg, payload):

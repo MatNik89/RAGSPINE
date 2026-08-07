@@ -1,7 +1,7 @@
 import json
 
-from ragspine.core.llm import LLMClient
-from ragspine.knowledge import wiki
+from atlas.core.llm import LLMClient
+from atlas.knowledge import wiki
 
 
 def _llm(cfg, pages):

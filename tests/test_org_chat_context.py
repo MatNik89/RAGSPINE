@@ -1,10 +1,10 @@
 """Faza C spojnog tkiva: wiki/skills/memorija ulaze u chat prompt; L0 zapis; distill job."""
-from ragspine.business.acl import Actor
-from ragspine.core.llm import LLMClient
-from ragspine.docs import ingest
-from ragspine.knowledge import memory_layers, skills
-from ragspine.ops import jobs
-from ragspine.rag import pipeline
+from atlas.business.acl import Actor
+from atlas.core.llm import LLMClient
+from atlas.docs import ingest
+from atlas.knowledge import memory_layers, skills
+from atlas.ops import jobs
+from atlas.rag import pipeline
 
 ACTOR = Actor(user_id=1, org_id=1, role="member", username="ana")
 
@@ -76,7 +76,7 @@ def test_memory_distill_job_distills(spine, cfg, monkeypatch):
     def fake_distill(sp, org, uid, llm):
         calls.append((org, uid)); return {"atoms": 0}
 
-    from ragspine.knowledge import memory_layers as ml
+    from atlas.knowledge import memory_layers as ml
     monkeypatch.setattr(ml, "distill", fake_distill)
     jobs.memory_distill_job(spine, cfg)
     assert calls == [(1, 1)]

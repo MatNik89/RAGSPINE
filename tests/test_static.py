@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from ragspine.web.api import create_app
-from ragspine.web.static import serve_static
+from atlas.web.api import create_app
+from atlas.web.static import serve_static
 
 
 def _client(spine, cfg):
@@ -43,7 +43,7 @@ def test_static_disallowed_extension_404(spine, cfg):
     c = _client(spine, cfg)
     r = c.get("/static/some.py")
     assert r.status_code == 404
-    r2 = c.get("/static/../ragspine/config.py")
+    r2 = c.get("/static/../atlas/config.py")
     assert r2.status_code == 404
 
 
@@ -52,7 +52,7 @@ def test_serve_static_traversal_guard_direct():
     # normalizes ".." out of the URL before it ever reaches the route, so
     # this proves the guard itself (not just client-side URL cleanup).
     assert serve_static("../../../../../../etc/passwd").status_code == 404
-    assert serve_static("fonts/../../../ragspine/config.py").status_code == 404
+    assert serve_static("fonts/../../../atlas/config.py").status_code == 404
     assert serve_static("fonts/PlexSans-400.woff2").status_code == 200
 
 
@@ -80,7 +80,7 @@ def test_static_traversal_with_allowed_extension_blocked():
 
 
 def test_serve_static_blocks_real_file_outside_scoped_dir(tmp_path, monkeypatch):
-    import ragspine.web.static as static_mod
+    import atlas.web.static as static_mod
 
     static_root = tmp_path / "static"
     (static_root / "fonts").mkdir(parents=True)

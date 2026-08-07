@@ -1,8 +1,8 @@
 """Faza B spojnog tkiva: org-scope retrievala, cachea, kb-a i backfill migracija."""
-from ragspine.business import tenancy
-from ragspine.docs import ingest
-from ragspine.knowledge import kb
-from ragspine.rag import cache, retrieval
+from atlas.business import tenancy
+from atlas.docs import ingest
+from atlas.knowledge import kb
+from atlas.rag import cache, retrieval
 
 
 def _org(spine, name):

@@ -1,7 +1,7 @@
 import pytest
 import xml.etree.ElementTree as ET
 
-from ragspine.core import xmlsafe
+from atlas.core import xmlsafe
 
 
 def test_plain_xml_parses():

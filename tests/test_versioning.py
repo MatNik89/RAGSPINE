@@ -1,11 +1,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from ragspine.docs import ingest as ing
-from ragspine.rag import retrieval, versioning as ver
-from ragspine.web import watchlist as w
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.docs import ingest as ing
+from atlas.rag import retrieval, versioning as ver
+from atlas.web import watchlist as w
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):

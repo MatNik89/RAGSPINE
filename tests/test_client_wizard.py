@@ -1,8 +1,8 @@
 """Piece F: AI sidebar (client_assist) + wizard kreiranje (legal_form, doc_types)."""
 import pytest
 
-from ragspine.business import client_assist, onboarding, quickref
-from ragspine.docs.ingest import ingest_text
+from atlas.business import client_assist, onboarding, quickref
+from atlas.docs.ingest import ingest_text
 
 
 def test_assist_oib_rules(spine, cfg):
@@ -106,7 +106,7 @@ def test_assist_llm_note_optional(spine, cfg):
 
 
 def test_create_client_legal_form_and_doc_types(spine, cfg):
-    from ragspine.business import doc_registry
+    from atlas.business import doc_registry
     doc_registry.upsert(spine, "ugovor", "Ugovor", [])
     res = onboarding.create_client(spine, cfg, {
         "name": "Obrt Mlin", "legal_form": "obrt", "regime": "pausal",
@@ -134,8 +134,8 @@ def test_create_client_rejects_bad_combo(spine, cfg):
 
 def test_api_assist_create_and_wizard_page(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
 
     from tests.conftest import complete_setup
 

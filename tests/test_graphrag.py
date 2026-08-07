@@ -1,4 +1,4 @@
-from ragspine.rag import graphrag as g
+from atlas.rag import graphrag as g
 
 def test_extract():
     ents = dict(g.extract_entities("Klijent OIB 69435151530, konto 4010, iznos 1.500,00 EUR"))

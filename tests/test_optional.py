@@ -1,4 +1,4 @@
-from ragspine.core import optional
+from atlas.core import optional
 
 def test_need_present():
     assert optional.need("json", "test-feature") is not None

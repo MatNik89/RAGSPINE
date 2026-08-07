@@ -1,5 +1,5 @@
 import os, sys, time
-from ragspine.core.subproc import run_isolated
+from atlas.core.subproc import run_isolated
 
 def test_ok():
     rc, out, _ = run_isolated([sys.executable, "-c", "print('hi')"])

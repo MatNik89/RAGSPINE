@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
-from ragspine.business import sop as sop_mod
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import sop as sop_mod
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from tests.conftest import complete_setup
 
 
@@ -139,7 +139,7 @@ def test_theme_toggle_present(spine, cfg):
     assert r.status_code == 200
     assert "toggleTheme" in r.text
     assert 'id="theme-toggle"' in r.text
-    assert "ragspine-theme" in r.text
+    assert "atlas-theme" in r.text
 
 
 def test_chat_and_upute_functionality_preserved(spine, cfg):

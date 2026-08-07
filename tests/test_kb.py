@@ -1,4 +1,4 @@
-from ragspine.knowledge import kb
+from atlas.knowledge import kb
 
 def test_similar_lookup(spine):
     kb.save(spine, "Koliki je prag za ulazak u sustav PDV-a?", "60.000 EUR", "pdv")

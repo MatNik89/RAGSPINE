@@ -2,12 +2,12 @@
 rate-limit, audit admin-gate, verify org-ekspanzija."""
 from fastapi.testclient import TestClient
 
-from ragspine.docs import ingest
-from ragspine.rag import budget, verify
-from ragspine.rag.retrieval import Hit
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
-from ragspine.web.ratelimit import RateLimiter
+from atlas.docs import ingest
+from atlas.rag import budget, verify
+from atlas.rag.retrieval import Hit
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
+from atlas.web.ratelimit import RateLimiter
 
 
 # --- čišćenje šuma ---
@@ -116,7 +116,7 @@ class _CaptureLLM:
 
 
 def test_graph_lane_compacts_and_keeps_relevant_doc(spine, cfg):
-    from ragspine.rag import graphrag
+    from atlas.rag import graphrag
     oib = "69435151530"
     filler = ("nebitan sadržaj o nečem desetom " * 300)
     for i in range(12):
@@ -131,7 +131,7 @@ def test_graph_lane_compacts_and_keeps_relevant_doc(spine, cfg):
 
 
 def test_web_lane_compacts_prompt(monkeypatch, spine, cfg):
-    from ragspine.web import websearch
+    from atlas.web import websearch
     results = [{"title": f"Naslov {i}", "url": f"https://x.hr/{i}",
                 "snippet": "dugačak snippet " * 200} for i in range(50)]
     monkeypatch.setattr(websearch, "ddg", lambda q, fetch=None: results)
@@ -146,7 +146,7 @@ def test_web_lane_compacts_prompt(monkeypatch, spine, cfg):
 def test_ratelimiter_evicts_stale_keys(monkeypatch):
     """Codex nalaz #4: hladni ključevi moraju ispasti — inače jedinstveni
     usernameovi rastu memoriju bez granice."""
-    from ragspine.web import ratelimit as rl_mod
+    from atlas.web import ratelimit as rl_mod
     clock = [0.0]
     monkeypatch.setattr(rl_mod.time, "monotonic", lambda: clock[0])
     rl = RateLimiter()
@@ -161,7 +161,7 @@ def test_ratelimiter_evicts_stale_keys(monkeypatch):
 def test_ratelimiter_hard_cap_with_fresh_keys(monkeypatch):
     """Codex runda 2 HIGH: kad su SVI ključevi svježi, sweep ne briše ništa —
     cap mora ostati tvrd (izbacuju se najstarije-aktivni)."""
-    from ragspine.web import ratelimit as rl_mod
+    from atlas.web import ratelimit as rl_mod
     clock = [0.0]
     monkeypatch.setattr(rl_mod.time, "monotonic", lambda: clock[0])
     rl = RateLimiter()
@@ -213,7 +213,7 @@ def test_chat_rate_limited(spine, cfg):
 def test_audit_org_scoped_through_endpoint(spine, cfg):
     """Codex nalazi (2 runde): admin org-a A ne smije vidjeti audit org-a B,
     i to mora vrijediti KROZ endpoint (revert samo API ožičenja mora pasti)."""
-    from ragspine.business import tenancy
+    from atlas.business import tenancy
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")
     owner = c.post("/auth/login", json={"username": "ana", "password": "pw"}).json()["token"]

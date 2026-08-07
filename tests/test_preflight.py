@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.ops import preflight as pf
+from atlas.ops import preflight as pf
 from tests.conftest import complete_setup
 
 # Sačuvana referenca na pravu funkciju PRIJE nego je autouse fixture prekrije
@@ -75,8 +75,8 @@ def test_system_state_keys(cfg):
 
 def _admin_client(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")           # prvi login → owner default orga
     complete_setup(spine)
@@ -86,8 +86,8 @@ def _admin_client(spine, cfg):
 
 def test_preflight_route_admin_only(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     # owner (admin) → 200
     c, h = _admin_client(spine, cfg)
     j = c.get("/preflight", headers=h)
@@ -442,7 +442,7 @@ def test_install_via_winget_path_problem(monkeypatch):
 
 
 def test_proxy_roundtrip(tmp_path):
-    from ragspine.core.spine import init_spine
+    from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     assert pf.get_proxy(s) == ""
     pf.set_proxy(s, "http://proxy.ured.local:3128")

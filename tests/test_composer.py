@@ -1,5 +1,5 @@
-from ragspine.rag.composer import compose
-from ragspine.rag.retrieval import Hit
+from atlas.rag.composer import compose
+from atlas.rag.retrieval import Hit
 
 
 def test_compose_marks_sources():

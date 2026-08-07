@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.business.place import bruto_to_neto
+from atlas.business.place import bruto_to_neto
 
 def test_basic_2000():
     r = bruto_to_neto(2000.0)

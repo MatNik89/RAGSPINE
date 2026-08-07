@@ -1,5 +1,5 @@
-from ragspine.rag.citations import verify
-from ragspine.rag.retrieval import Hit
+from atlas.rag.citations import verify
+from atlas.rag.retrieval import Hit
 
 H = [Hit(1, 1, "pdv", "Stopa PDV-a je 25%.", 1.0, "zakon"),
      Hit(2, 2, "min", "Minimalac je 970 EUR.", 0.9, "zakon")]

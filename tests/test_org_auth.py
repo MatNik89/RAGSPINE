@@ -1,10 +1,10 @@
 """Faza A spojnog tkiva: org-kontekst u auth (JWT claims, require_actor, /org)."""
 from fastapi.testclient import TestClient
 
-from ragspine.business import tenancy
-from ragspine.core.security import jwt_decode, jwt_encode
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import tenancy
+from atlas.core.security import jwt_decode, jwt_encode
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):

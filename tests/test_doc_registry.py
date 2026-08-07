@@ -1,6 +1,6 @@
 import pytest
 
-from ragspine.business import doc_registry
+from atlas.business import doc_registry
 
 
 def test_seed_osobna_iskaznica(spine):

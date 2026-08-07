@@ -1,7 +1,7 @@
 import pytest
 
-from ragspine.core import optional
-from ragspine.docs import pdfforms
+from atlas.core import optional
+from atlas.docs import pdfforms
 
 fitz = optional.need("fitz", "PDF forms")
 

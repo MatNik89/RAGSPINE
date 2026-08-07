@@ -2,7 +2,7 @@ import io
 
 import pytest
 
-from ragspine.docs import ocr
+from atlas.docs import ocr
 
 
 def _png_with_text(text="PDV 25"):

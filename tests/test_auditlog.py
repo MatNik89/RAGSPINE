@@ -1,4 +1,4 @@
-from ragspine.business import auditlog
+from atlas.business import auditlog
 
 
 def test_search_filters_by_user(spine):

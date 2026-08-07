@@ -2,9 +2,9 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from ragspine.business import expiry
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import expiry
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine):

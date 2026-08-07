@@ -1,6 +1,6 @@
 """Connector framework: registry, test-before-save, status, maskiranje tajni."""
 import pytest
-from ragspine.business import connectors as cx
+from atlas.business import connectors as cx
 from tests.conftest import complete_setup
 
 
@@ -87,8 +87,8 @@ def test_unknown_kind_rejected(spine):
 
 def _admin(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "pw")
     complete_setup(spine)
@@ -124,7 +124,7 @@ def test_connector_routes_admin_flow(spine, cfg):
 
 def test_connector_routes_worker_forbidden(spine, cfg):
     c, h = _admin(spine, cfg)
-    from ragspine.web.deps import add_user
+    from atlas.web.deps import add_user
     add_user(spine, "boris", "pw", "radnik")
     wt = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
     wh = {"Authorization": f"Bearer {wt}"}

@@ -1,4 +1,4 @@
-from ragspine.web import watchlist as w
+from atlas.web import watchlist as w
 
 RSS_OK = """<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>

@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 
-from ragspine.core import memory
-from ragspine.ops import jobs
-from ragspine.ops.scheduler import Scheduler
+from atlas.core import memory
+from atlas.ops import jobs
+from atlas.ops.scheduler import Scheduler
 
 
 def test_write_memory_sets_hot_score_and_access_count(spine):

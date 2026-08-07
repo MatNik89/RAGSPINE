@@ -1,10 +1,10 @@
 """Vidljivost klijenata po radniku: business logika + endpoint enforcement + chat."""
 from fastapi.testclient import TestClient
 
-from ragspine.business import client_visibility as cv
-from ragspine.business.acl import Actor
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.business import client_visibility as cv
+from atlas.business.acl import Actor
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 
 
 def _client(spine, cfg):
@@ -120,7 +120,7 @@ def test_model_write_admin_only(spine, cfg):
 # --- chat ---
 
 def test_chat_hides_note_of_invisible_client(spine, cfg):
-    from ragspine.rag import client_context
+    from atlas.rag import client_context
     a, b = _mk_clients(spine, "Alfa", "Beta")
     add_user(spine, "boris", "pw")
     uid = _uid(spine, "boris")
@@ -205,7 +205,7 @@ def test_discover_admin_only(spine, cfg):
 # --- RAG retrieval ne smije procuriti dokumente skrivenog klijenta (Codex HIGH) ---
 
 def test_retrieval_filters_hidden_client_docs(spine):
-    from ragspine.rag import retrieval
+    from atlas.rag import retrieval
     a, b = _mk_clients(spine, "Alfa", "Beta")
     with spine.write() as conn:
         # uredski dokument (client_id NULL) + po jedan klijentski

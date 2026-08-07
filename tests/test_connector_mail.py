@@ -1,18 +1,18 @@
 """Mail adapteri (exchangelib / Graph) — connect logika, mockano (biblioteke
-nisu instalirane u testu; live spoj traži ragspine[mail] + prave podatke)."""
+nisu instalirane u testu; live spoj traži atlas[mail] + prave podatke)."""
 import sys
 import types
-from ragspine.business import connector_adapters as ad
+from atlas.business import connector_adapters as ad
 
 
 def test_exchange_without_lib_reports_install():
     st, detail = ad._test_exchange({"email": "a@b.hr", "password": "x"})
-    assert st == "error" and "ragspine[mail]" in detail
+    assert st == "error" and "atlas[mail]" in detail
 
 
 def test_graph_without_lib_reports_install():
     st, detail = ad._test_graph({"tenant_id": "t", "client_id": "c", "client_secret": "s", "mailbox": "a@b.hr"})
-    assert st == "error" and "ragspine[mail]" in detail
+    assert st == "error" and "atlas[mail]" in detail
 
 
 def test_exchange_bad_email():

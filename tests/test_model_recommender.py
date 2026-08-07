@@ -1,4 +1,4 @@
-from ragspine.ops import model_recommender as mr
+from atlas.ops import model_recommender as mr
 
 
 def test_classify_tier_buckets():
@@ -79,8 +79,8 @@ def test_report_contains_tier_and_model():
 
 def test_api_models_recommend(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
 
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "tajna")
@@ -92,8 +92,8 @@ def test_api_models_recommend(spine, cfg):
 
 def test_api_models_litellm(spine, cfg):
     from fastapi.testclient import TestClient
-    from ragspine.web.api import create_app
-    from ragspine.web.deps import add_user
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
 
     c = TestClient(create_app(spine, cfg))
     add_user(spine, "ana", "tajna")

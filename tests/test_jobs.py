@@ -1,8 +1,8 @@
 from datetime import date, timedelta
 
-from ragspine.business import expiry, kalendar, obveze
-from ragspine.ops import jobs
-from ragspine.ops.scheduler import Scheduler
+from atlas.business import expiry, kalendar, obveze
+from atlas.ops import jobs
+from atlas.ops.scheduler import Scheduler
 
 
 def _client(spine, name="Alfa", pdv=""):

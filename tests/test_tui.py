@@ -1,5 +1,5 @@
 # tests/test_tui.py
-from ragspine.ops import tui
+from atlas.ops import tui
 
 
 def _reader(*answers):

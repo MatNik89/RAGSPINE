@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from ragspine.docs import eracun
-from ragspine.rag import retrieval
+from atlas.docs import eracun
+from atlas.rag import retrieval
 
 FIXTURE = Path(__file__).parent / "fixtures" / "eracun_ubl.xml"
 

@@ -2,7 +2,7 @@ import os
 import re
 from email.message import EmailMessage
 
-from ragspine.docs import imap_fetch
+from atlas.docs import imap_fetch
 
 
 class FakeIMAP:

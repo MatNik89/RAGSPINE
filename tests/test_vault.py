@@ -1,10 +1,10 @@
 import os
 
-from ragspine.docs import ingest
-from ragspine.docs import vault
-from ragspine.rag import retrieval
-from ragspine.web.api import create_app
-from ragspine.web.deps import add_user
+from atlas.docs import ingest
+from atlas.docs import vault
+from atlas.rag import retrieval
+from atlas.web.api import create_app
+from atlas.web.deps import add_user
 from fastapi.testclient import TestClient
 
 

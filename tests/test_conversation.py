@@ -1,8 +1,8 @@
 import pytest
 
-from ragspine.docs import ingest as ing
-from ragspine.rag import cache, conversation, pipeline
-from ragspine.core.llm import LLMClient
+from atlas.docs import ingest as ing
+from atlas.rag import cache, conversation, pipeline
+from atlas.core.llm import LLMClient
 
 
 def _insert(spine, user, query, answer):
