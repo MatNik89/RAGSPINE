@@ -5,9 +5,16 @@ import plistlib
 from atlas.ops import shortcut
 
 
-def test_desktop_dir_posix(tmp_path, monkeypatch):
+def _home(monkeypatch, tmp_path):
+    """HOME + USERPROFILE na tmp_path — expanduser("~") na Windowsu čita
+    USERPROFILE, na POSIX-u HOME; postavi oba da test bude OS-neovisan."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+
+
+def test_desktop_dir_posix(tmp_path, monkeypatch):
+    _home(monkeypatch, tmp_path)
     (tmp_path / "Desktop").mkdir()
     assert shortcut._desktop_dir() == str(tmp_path / "Desktop")
 
@@ -20,14 +27,12 @@ def test_desktop_dir_xdg(tmp_path, monkeypatch):
 
 
 def test_desktop_dir_nema(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+    _home(monkeypatch, tmp_path)
     assert shortcut._desktop_dir() is None
 
 
 def test_linux_desktop_datoteka(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+    _home(monkeypatch, tmp_path)
     (tmp_path / "Desktop").mkdir()
     lines = []
     ok = shortcut.create_desktop_shortcut("https://x:8443", out=lines.append,
@@ -42,8 +47,7 @@ def test_linux_desktop_datoteka(tmp_path, monkeypatch):
 
 
 def test_macos_webloc(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+    _home(monkeypatch, tmp_path)
     (tmp_path / "Desktop").mkdir()
     ok = shortcut.create_desktop_shortcut("https://x:8443", out=lambda *_: None,
                                           system=lambda: "Darwin")
@@ -94,8 +98,7 @@ def test_windows_powershell_pad_ide_na_url(tmp_path, monkeypatch):
 
 
 def test_bez_desktopa_poruka_bez_pada(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_DESKTOP_DIR", raising=False)
+    _home(monkeypatch, tmp_path)
     lines = []
     ok = shortcut.create_desktop_shortcut("https://x", out=lines.append,
                                           system=lambda: "Linux")
