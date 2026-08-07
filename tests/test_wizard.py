@@ -341,8 +341,9 @@ def test_run_resume_from_stage2_runs_pages_3_to_6(tmp_path, monkeypatch):
     assert ws.is_complete(s) is True
 
 
-def test_launch_now_odbijen_ne_pokrece_nista(tmp_path):
+def test_launch_now_odbijen_ne_pokrece_nista(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
     calls = []
     lines = []
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
@@ -356,6 +357,7 @@ def test_launch_now_windows_pokrece_serve_i_edge(tmp_path, monkeypatch):
     s.set_override("net", "host", "192.168.1.7")
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
     calls = []
     wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
                       popen=lambda cmd, **k: calls.append(cmd))
@@ -370,24 +372,27 @@ def test_launch_now_bind_sve_mreze_koristi_lan_ip(tmp_path, monkeypatch):
     s.set_override("net", "host", "0.0.0.0")
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.preflight, "local_ip", lambda: "192.168.1.7")
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
     lines = []
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
                       popen=lambda *a, **k: None)
     assert any("https://192.168.1.7:8443" in l for l in lines)
 
 
-def test_launch_now_bez_mapa_env_none(tmp_path):
+def test_launch_now_bez_mapa_env_none(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
     calls = []
     wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
                       popen=lambda cmd, **k: calls.append(k))
     assert calls[0]["env"] is None
 
 
-def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path):
+def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path, monkeypatch):
     import types
     from atlas.business import folders
     s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
     mapa = tmp_path / "propisi"
     mapa.mkdir()
     folders.register(s, types.SimpleNamespace(mount_roots=[str(mapa)]),
@@ -400,8 +405,9 @@ def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path):
     assert str(mapa.resolve()) in env["ATLAS_MOUNT_ROOTS"].split(",")
 
 
-def test_launch_now_oserror_ne_rusi(tmp_path):
+def test_launch_now_oserror_ne_rusi(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
 
     def _boom(cmd, **k):
         raise OSError("nema binarke")
@@ -410,8 +416,9 @@ def test_launch_now_oserror_ne_rusi(tmp_path):
     assert any("atlas serve" in l for l in lines)
 
 
-def test_launch_now_eof_tretira_kao_ne(tmp_path):
+def test_launch_now_eof_tretira_kao_ne(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
 
     def _eof(_=""):
         raise EOFError()
@@ -419,6 +426,17 @@ def test_launch_now_eof_tretira_kao_ne(tmp_path):
     wizard.launch_now(s, None, input_fn=_eof, out=lambda *_: None,
                       popen=lambda *a, **k: calls.append(a))   # ne smije propagirati
     assert calls == []
+
+
+def test_launch_now_stvara_precac(tmp_path, monkeypatch):
+    """Prečac se stvara i kad korisnik NE pokrene server."""
+    s = init_spine(str(tmp_path / "t.db"))
+    made = []
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut",
+                        lambda url, **k: made.append(url) or True)
+    wizard.launch_now(s, None, input_fn=_reader("n"), out=lambda *_: None,
+                      popen=lambda *a, **k: None)
+    assert made and made[0].startswith("https://")
 
 
 def test_choose_embed_model_bge_when_ram_allows():
@@ -728,6 +746,7 @@ def test_launch_now_edge_oserror_ne_rusi(tmp_path, monkeypatch):
     s.set_override("net", "host", "192.168.1.7")
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
 
     calls = []
 

@@ -14,7 +14,7 @@ import types
 from pathlib import Path
 
 from atlas.core.llm import LLMError, LLMUnavailable
-from atlas.ops import backup, certs, folder_picker, model_table, preflight, tui, tui_curses, winsvc, wizard_state
+from atlas.ops import backup, certs, folder_picker, model_table, preflight, shortcut, tui, tui_curses, winsvc, wizard_state
 from atlas.web import firstrun
 
 _MIN_PW = 8
@@ -465,6 +465,7 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
     port = spine.get_override("net", "port") or "8443"
     url_host = preflight.local_ip() if host == "0.0.0.0" else host
     url = f"https://{url_host}:{port}"
+    shortcut.create_desktop_shortcut(url, out=out)
     try:
         start = tui.prompt_yes_no(f"Pokreni ATLAS sada? ({url})", default=True,
                                   input_fn=input_fn, out=out)
