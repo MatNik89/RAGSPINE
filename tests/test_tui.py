@@ -25,3 +25,22 @@ def test_status_glyph():
     assert tui.status_glyph("ok") == "✓"
     assert tui.status_glyph("warn") == "⚠"
     assert tui.status_glyph("fail") == "✗"
+
+
+def test_prompt_password_injektirani_input_fn_vidljiv():
+    from atlas.ops import tui
+    got = tui.prompt_password("Lozinka", input_fn=lambda _="": " tajna123 ",
+                              out=lambda *_: None)
+    assert got == "tajna123"
+
+
+def test_prompt_password_tty_koristi_getpass(monkeypatch):
+    import builtins
+    import getpass as gp
+    import sys as _sys
+    from atlas.ops import tui
+    monkeypatch.setattr(_sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(gp, "getpass", lambda prompt="": "skriveno")
+    got = tui.prompt_password("Lozinka", input_fn=builtins.input,
+                              out=lambda *_: None)
+    assert got == "skriveno"

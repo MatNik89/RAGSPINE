@@ -74,11 +74,11 @@ def page_operater(spine, *, input_fn=input, out=print) -> bool:
             break
         out("Korisničko ime ne smije biti prazno.")
     while True:
-        pw = tui.prompt_text("Lozinka (min 8)", input_fn=input_fn, out=out)
+        pw = tui.prompt_password("Lozinka (min 8)", input_fn=input_fn, out=out)
         if len(pw) < _MIN_PW:
             out(f"Lozinka mora imati barem {_MIN_PW} znakova.")
             continue
-        pw2 = tui.prompt_text("Ponovi lozinku", input_fn=input_fn, out=out)
+        pw2 = tui.prompt_password("Ponovi lozinku", input_fn=input_fn, out=out)
         if pw != pw2:
             out("Lozinke se ne podudaraju.")
             continue
