@@ -12,6 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from atlas.ops.certs import best_display_host  # noqa: F401 - re-export, jedna implementacija (certs.py)
+
 logger = logging.getLogger(__name__)
 
 BAT_IME = "postavi-vezu.bat"
@@ -23,6 +25,7 @@ def bat_content(cert_url: str, https_url: str) -> bytes:
         "@echo off",
         "echo Postavljam sigurnu vezu za ATLAS...",
         f'certutil -urlcache -split -f "{cert_url}" "%TEMP%\\atlas-cert.pem"',
+        "if errorlevel 1 (echo GRESKA - server nedostupan & pause & exit /b 1)",
         'certutil -addstore -f Root "%TEMP%\\atlas-cert.pem"',
         "if errorlevel 1 (echo GRESKA - pokreni kao administrator & pause & exit /b 1)",
         f"echo Gotovo! Otvaram {https_url}",
@@ -42,10 +45,10 @@ def postavi_html(https_url: str, bat_ime: str = BAT_IME) -> str:
 <body>
 <h1>Postavljanje sigurne veze na ATLAS</h1>
 <ol>
-<li>1. <a href="/{bat_ime}">Preuzmi postavljanje</a></li>
-<li>2. Dupli klik na preuzetu datoteku, zatim desni klik →
+<li><a href="/{bat_ime}">Preuzmi postavljanje</a></li>
+<li>Dupli klik na preuzetu datoteku, zatim desni klik →
 "Pokreni kao administrator" → Da (UAC upit)</li>
-<li>3. Otvori <a href="{https_url}">{https_url}</a> — ubuduće radi i
+<li>Otvori <a href="{https_url}">{https_url}</a> — ubuduće radi i
 prečac/bookmark na tu adresu</li>
 </ol>
 <h2>Ručno (napredno)</h2>
@@ -54,18 +57,6 @@ administrator naredbom:</p>
 <pre>certutil -addstore -f Root cert.pem</pre>
 </body>
 </html>"""
-
-
-def best_display_host(names: list[str], fallback: str) -> str:
-    """Najbolje ime za prikaz klijentima: prava FQDN (točka, nije
-    atlas.local/.local), pa hostname.local, pa fallback (obično IP)."""
-    for n in names:
-        if "." in n and n != "atlas.local" and not n.endswith(".local"):
-            return n
-    for n in names:
-        if n.endswith(".local") and n != "atlas.local":
-            return n
-    return fallback
 
 
 def _make_handler(cert_path: str, https_url: str, cert_url: str):
@@ -124,7 +115,9 @@ def start_bootstrap_server(cert_path: str, https_url: str, host: str,
     handler_cls = _make_handler(cert_path, https_url, cert_url)
     try:
         server = ThreadingHTTPServer((host, port), handler_cls)
-    except OSError as e:
+    except (OSError, OverflowError) as e:
+        # OverflowError: port izvan 0-65535 (npr. ATLAS_BOOTSTRAP_PORT=70000) —
+        # socket sloj to ne javlja kao OSError nego kao OverflowError.
         logger.warning("Bootstrap server ne može se pokrenuti na %s:%s (%s)",
                         host, port, e)
         return None

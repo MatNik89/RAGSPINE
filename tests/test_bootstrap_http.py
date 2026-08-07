@@ -27,8 +27,9 @@ def test_postavi_html_sadrzi_korake_i_link():
     assert "https://nick.fritz.box:8443" in html
     assert "postavi-vezu.bat" in html
     assert "administrator" in html.lower()
-    # 3 koraka
-    assert "1." in html and "2." in html and "3." in html
+    # 3 koraka (<ol> numerira sam — bez ručnih brojeva u <li>)
+    assert html.count("<li>") == 3
+    assert "<li>1." not in html and "<li>2." not in html and "<li>3." not in html
     assert "cert.pem" in html
 
 
@@ -54,6 +55,15 @@ def test_bind_error_returns_none(monkeypatch, tmp_path):
 
     monkeypatch.setattr(bootstrap_http, "ThreadingHTTPServer", BoomServer)
     result = start_bootstrap_server(str(tmp_path / "cert.pem"), "https://x:8443", "127.0.0.1", port=1)
+    assert result is None
+
+
+def test_port_overflow_returns_none_without_raising(tmp_path):
+    """Nalaz: ATLAS_BOOTSTRAP_PORT=70000 -> socket sloj baca OverflowError
+    (port izvan 0-65535), ne OSError -> prije popravka bi ovo srušilo cijeli
+    `atlas serve` prije nego uvicorn uopce krene."""
+    result = start_bootstrap_server(str(tmp_path / "cert.pem"), "https://x:8443",
+                                    "127.0.0.1", port=70000)
     assert result is None
 
 
@@ -104,3 +114,4 @@ def test_bootstrap_server_routes(tmp_path):
             assert e.code == 404
     finally:
         server.shutdown()
+        server.server_close()

@@ -27,7 +27,7 @@ def _start_bootstrap(cert: str, host: str, port: int) -> None:
     ATLAS_BOOTSTRAP_PORT="0" isključuje, bind greška samo upozori (log)."""
     from atlas import config
     from atlas.ops import certs, preflight
-    from atlas.web.bootstrap_http import start_bootstrap_server, best_display_host
+    from atlas.web.bootstrap_http import start_bootstrap_server
 
     bport_raw = config._env("BOOTSTRAP_PORT", "8080")
     if bport_raw == "0":
@@ -37,7 +37,10 @@ def _start_bootstrap(cert: str, host: str, port: int) -> None:
     except ValueError:
         bport = 8080
     url_host = preflight.local_ip() if host == "0.0.0.0" else host
-    display = best_display_host(certs.friendly_names(), url_host)
+    # nalaz: display ime mora biti usklađeno sa SAN-om POSTOJEĆEG certa (v.
+    # certs.verified_display_host) — inače stara instalacija nudi ime koje
+    # cert uopće ne pokriva -> browser warning i nakon instalacije certa.
+    display = certs.verified_display_host(cert, certs.friendly_names(), url_host)
     https_url = f"https://{display}:{port}"
     thread = start_bootstrap_server(cert, https_url, host, port=bport)
     if thread is not None:

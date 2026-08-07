@@ -263,15 +263,8 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 
 def _best_name(names: list[str], fallback_ip: str) -> str:
-    """Najbolje ime za prikaz: prava FQDN (točka, nije atlas.local/.local),
-    pa hostname.local, pa fallback_ip."""
-    for n in names:
-        if "." in n and n != "atlas.local" and not n.endswith(".local"):
-            return n
-    for n in names:
-        if n.endswith(".local") and n != "atlas.local":
-            return n
-    return fallback_ip
+    """Tanki alias — jedina implementacija je certs.best_display_host."""
+    return certs.best_display_host(names, fallback_ip)
 
 
 def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
@@ -335,8 +328,10 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     out(f"HTTPS certifikat: {cert}")
     out(f"  SHA256: {certs.fingerprint_sha256(cert)}")
     best = _best_name(names, cert_ip)
+    from atlas import config
+    bport = config._env("BOOTSTRAP_PORT", "8080")
     out("  Na OVOM računalu: atlas trust")
-    out(f"  Radnici: nakon pokretanja servera otvore http://{best}:8080/postavi (bootstrap stranica)")
+    out(f"  Radnici: nakon pokretanja servera otvore http://{best}:{bport}/postavi (bootstrap stranica)")
 
     # 6) spremi net postavke
     spine.set_override("net", "host", bind)
@@ -400,7 +395,11 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
         host = spine.get_override("net", "host") or "127.0.0.1"
         port = spine.get_override("net", "port") or "8443"
         url_host = preflight.local_ip() if host == "0.0.0.0" else host
-        name = _best_name(certs.friendly_names(), url_host)
+        # nalaz: display ime mora biti usklađeno sa SAN-om POSTOJEĆEG certa —
+        # stara instalacija može imati cert=[atlas.local, IP] dok friendly_names()
+        # vec nudi novije ime (npr. nick.fritz.box) -> browser warning i nakon
+        # instalacije certa jer taj naziv cert uopće ne pokriva.
+        name = certs.verified_display_host(cert_path, certs.friendly_names(), url_host)
         from atlas import config
         bport = config._env("BOOTSTRAP_PORT", "8080")
         out("")

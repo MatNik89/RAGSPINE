@@ -88,6 +88,44 @@ def test_friendly_names_socket_exception_falls_back(monkeypatch):
     assert certs.friendly_names() == ["atlas.local"]
 
 
+def test_san_dns_names_returns_cert_dns_entries(tmp_path):
+    cert, _ = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"],
+                                         hostnames=["atlas.local"])
+    assert certs.san_dns_names(cert) == ["atlas.local"]
+
+
+def test_san_dns_names_empty_on_unreadable_cert(tmp_path):
+    bad = tmp_path / "cert.pem"
+    bad.write_text("nije certifikat")
+    assert certs.san_dns_names(str(bad)) == []
+    assert certs.san_dns_names(str(tmp_path / "ne-postoji.pem")) == []
+
+
+def test_verified_display_host_stari_cert_prikazuje_samo_san_ime(tmp_path):
+    """Nalaz: stara instalacija — cert SAN pokriva samo atlas.local, dok
+    friendly_names() vec nudi novije ime (nick.fritz.box). Display MORA
+    ostati na imenu koje cert stvarno pokriva — ne smije nuditi ime koje
+    izaziva browser warning."""
+    cert, _ = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"],
+                                         hostnames=["atlas.local"])
+    names = ["nick", "nick.fritz.box", "nick.local", "atlas.local"]
+    assert certs.verified_display_host(cert, names, "10.0.0.1") == "atlas.local"
+
+
+def test_verified_display_host_novi_cert_sa_svim_imenima(tmp_path):
+    names = ["nick", "nick.fritz.box", "nick.local", "atlas.local"]
+    cert, _ = certs.generate_self_signed(str(tmp_path), ips=["10.0.0.1"],
+                                         hostnames=names)
+    assert certs.verified_display_host(cert, names, "10.0.0.1") == "nick.fritz.box"
+
+
+def test_verified_display_host_necitljiv_cert_pada_na_ip(tmp_path):
+    bad = tmp_path / "cert.pem"
+    bad.write_text("nije certifikat")
+    names = ["nick", "nick.fritz.box", "nick.local", "atlas.local"]
+    assert certs.verified_display_host(str(bad), names, "10.0.0.1") == "10.0.0.1"
+
+
 def test_generate_recovers_from_orphan_key(tmp_path):
     """Ako ostane samo key.pem od crasha, regenerira se s novim certom."""
     # Simuliraj crash: kreiraj samo key.pem bez certa

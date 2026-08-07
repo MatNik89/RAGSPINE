@@ -120,3 +120,39 @@ def fingerprint_sha256(cert_path: str) -> str:
     cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
     raw = cert.fingerprint(hashes.SHA256()).hex().upper()
     return ":".join(raw[i:i + 2] for i in range(0, len(raw), 2))
+
+
+def san_dns_names(cert_path: str) -> list[str]:
+    """DNS imena iz SAN ekstenzije POSTOJEĆEG certa (isto x509 parsanje kao
+    _warn_if_san_stale). [] na bilo koju grešku (ne postoji/nečitljiv/bez SAN-a)
+    — pozivatelj tada pada na IP fallback."""
+    try:
+        cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        return list(san.get_values_for_type(x509.DNSName))
+    except Exception:
+        return []
+
+
+def best_display_host(names: list[str], fallback: str) -> str:
+    """Najbolje ime za prikaz klijentima: prava FQDN (točka, nije
+    atlas.local/.local), pa hostname.local, pa fallback (obično IP).
+    Jedna implementacija — wizard._best_name i bootstrap_http.best_display_host
+    su tanki aliasi na ovu."""
+    for n in names:
+        if "." in n and n != "atlas.local" and not n.endswith(".local"):
+            return n
+    for n in names:
+        if n.endswith(".local") and n != "atlas.local":
+            return n
+    return fallback
+
+
+def verified_display_host(cert_path: str, names: list[str], fallback: str) -> str:
+    """best_display_host, ali samo nad imenima koja SAN POSTOJEĆEG certa
+    stvarno pokriva (nalaz: stara instalacija može imati cert=[atlas.local, IP]
+    dok uputa nudi novije ime iz friendly_names() -> browser warning i nakon
+    instalacije certa). Prazan presjek (ili necitljiv cert) -> fallback (IP)."""
+    san = san_dns_names(cert_path)
+    candidates = [n for n in names if n in san]
+    return best_display_host(candidates, candidates[0] if candidates else fallback)

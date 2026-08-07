@@ -737,6 +737,10 @@ def test_page_gotovo_s_certom_ispisuje_uputu(tmp_path, monkeypatch):
     s.set_override("net", "cert_path", str(tmp_path / "cert.pem"))
     monkeypatch.setattr(wizard.certs, "friendly_names",
                         lambda: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
+    # cert (nepostojeći u ovom testu) SAN pokriva sva imena — display nije
+    # ograničen na atlas.local (v. test_page_gotovo_stari_cert_prikazuje_samo_san_ime)
+    monkeypatch.setattr(wizard.certs, "san_dns_names",
+                        lambda p: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
 
     class _Cfg:
         db_path = str(tmp_path / "t.db")
@@ -760,6 +764,8 @@ def test_page_gotovo_bootstrap_port_0_bez_http_koraka(tmp_path, monkeypatch):
     s.set_override("net", "cert_path", str(tmp_path / "cert.pem"))
     monkeypatch.setattr(wizard.certs, "friendly_names",
                         lambda: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
+    monkeypatch.setattr(wizard.certs, "san_dns_names",
+                        lambda p: ["nick", "nick.fritz.box", "nick.local", "atlas.local"])
 
     class _Cfg:
         db_path = str(tmp_path / "t.db")
