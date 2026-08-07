@@ -55,6 +55,11 @@ def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
     assert any("zauzet" in l.lower() for l in lines)
 
 
+def _picker_roots(monkeypatch):
+    from atlas.ops import folder_picker
+    monkeypatch.setattr(folder_picker, "_roots", lambda: ["/fixroot"])
+
+
 def test_page_mape_preskok(tmp_path):
     s = init_spine(str(tmp_path / "t.db"))
     ok = wizard.page_mape(s, None, input_fn=_reader("n"), out=lambda *_: None)
@@ -63,13 +68,15 @@ def test_page_mape_preskok(tmp_path):
     assert folders.list_folders(s) == []
 
 
-def test_page_mape_registrira_mapu(tmp_path):
+def test_page_mape_registrira_mapu(tmp_path, monkeypatch):
+    _picker_roots(monkeypatch)
     s = init_spine(str(tmp_path / "t.db"))
     d = tmp_path / "klijenti"
     d.mkdir()
-    # "d" (poveži), putanja za Klijente, prazno za preostale 3 uloge
+    # "d" (poveži); Klijenti: 3=Ručni upis pa putanja; ostale 3 uloge: 4=Odustani
     lines = []
-    ok = wizard.page_mape(s, None, input_fn=_reader("d", str(d), "", "", ""),
+    ok = wizard.page_mape(s, None,
+                          input_fn=_reader("d", "3", str(d), "4", "4", "4"),
                           out=lines.append)
     assert ok is True
     from atlas.business import folders
@@ -78,13 +85,14 @@ def test_page_mape_registrira_mapu(tmp_path):
     assert any("ATLAS_MOUNT_ROOTS" in l for l in lines)
 
 
-def test_page_mape_nedostupna_pa_odustane(tmp_path):
+def test_page_mape_nedostupna_pa_odustane(tmp_path, monkeypatch):
+    _picker_roots(monkeypatch)
     s = init_spine(str(tmp_path / "t.db"))
-    # UNC putanja — trebala bi biti nedostupna i očekujemo net use hint
     bad_unc = r"\\nas\share\nema"
-    # "d", nepostojeća UNC putanja, "n" (ne pokušava ponovno), prazno za ostale 3
+    # "d"; Klijenti: 3=Ručni upis, nepostojeći UNC, "n" (bez retrya); ostale: 4
     lines = []
-    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad_unc, "n", "", "", ""),
+    ok = wizard.page_mape(s, None,
+                          input_fn=_reader("d", "3", bad_unc, "n", "4", "4", "4"),
                           out=lines.append)
     assert ok is True
     assert any("net use" in l for l in lines)
@@ -92,13 +100,13 @@ def test_page_mape_nedostupna_pa_odustane(tmp_path):
     assert folders.list_folders(s) == []
 
 
-def test_page_mape_ne_unc_putanja_nema_net_use(tmp_path):
-    """Ne-UNC (npr. /nema/takve/mape) nepostojeća putanja — očekuj 'nije UNC',
-    NEMA 'net use' hint-a."""
+def test_page_mape_ne_unc_putanja_nema_net_use(tmp_path, monkeypatch):
+    _picker_roots(monkeypatch)
     s = init_spine(str(tmp_path / "t.db"))
-    bad_local = "/nema/takve/mape"
     lines = []
-    ok = wizard.page_mape(s, None, input_fn=_reader("d", bad_local, "n", "", "", ""),
+    ok = wizard.page_mape(s, None,
+                          input_fn=_reader("d", "3", "/nema/takve/mape", "n",
+                                           "4", "4", "4"),
                           out=lines.append)
     assert ok is True
     text = "\n".join(lines)
@@ -106,13 +114,36 @@ def test_page_mape_ne_unc_putanja_nema_net_use(tmp_path):
     assert "net use" not in text.lower()
 
 
-def test_page_mape_upozorava_na_slovo_pogona(tmp_path):
+def test_page_mape_drive_warn_samo_za_remote(tmp_path, monkeypatch):
+    """E2E nalaz: lokalni fiksni disk (D:\\KLIJENTI) NE dobiva ⚠; upozorenje
+    samo kad _drive_warn kaže DRIVE_REMOTE."""
+    _picker_roots(monkeypatch)
     s = init_spine(str(tmp_path / "t.db"))
-    # "d", drive-letter putanja (ne postoji na Linuxu), "n", prazno za ostale 3
+    monkeypatch.setattr(wizard, "_drive_warn", lambda p: True)
     lines = []
-    wizard.page_mape(s, None, input_fn=_reader("d", "Z:\\skenovi", "n", "", "", ""),
+    wizard.page_mape(s, None,
+                     input_fn=_reader("d", "3", "Z:\\skenovi", "n", "4", "4", "4"),
                      out=lines.append)
-    assert any("Slovo pogona" in l for l in lines)
+    assert any("mrežni pogon" in l for l in lines)
+
+
+def test_page_mape_lokalni_disk_bez_upozorenja(tmp_path, monkeypatch):
+    _picker_roots(monkeypatch)
+    s = init_spine(str(tmp_path / "t.db"))
+    d = tmp_path / "kl"
+    d.mkdir()
+    monkeypatch.setattr(wizard, "_drive_warn", lambda p: False)
+    lines = []
+    wizard.page_mape(s, None, input_fn=_reader("d", "3", str(d), "4", "4", "4"),
+                     out=lines.append)
+    assert not any("mrežni pogon" in l for l in lines)
+
+
+def test_drive_warn_ne_windows_uvijek_false():
+    if wizard.os.name == "nt":
+        return
+    assert wizard._drive_warn("Z:\\bilo") is False
+    assert wizard._drive_warn("/posix/putanja") is False
 
 
 def test_net_use_hint_iz_unc_putanje():

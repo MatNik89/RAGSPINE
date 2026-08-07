@@ -14,7 +14,7 @@ import types
 from pathlib import Path
 
 from atlas.core.llm import LLMError, LLMUnavailable
-from atlas.ops import backup, certs, model_table, preflight, tui, tui_curses, winsvc, wizard_state
+from atlas.ops import backup, certs, folder_picker, model_table, preflight, tui, tui_curses, winsvc, wizard_state
 from atlas.web import firstrun
 
 _MIN_PW = 8
@@ -334,29 +334,39 @@ def _net_use_hint(unc: str) -> str:
     return f"net use {share} /user:DOMENA\\korisnik * /persistent:no"
 
 
+def _drive_warn(path: str) -> bool:
+    """⚠ samo za MAPIRANI MREŽNI pogon (DRIVE_REMOTE=4) — lokalni fiksni
+    disk servis normalno vidi (E2E: D:\\KLIJENTI lažno upozorenje)."""
+    m = re.match(r"^([A-Za-z]:)", path)
+    if not m or os.name != "nt":
+        return False
+    try:
+        import ctypes
+        return ctypes.windll.kernel32.GetDriveTypeW(m.group(1) + "\\") == 4
+    except Exception:
+        return False
+
+
 def page_mape(spine, cfg, *, input_fn=input, out=print) -> bool:
     """Stranica 5: mrežne mape po ulogama (UNC putanje), preskočivo.
     Test pristupa ide kao trenutni korisnik (servisni račun ne postoji —
     wrapper backlog, v. winsvc); registracija ide u istu folders tablicu
     koju koristi web Postavke → Mrežne mape."""
     from atlas.business import folders
-    tui.print_header("5/6  Mape / mrežni pogoni", out=out)
+    tui.print_header("5/6  Mape / mrežni resursi", out=out)
     if not tui.prompt_yes_no("Poveži mrežne mape sada? (kasnije: Postavke → Mrežne mape)",
                              default=True, input_fn=input_fn, out=out):
         return True
     registered = []
     for role, naziv in _MAPE_ULOGE:
         while True:
-            path = tui.prompt_text(
-                f"{naziv} — UNC putanja (\\\\server\\share\\...; prazno = preskoči)",
-                input_fn=input_fn, out=out)
+            out(f"{naziv}:")
+            path = folder_picker.pick_folder(input_fn=input_fn, out=out)
             if not path:
                 break
-            if re.match(r"^[A-Za-z]:", path):
-                # ponytail: upozorenje ne blokira jer os.path.realpath na Windowsu
-                # mapped-drive obično razriješi u UNC; blokada bi lažno odbila valjane
-                # konfiguracije (do tada admin koristi mapped drive, što je OK).
-                out("  ⚠ Slovo pogona (npr. Z:) servisni račun ne vidi — koristi UNC putanju.")
+            if _drive_warn(path):
+                out("  ⚠ Mapirani mrežni pogon (npr. Z:) servisni račun ne vidi "
+                    "— koristi UNC putanju (\\\\server\\share\\...).")
             if not os.path.isdir(path):
                 out(f"  ✗ Nedostupno: {path}")
                 if path.startswith("\\\\"):
