@@ -673,4 +673,5 @@ def test_requirements_ne_pusta_warnings(monkeypatch, recwarn):
     monkeypatch.setattr(preflight, "internet_ok", lambda: True)
     monkeypatch.setattr(preflight.winpath, "find_binary", lambda k: None)
     preflight.requirements(None)
-    assert len(recwarn) == 0
+    # samo NAŠ warning je predmet testa — tuđi (order-dependent na CI-ju) ne smiju rušiti
+    assert not [w for w in recwarn if "fitz is deprecated" in str(w.message)]

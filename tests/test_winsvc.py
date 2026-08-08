@@ -59,7 +59,8 @@ def test_winsw_xml_structure():
     assert "<name>ATLAS</name>" in xml
     assert "<executable>C:/Program Files/atlas/atlas.exe</executable>" in xml
     assert "<arguments>serve</arguments>" in xml
-    assert "C:/data/logs" in xml
+    import os
+    assert os.path.join("C:/data", "logs") in xml   # separator ovisi o OS-u
     assert xml.count('action="restart"') == 3
     assert 'action="none"' in xml
     assert "<stoptimeout>15 sec</stoptimeout>" in xml
