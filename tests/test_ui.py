@@ -251,3 +251,58 @@ def test_toast_definiran_prije_upotrebe_u_page_shell():
     assert html_out.index("function toast(") < html_out.index("loadDashboard();")
     assert "box.id = 'toasts'" in html_out
     assert "aria-live" in html_out
+
+
+# --- Faza 2 T2: dvokoračni login + Postavke → Radnici -------------------
+
+def test_login_page_has_step1_form_and_js_flows():
+    """Korak 1 = samo user + Dalje; JS prebacuje na password ili activate
+    prema /login/step odgovoru, bez redizajna (izvan design systema)."""
+    from atlas.web.templates_login import render_login
+    html_out = render_login()
+    assert 'id="username"' in html_out
+    assert 'id="step1"' in html_out and "Dalje" in html_out
+    assert "/login/step" in html_out
+    assert "/login/activate" in html_out
+    assert "/auth/login" in html_out
+    assert 'id="password"' in html_out and 'id="pw"' in html_out
+    assert 'id="activate"' in html_out and 'id="pw1"' in html_out and 'id="pw2"' in html_out
+    assert "minlength=\"8\"" in html_out
+    assert "alert(" not in html_out
+
+
+def test_login_page_activate_checks_length_and_match_clientside():
+    from atlas.web.templates_login import render_login
+    html_out = render_login()
+    assert "p1.length < 8" in html_out
+    assert "p1 !== p2" in html_out
+
+
+def test_ui_radnici_authed_renders_table_form_and_actions(spine, cfg):
+    c = _client(spine, cfg)
+    tok = _token(c, spine)  # prvi login = owner (admin-razina)
+    r = c.get("/ui/radnici", headers=_auth(tok))
+    assert r.status_code == 200
+    assert "Radnici" in r.text
+    assert "/radnici" in r.text
+    assert "Dodaj radnika" in r.text
+    assert 'id="ra-user"' in r.text and 'id="ra-role"' in r.text
+    assert "Resetiraj šifru" in r.text
+    assert "Ukloni iz ureda" in r.text
+    assert "alert(" not in r.text
+
+
+def test_ui_radnici_no_auth_redirects(spine, cfg):
+    add_user(spine, "_o", "pw")
+    complete_setup(spine)
+    c = _client(spine, cfg)
+    r = c.get("/ui/radnici", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/login"
+
+
+def test_postavke_lists_radnici_card():
+    from atlas.web.templates_ui import postavke_page
+    html_out = postavke_page()
+    assert "/ui/radnici" in html_out
+    assert "<h2>Radnici</h2>" in html_out

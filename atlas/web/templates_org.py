@@ -159,7 +159,7 @@ load();
 """
 
 
-def radnici_page() -> str:
+def vidljivost_page() -> str:
     body = f"""<h1>Radnici — vidljivost klijenata</h1>
 <p class="meta"><a href="/ui/postavke">← Postavke</a> · Zadano svaki radnik vidi
 sve klijente. Ovdje možeš pojedinom radniku ograničiti vidljivost na izabrane
@@ -181,6 +181,107 @@ klijente. Administrator i vlasnik uvijek vide sve.</p>
   </div>
 </div>
 <script>{_RADNICI_JS}</script>"""
+    return page_shell("Vidljivost klijenata", body, active="postavke")
+
+
+_RADNICI_ADMIN_JS = """
+function $(id){ return document.getElementById(id); }
+var LABELS = {member: 'radnik', admin: 'administrator', owner: 'vlasnik'};
+
+function confirmBtn(label, onYes){
+  var b = document.createElement('button');
+  b.className = 'btn btn-ghost';
+  b.textContent = label;
+  var armed = false, timer = null;
+  b.addEventListener('click', function(){
+    if (!armed){
+      armed = true; b.textContent = 'Sigurno? Klikni opet';
+      timer = setTimeout(function(){ armed = false; b.textContent = label; }, 3000);
+      return;
+    }
+    clearTimeout(timer); armed = false; b.textContent = label;
+    onYes();
+  });
+  return b;
+}
+
+async function load(){
+  var res = await fetch('/radnici', {credentials:'same-origin'});
+  if (!res.ok){ $('ra-err').textContent = 'Samo administrator vidi ovu stranicu.'; return; }
+  $('ra-err').textContent = '';
+  var tb = $('ra-list'); tb.textContent = '';
+  (await res.json()).forEach(function(w){
+    var tr = document.createElement('tr');
+    var td1 = document.createElement('td'); td1.textContent = w.user;
+    var td2 = document.createElement('td'); td2.textContent = LABELS[w.role] || w.role;
+    var td3 = document.createElement('td');
+    var chip = document.createElement('span');
+    chip.className = 'chip ' + (w.aktivan ? 'ok' : 'warn');
+    chip.textContent = w.aktivan ? 'aktivan' : 'čeka aktivaciju';
+    td3.appendChild(chip);
+    var td4 = document.createElement('td'); td4.textContent = w.device || '–';
+    var td5 = document.createElement('td');
+    td5.style.display = 'flex'; td5.style.gap = '.4rem';
+    td5.appendChild(confirmBtn('Resetiraj šifru', function(){ resetPw(w.id); }));
+    td5.appendChild(confirmBtn('Ukloni iz ureda', function(){ removeWorker(w.id); }));
+    tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3); tr.appendChild(td4); tr.appendChild(td5);
+    tb.appendChild(tr);
+  });
+}
+
+async function resetPw(id){
+  var res = await fetch('/radnici/' + id + '/reset', {method:'POST', credentials:'same-origin'});
+  var msg = $('ra-msg');
+  if (res.ok){ msg.textContent = 'Šifra resetirana — radnik ponovno prolazi aktivaciju.'; load(); }
+  else { var e = await res.json().catch(function(){return{};});
+         msg.textContent = 'Greška: ' + (e.detail || res.status); }
+}
+
+async function removeWorker(id){
+  var res = await fetch('/radnici/' + id, {method:'DELETE', credentials:'same-origin'});
+  var msg = $('ra-msg');
+  if (res.ok){ msg.textContent = 'Radnik uklonjen iz ureda.'; load(); }
+  else { var e = await res.json().catch(function(){return{};});
+         msg.textContent = 'Greška: ' + (e.detail || res.status); }
+}
+
+async function addWorker(){
+  var username = $('ra-user').value.trim();
+  var msg = $('ra-msg');
+  if (!username){ msg.textContent = 'Upiši korisničko ime.'; return; }
+  var res = await fetch('/radnici', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username: username, role: $('ra-role').value})});
+  if (res.ok){ $('ra-user').value = ''; msg.textContent = 'Radnik dodan — čeka aktivaciju.'; load(); }
+  else { var e = await res.json().catch(function(){return{};});
+         msg.textContent = 'Greška: ' + (e.detail || res.status); }
+}
+
+$('ra-add').addEventListener('click', addWorker);
+load();
+"""
+
+
+def radnici_page() -> str:
+    body = f"""<h1>Radnici</h1>
+<p class="meta"><a href="/ui/postavke">← Postavke</a> · Dodaj radnika (bez šifre —
+sam je postavlja pri prvoj prijavi), resetiraj šifru ili ga ukloni iz ureda.
+"Ukloni iz ureda" ne briše račun, samo članstvo — korisničko ime i povijest ostaju.</p>
+<p id="ra-err" class="meta"></p>
+<div class="card" style="max-width:760px">
+  <table><thead><tr><th>Korisnik</th><th>Uloga</th><th>Stanje</th><th>Uređaj</th><th></th></tr></thead>
+    <tbody id="ra-list"></tbody></table>
+</div>
+<div class="card" style="max-width:520px">
+  <h2>Dodaj radnika</h2>
+  <div style="display:flex;gap:.5rem;align-items:center">
+    <input type="text" id="ra-user" placeholder="korisničko ime">
+    <select id="ra-role"><option value="member">radnik</option><option value="admin">administrator</option></select>
+    <button type="button" class="btn" id="ra-add">Dodaj</button>
+  </div>
+  <p id="ra-msg" class="meta"></p>
+</div>
+<script>{_RADNICI_ADMIN_JS}</script>"""
     return page_shell("Radnici", body, active="postavke")
 
 

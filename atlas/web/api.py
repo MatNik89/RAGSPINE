@@ -61,7 +61,7 @@ from atlas.web.templates_mape import mape_page
 from atlas.web.templates_model import model_page
 from atlas.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
 from atlas.web.templates_org import (org_page, radnici_page, skills_page,
-                                        wiki_page as wiki_page_ui)
+                                        vidljivost_page, wiki_page as wiki_page_ui)
 from atlas.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
                                         klijenti_page, obavijesti_page, postavke_page, upute_page)
 
@@ -1193,6 +1193,14 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         return org_page()
+
+    @app.get("/ui/vidljivost", response_class=HTMLResponse)
+    def ui_vidljivost(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        return vidljivost_page()
 
     @app.get("/ui/radnici", response_class=HTMLResponse)
     def ui_radnici(request: Request):

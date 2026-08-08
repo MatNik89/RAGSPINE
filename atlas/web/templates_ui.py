@@ -694,7 +694,8 @@ def postavke_page() -> str:
         ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
         ("Vrste dokumenata", "/ui/dok-tipovi", "Dokumenti s poljima za automatsko čitanje (osobna, putovnica…) i istekom."),
         ("Organizacija", "/ui/org", "Članovi i uloge (viewer/member/admin/owner)."),
-        ("Radnici", "/ui/radnici", "Ograniči kojem radniku su vidljivi koji klijenti."),
+        ("Radnici", "/ui/radnici", "Dodaj radnike, aktivacija prvom prijavom, reset šifre, uklanjanje."),
+        ("Vidljivost klijenata", "/ui/vidljivost", "Ograniči kojem radniku su vidljivi koji klijenti."),
         ("Wiki", "/ui/wiki", "Interno znanje ureda koje LLM održava; zaključavanje stranica."),
         ("Skills", "/ui/skills", "Interni postupci s okidačima — chat ih automatski nudi."),
     ]
