@@ -1,9 +1,11 @@
 from fastapi.testclient import TestClient
 
 from atlas.business import model_settings
+from atlas.business.model_settings import PROVIDER_CATALOG, PROVIDERS
 from atlas.config import get_config
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
+from atlas.web.templates_model import model_page
 from tests.conftest import complete_setup
 
 
@@ -19,6 +21,48 @@ def _token(c, spine):
 
 def _auth(t):
     return {"Authorization": f"Bearer {t}"}
+
+
+# ---------- B11: katalog providera ----------
+
+def test_provider_catalog_entries_valid():
+    keys = [p["key"] for p in PROVIDER_CATALOG]
+    assert len(keys) == len(set(keys)), "katalog ključevi moraju biti jedinstveni"
+    for p in PROVIDER_CATALOG:
+        assert set(("key", "naziv", "base_url", "path", "needs_key", "hint")) <= set(p)
+        assert isinstance(p["needs_key"], bool)
+        assert p["path"].startswith("/")
+
+def test_providers_keeps_legacy_keys():
+    assert PROVIDERS[:3] == ("anthropic", "openai", "ollama") or \
+        {"anthropic", "openai", "ollama"} <= set(PROVIDERS)
+
+def test_gemini_path_is_nonstandard():
+    gemini = next(p for p in PROVIDER_CATALOG if p["key"] == "gemini")
+    assert gemini["path"] == "/v1beta/openai/chat/completions"
+
+def test_new_provider_still_validates_https(spine):
+    import pytest
+    with pytest.raises(ValueError):  # SSRF zaštita mora vrijediti i za nove providere
+        model_settings.save(spine, "deepseek", base_url="http://192.168.1.5")
+
+def test_apply_new_provider_uses_catalog_path(spine, cfg):
+    model_settings.save(spine, "gemini", model="gemini-x", api_key="k")
+    applied = model_settings.apply(spine, cfg)
+    assert applied.llm_path == "/v1beta/openai/chat/completions"
+    assert applied.llm_base_url == "https://generativelanguage.googleapis.com"
+
+def test_apply_openai_default_path_unchanged(spine, cfg):
+    model_settings.save(spine, "openai", model="gpt-x", api_key="k")
+    applied = model_settings.apply(spine, cfg)
+    assert applied.llm_path == "/v1/chat/completions"
+    assert applied.llm_base_url == "https://api.openai.com"
+
+def test_templates_model_lists_catalog_and_manual_entry():
+    html = model_page()
+    for p in PROVIDER_CATALOG:
+        assert p["naziv"] in html
+    assert "Ručni unos" in html
 
 
 # ---------- business ----------

@@ -1,5 +1,6 @@
 """HTML za /ui/model — odabir LLM providera (mozak vs gorivo). API ključ se
 šalje ali nikad ne vraća (GET daje samo has_api_key). Reuse design-shell."""
+from atlas.business.model_settings import PROVIDER_CATALOG
 from atlas.web.templates_ui import page_shell
 
 _MODEL_JS = """
@@ -15,6 +16,12 @@ async function loadModel(){
   $('m-embed').value = d.embed_model || '';
   $('m-ollama').value = d.ollama_url || '';
   $('m-key').placeholder = d.has_api_key ? '•••••••• (spremljeno — prazno zadržava)' : 'API ključ';
+}
+
+function onProviderChange(){
+  var opt = $('m-provider').options[$('m-provider').selectedIndex];
+  var base = opt.getAttribute('data-baseurl') || '';
+  if($('m-provider').value !== 'custom'){ $('m-base').value = base; }
 }
 
 async function saveModel(){
@@ -38,23 +45,31 @@ async function testModel(){
   else { msg.textContent='✗ Ne radi: '+(d.error||'nepoznato'); }
 }
 
+$('m-provider').addEventListener('change', onProviderChange);
 $('m-save').addEventListener('click', saveModel);
 $('m-test').addEventListener('click', testModel);
 loadModel();
 """
 
 
+def _provider_options() -> str:
+    opts = []
+    for p in PROVIDER_CATALOG:
+        opts.append(
+            f'<option value="{p["key"]}" data-baseurl="{p["base_url"]}">{p["naziv"]}</option>')
+    return "\n      ".join(opts)
+
+
 def model_page() -> str:
     body = f"""<h1>Model (LLM)</h1>
 <p class="meta"><a href="/ui/postavke">← Postavke</a> · ATLAS je mozak; model je gorivo.
 Prebaci providera bilo kad — pravila, memorija i pretraga ostaju iste.</p>
+<p class="meta">Prijavljeni Claude Code/Codex račun na serveru koristi se automatski kad nema ključa.</p>
 <div class="card" style="max-width:640px">
   <form class="stack" onsubmit="return false">
     <label for="m-provider">Provider</label>
     <select id="m-provider">
-      <option value="anthropic">Anthropic (Claude)</option>
-      <option value="openai">OpenAI-compat (ChatGPT i sl.)</option>
-      <option value="ollama">Lokalni (Ollama)</option>
+      {_provider_options()}
     </select>
     <label for="m-model">Model (naziv)</label>
     <input type="text" id="m-model" placeholder="npr. claude-… / gpt-… / llama3.1">

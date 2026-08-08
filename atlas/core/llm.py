@@ -119,7 +119,10 @@ class LLMClient:
                 raise LLMError(f"malformed provider response: {resp}") from None
             return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
 
-        url = f"{base}/v1/chat/completions"
+        # B10: put iza base_url dolazi iz kataloga (business/model_settings.py PROVIDER_CATALOG),
+        # koji apply() upiše u cfg.llm_path po odabranom provideru; prazno/zadano = staro ponašanje.
+        path = getattr(cfg, "llm_path", "") or "/v1/chat/completions"
+        url = f"{base.rstrip('/')}{path}"
         headers = {"content-type": "application/json"}
         if key:
             headers["authorization"] = f"Bearer {key}"

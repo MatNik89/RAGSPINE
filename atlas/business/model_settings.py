@@ -8,7 +8,49 @@ import urllib.parse
 
 from atlas.core.net import _is_blocked_addr
 
-PROVIDERS = ("anthropic", "openai", "ollama")
+# B11: statični katalog providera (ARHITEKTURA.md §5.1) — namjerno nema ekran za
+# uređivanje (audit "Što NE dirati" #3) niti popis modela po provideru (#4); tipični
+# modeli idu kao <datalist> prijedlog u UI, ne ovdje. "custom" = ručni unos base_url-a.
+# path = put iza base_url za OpenAI-kompat pozive (core/llm.py); "" znači zadano
+# "/v1/chat/completions" (core/llm.py). Gemini ima nestandardni put (B10).
+PROVIDER_CATALOG = [
+    {"key": "anthropic", "naziv": "Anthropic (Claude)", "base_url": "https://api.anthropic.com",
+     "path": "/v1/messages", "needs_key": True, "hint": "Zahtijeva API ključ s console.anthropic.com."},
+    {"key": "openai", "naziv": "OpenAI-compat (ChatGPT i sl.)", "base_url": "https://api.openai.com",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI ili bilo koji OpenAI-kompatibilan servis."},
+    {"key": "ollama", "naziv": "Lokalni (Ollama)", "base_url": "http://127.0.0.1:11434",
+     "path": "/v1/chat/completions", "needs_key": False, "hint": "Lokalni server; ključ nije potreban."},
+    {"key": "deepseek", "naziv": "DeepSeek", "base_url": "https://api.deepseek.com",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan API."},
+    {"key": "moonshot", "naziv": "Moonshot / Kimi", "base_url": "https://api.moonshot.ai",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan API."},
+    {"key": "groq", "naziv": "Groq", "base_url": "https://api.groq.com/openai",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "Brza inferencija; OpenAI-kompatibilan API."},
+    {"key": "mistral", "naziv": "Mistral", "base_url": "https://api.mistral.ai",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan API."},
+    {"key": "openrouter", "naziv": "OpenRouter", "base_url": "https://openrouter.ai/api",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "Agregator više providera iza jednog ključa."},
+    {"key": "xai", "naziv": "xAI (Grok)", "base_url": "https://api.x.ai",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan API."},
+    {"key": "together", "naziv": "Together AI", "base_url": "https://api.together.xyz",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan API."},
+    {"key": "gemini", "naziv": "Google Gemini", "base_url": "https://generativelanguage.googleapis.com",
+     "path": "/v1beta/openai/chat/completions", "needs_key": True,
+     "hint": "OpenAI-kompatibilan endpoint na nestandardnom putu."},
+    {"key": "custom", "naziv": "Ručni unos…", "base_url": "",
+     "path": "/v1/chat/completions", "needs_key": True,
+     "hint": "Ručno upiši base URL bilo kojeg OpenAI-kompatibilnog servera."},
+]
+_CATALOG_BY_KEY = {p["key"]: p for p in PROVIDER_CATALOG}
+PROVIDERS = tuple(p["key"] for p in PROVIDER_CATALOG)
 _KEYS = ("provider", "model", "base_url", "api_key", "embed_model", "ollama_url")
 
 
@@ -49,8 +91,10 @@ def save(spine, provider: str, model: str = "", base_url: str = "", api_key: str
     if provider not in PROVIDERS:
         raise ValueError(f"nepoznat provider: {provider!r}")
     base_url = (base_url or "").strip()
-    # remote provideri: base_url mora biti javni https (ako je zadan)
-    if provider in ("anthropic", "openai") and base_url:
+    # remote provideri (svi osim Ollame): base_url mora biti javni https (ako je zadan).
+    # B11 proširio popis providera preko anthropic/openai — isti SSRF/eksfiltracijski
+    # rizik vrijedi za svakog od njih (i za "custom"), pa se uvjet drži na "nije ollama".
+    if provider != "ollama" and base_url:
         _validate_remote_url(base_url)
 
     prev = _raw(spine)
@@ -91,10 +135,13 @@ def apply(spine, cfg):
         return dataclasses.replace(cfg, llm_provider="anthropic", llm_base_url=b,
                                    llm_api_key=s["api_key"], llm_model=model,
                                    anthropic_base_url=b, embed_model=embed)
-    # openai-compat: llm.py dodaje "/v1/chat/completions", pa base BEZ /v1
+    # openai-compat (svi ostali katalog ključevi, uklj. "custom"): put iza base_url
+    # dolazi iz kataloga (B10) — zadano "/v1/chat/completions" ako ključ nije poznat.
+    entry = _CATALOG_BY_KEY.get(prov, {})
     return dataclasses.replace(cfg, llm_provider="openai",
-                               llm_base_url=(base or "https://api.openai.com"),
-                               llm_api_key=s["api_key"], llm_model=model, embed_model=embed)
+                               llm_base_url=(base or entry.get("base_url") or "https://api.openai.com"),
+                               llm_api_key=s["api_key"], llm_model=model, embed_model=embed,
+                               llm_path=entry.get("path") or "/v1/chat/completions")
 
 
 def test_connection(spine, cfg) -> dict:

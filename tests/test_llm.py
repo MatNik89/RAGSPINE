@@ -19,6 +19,28 @@ def test_openai_path(cfg):
     r = LLMClient(cfg, transport=_fake_openai).complete([{"role": "user", "content": "hej"}])
     assert r.text == "odgovor"
 
+def test_openai_default_path_unchanged(cfg):
+    # B10: bez cfg.llm_path (prazno = default) URL mora ostati identičan starom ponašanju.
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "x"
+    seen = {}
+    def transport(url, headers, body):
+        seen["url"] = url
+        return {"choices": [{"message": {"content": "ok"}}], "model": body["model"], "usage": {}}
+    LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}])
+    assert seen["url"] == "https://api.deepseek.com/v1/chat/completions"
+
+def test_openai_custom_path_for_gemini(cfg):
+    # B10: katalog daje nestandardni put za Gemini; klijent mora graditi točan URL.
+    cfg.llm_base_url = "https://generativelanguage.googleapis.com"
+    cfg.llm_path = "/v1beta/openai/chat/completions"
+    cfg.llm_api_key = "k"; cfg.llm_model = "gemini-x"
+    seen = {}
+    def transport(url, headers, body):
+        seen["url"] = url
+        return {"choices": [{"message": {"content": "ok"}}], "model": body["model"], "usage": {}}
+    LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}])
+    assert seen["url"] == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
 def test_anthropic_path(cfg):
     cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "claude-sonnet-5"
     r = LLMClient(cfg, transport=_fake_anthropic).complete(

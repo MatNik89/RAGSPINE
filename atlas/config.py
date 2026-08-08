@@ -51,6 +51,7 @@ class Config:
     apprise_urls: list[str]
     mount_roots: list[str]
     digest_hour: int
+    llm_path: str = ""  # OpenAI-kompat put iza base_url (B10); "" = /v1/chat/completions
 
     @classmethod
     def from_env(cls) -> "Config":
