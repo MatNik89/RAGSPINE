@@ -219,7 +219,7 @@ async function load(){
     chip.className = 'chip ' + (w.aktivan ? 'ok' : 'warn');
     chip.textContent = w.aktivan ? 'aktivan' : 'čeka aktivaciju';
     td3.appendChild(chip);
-    var td4 = document.createElement('td'); td4.textContent = w.device || '–';
+    var td4 = document.createElement('td'); td4.textContent = w.device ? w.device.name : '–';
     var td5 = document.createElement('td');
     td5.style.display = 'flex'; td5.style.gap = '.4rem';
     td5.appendChild(confirmBtn('Resetiraj šifru', function(){ resetPw(w.id); }));

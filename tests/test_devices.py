@@ -203,6 +203,58 @@ def test_scan_wrong_kind_rejected(spine, cfg):
         devices.print_doc(spine, cfg, 424242, 1)
 
 
+# --- radne stanice (Faza 2, sekcija 4) -----------------------------------------
+
+def test_scanner_and_printer_get_default_caps(spine):
+    d = devices.add_device(spine, "scanner", "Ured", "http://127.0.0.1:9999/eSCL")
+    assert d["caps"] == devices.DEFAULT_CAPS
+    assert d["worker_username"] is None and d["mac"] is None and d["host"] is None
+
+
+def test_radna_stanica_add_with_caps_and_worker_roundtrip(spine):
+    d = devices.add_device(
+        spine, "radna-stanica", "Ana-PC", host="127.0.0.1", mac="AA:BB:CC:DD:EE:FF",
+        worker_username="ana", caps={"wol": True, "shutdown_order": 2, "run_programs": True})
+    assert d["kind"] == "radna-stanica"
+    assert d["host"] == "127.0.0.1" and d["mac"] == "AA:BB:CC:DD:EE:FF"
+    assert d["worker_username"] == "ana"
+    assert d["caps"] == {"shutdown_order": 2, "wol": True,
+                          "run_programs": True, "monitor_only": False}
+    [listed] = devices.list_devices(spine, kind="radna-stanica")
+    assert listed["caps"] == d["caps"]
+
+
+def test_radna_stanica_public_host_rejected(spine):
+    with pytest.raises(lan.LanBlocked):
+        devices.add_device(spine, "radna-stanica", "Zla", host="8.8.8.8")
+
+
+def test_radna_stanica_without_host_allowed(spine):
+    d = devices.add_device(spine, "radna-stanica", "Bez-hosta")
+    assert d["host"] is None
+
+
+def test_update_device_partial_fields(spine):
+    d = devices.add_device(spine, "radna-stanica", "Ana-PC", host="127.0.0.1")
+    updated = devices.update_device(spine, d["id"], worker_username="ana",
+                                    caps={"wol": True})
+    assert updated["worker_username"] == "ana"
+    assert updated["caps"]["wol"] is True
+    assert updated["host"] == "127.0.0.1"  # netaknuto polje ostaje
+    with pytest.raises(ValueError):
+        devices.update_device(spine, 424242, name="x")
+
+
+def test_device_for_worker_returns_bound_workstation_or_none(spine):
+    assert devices.device_for_worker(spine, "ana") is None
+    devices.add_device(spine, "radna-stanica", "Ana-PC", host="127.0.0.1",
+                       worker_username="ana")
+    found = devices.device_for_worker(spine, "ana")
+    assert found is not None and found["name"] == "Ana-PC"
+    assert devices.device_for_worker(spine, "boris") is None
+    assert devices.device_for_worker(spine, "") is None
+
+
 # --- API ----------------------------------------------------------------------
 
 def test_api_devices_admin_gate_and_scan(spine, cfg, device_server):
@@ -243,6 +295,72 @@ def test_api_devices_admin_gate_and_scan(spine, cfg, device_server):
     assert c.delete(f"/devices/{dev_id}", headers=ho).status_code == 200
     r = c.get("/ui/uredjaji", headers=ho)
     assert r.status_code == 200 and "Uređaji" in r.text
+
+
+def test_api_radna_stanica_crud_and_radnici_device_join(spine, cfg):
+    from fastapi.testclient import TestClient
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
+    from tests.conftest import complete_setup
+
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw", role="admin")
+    complete_setup(spine)
+    owner = c.post("/auth/login", json={"username": "gazda", "password": "pw"}).json()["token"]
+    add_user(spine, "boris", "pw")
+    worker = c.post("/auth/login", json={"username": "boris", "password": "pw"}).json()["token"]
+    ho = {"Authorization": f"Bearer {owner}"}
+    hw = {"Authorization": f"Bearer {worker}"}
+
+    payload = {"kind": "radna-stanica", "name": "Boris-PC", "host": "127.0.0.1",
+              "mac": "AA:BB:CC:DD:EE:FF", "worker_username": "boris",
+              "caps": {"wol": True, "shutdown_order": 1}}
+    assert c.post("/devices", headers=hw, json=payload).status_code == 403
+    r = c.post("/devices", headers=ho, json=payload)
+    assert r.status_code == 200
+    dev = r.json()
+    assert dev["caps"] == {"shutdown_order": 1, "wol": True,
+                           "run_programs": False, "monitor_only": False}
+    dev_id = dev["id"]
+
+    # PATCH ažurira samo poslana polja, admin-only
+    assert c.patch(f"/devices/{dev_id}", headers=hw, json={"mac": "x"}).status_code == 403
+    r = c.patch(f"/devices/{dev_id}", headers=ho, json={"caps": {"run_programs": True}})
+    assert r.status_code == 200
+    assert r.json()["caps"]["run_programs"] is True
+    assert r.json()["host"] == "127.0.0.1"  # netaknuto polje ostaje
+    assert c.patch("/devices/424242", headers=ho, json={"mac": "x"}).status_code == 404
+
+    # GET /radnici sad popunjava device polje join-om po worker_username
+    radnici = c.get("/radnici", headers=ho).json()
+    boris_row = next(r for r in radnici if r["user"] == "boris")
+    assert boris_row["device"]["name"] == "Boris-PC"
+    gazda_row = next(r for r in radnici if r["user"] == "gazda")
+    assert gazda_row["device"] is None
+
+
+def test_api_devices_invalid_kind_rejected(spine, cfg):
+    from fastapi.testclient import TestClient
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
+    from tests.conftest import complete_setup
+
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw", role="admin")
+    complete_setup(spine)
+    owner = c.post("/auth/login", json={"username": "gazda", "password": "pw"}).json()["token"]
+    r = c.post("/devices", headers={"Authorization": f"Bearer {owner}"},
+              json={"kind": "toster", "name": "X"})
+    assert r.status_code == 400
+
+
+def test_devices_page_has_workstation_section_no_alert():
+    from atlas.web.templates_devices import devices_page
+    html = devices_page()
+    assert "Radne stanice" in html
+    assert "ws-worker" in html and "ws-cap-wol" in html and "ws-shutdown-order" in html
+    assert "loadWorkstations" in html and "/radnici" in html
+    assert "alert(" not in html
 
 
 def test_escl_partial_scan_rejected(device_server, monkeypatch):

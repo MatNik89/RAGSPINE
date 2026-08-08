@@ -255,6 +255,9 @@ class Spine:
             })
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
+            _ensure_columns(c, "devices", {
+                "caps": "TEXT", "mac": "TEXT", "worker_username": "TEXT", "host": "TEXT",
+            })
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
             _migrate_setup_complete_for_upgrades(c)
             _migrate_pdv_rok_2026(c)

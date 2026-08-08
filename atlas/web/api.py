@@ -269,10 +269,29 @@ class ObligationTypeBody(BaseModel):
     description: str = ""
 
 
+class DeviceCaps(BaseModel):
+    shutdown_order: int | None = None
+    wol: bool = False
+    run_programs: bool = False
+    monitor_only: bool = False
+
+
 class DeviceBody(BaseModel):
     kind: str
     name: str
-    url: str
+    url: str = ""
+    host: str | None = None
+    mac: str | None = None
+    worker_username: str | None = None
+    caps: DeviceCaps | None = None
+
+
+class DeviceUpdateBody(BaseModel):
+    name: str | None = None
+    host: str | None = None
+    mac: str | None = None
+    worker_username: str | None = None
+    caps: DeviceCaps | None = None
 
 
 class PrintBody(BaseModel):
@@ -701,13 +720,16 @@ def create_app(spine, cfg) -> FastAPI:
     # razliku od /workers gore koji upravlja samo vidljivošću klijenata.
     @app.get("/radnici")
     def radnici_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import devices as devices_mod
         _require_admin(actor)
         rows = spine.read().execute(
             """SELECT u.id, u.username, mm.role, u.pw_hash FROM memberships mm
                JOIN users u ON u.id = mm.user_id WHERE mm.org_id=? ORDER BY u.username""",
             (actor.org_id,)).fetchall()
         return [{"id": r["id"], "user": r["username"], "role": r["role"],
-                 "aktivan": bool(r["pw_hash"]), "device": None} for r in rows]
+                 "aktivan": bool(r["pw_hash"]),
+                 "device": devices_mod.device_for_worker(spine, r["username"])}
+                for r in rows]
 
     @app.post("/radnici")
     def radnici_add(body: RadnikCreateBody, actor: Actor = Depends(require_actor_web)):
@@ -1486,8 +1508,27 @@ def create_app(spine, cfg) -> FastAPI:
         from atlas.core import lan
         _require_admin(actor)
         try:
-            return devices_mod.add_device(spine, body.kind, body.name, body.url,
-                                          user=actor.username)
+            return devices_mod.add_device(
+                spine, body.kind, body.name, body.url, user=actor.username,
+                host=body.host, mac=body.mac, worker_username=body.worker_username,
+                caps=body.caps.model_dump() if body.caps else None)
+        except (ValueError, lan.LanBlocked) as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.patch("/devices/{device_id}")
+    def devices_update(device_id: int, body: DeviceUpdateBody,
+                       actor: Actor = Depends(require_actor_web)):
+        from atlas.business import devices as devices_mod
+        from atlas.core import lan
+        _require_admin(actor)
+        if spine.read().execute("SELECT 1 FROM devices WHERE id=?",
+                                (device_id,)).fetchone() is None:
+            raise HTTPException(404, f"nepoznat uređaj: {device_id}")
+        fields = body.model_dump(exclude_unset=True)
+        if "caps" in fields and fields["caps"] is not None:
+            fields["caps"] = body.caps.model_dump()
+        try:
+            return devices_mod.update_device(spine, device_id, user=actor.username, **fields)
         except (ValueError, lan.LanBlocked) as e:
             raise HTTPException(400, str(e)) from e
 

@@ -69,6 +69,26 @@ def test_migration_adds_messaging_columns_to_preexisting_db(tmp_path):
     assert row["messaging_consent"] == 0
 
 
+def test_migration_adds_device_columns_to_preexisting_db(tmp_path):
+    # simulates a deployed DB from before Faza 2 sekcija 4: devices table
+    # pre-exists WITHOUT caps/mac/worker_username/host.
+    import sqlite3
+    db_path = str(tmp_path / "old_devices.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute("CREATE TABLE devices(id INTEGER PRIMARY KEY, kind TEXT, name TEXT, "
+                "url TEXT, added_by TEXT, added_at TEXT)")
+    conn.execute("INSERT INTO devices(id, kind, name, url) VALUES(1, 'scanner', 'Star', 'http://x')")
+    conn.commit(); conn.close()
+
+    sp = Spine(db_path)
+
+    cols = {r["name"] for r in sp.read().execute("PRAGMA table_info(devices)").fetchall()}
+    assert {"caps", "mac", "worker_username", "host"} <= cols
+    row = sp.read().execute("SELECT caps, mac, worker_username, host FROM devices WHERE id=1").fetchone()
+    assert row["caps"] is None and row["mac"] is None
+    assert row["worker_username"] is None and row["host"] is None
+
+
 def test_concurrent_writes(tmp_path):
     sp = _sp(tmp_path)
     def w(i):
