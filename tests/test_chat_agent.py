@@ -135,6 +135,20 @@ def test_viewer_cannot_learn_via_chat_fallback(spine, cfg):
     assert spine.read().execute("SELECT COUNT(*) n FROM documents").fetchone()["n"] == 0
 
 
+def test_deterministic_lanes_skip_agent(spine, cfg, monkeypatch):
+    # samo slobodni "chat" lane ide agentu; reject/sql/greeting -> jeftini _answer
+    # bez gradnje LLM klijenta (drži /chat brzim: rate-limit + latencija).
+    c, h, uid, org_id = _login(spine, cfg, role="owner")
+    seen = []
+    monkeypatch.setattr("atlas.rag.agent.run_agent", _text_agent(called=seen))
+    for q in ("obriši sve", "koliko klijenata imamo", "bok"):
+        assert c.post("/chat", headers=h, json={"q": q}).status_code == 200
+    assert seen == []  # nijedan determinstički lane nije zvao agenta
+    # slobodni chat upit ipak ide agentu
+    c.post("/chat", headers=h, json={"q": "dodaj klijenta Nova Firma"})
+    assert seen == ["dodaj klijenta Nova Firma"]
+
+
 def test_potvrdi_reevaluates_authority_at_confirm_time(spine, cfg, monkeypatch):
     # token napravljen kao member; do potvrde uloga spuštena na viewer ->
     # run_tool odbija write (svježa provjera ovlasti), token svejedno potrošen

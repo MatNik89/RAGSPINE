@@ -51,6 +51,7 @@ from atlas.knowledge import translate as translate_mod
 from atlas.ops import doctor, health, model_recommender, nis2
 from atlas.rag import agent, agent_tools
 from atlas.rag import pipeline
+from atlas.rag import router as router_mod
 from atlas.rag import versioning
 from atlas.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
 from atlas.web import learn  # noqa: F401 — register learn lane handler
@@ -960,10 +961,13 @@ def create_app(spine, cfg) -> FastAPI:
         # require_actor_web: prima i cookie i Bearer — web UI šalje cookie
         # (E2E nalaz: require_actor je samo-Bearer pa je web chat uvijek 401).
         _chat_gate(actor)
-        # Agentski put samo za korisnike koji smiju akcije; viewer (i degradirani
-        # LLM) idu starim retrieval putem. LLM izlaz je nepovjerljiv: write se
-        # NE izvršava, samo sprema kao jednokratni vlasnički token za /chat/potvrdi.
-        if actor.role not in _AGENT_ROLES:
+        # Agentski put samo za korisnike koji smiju akcije I samo za slobodni
+        # "chat" lane. Determinističke lane (reject, sql, ocr, greeting...) se
+        # rješavaju bez LLM-a kroz _answer — inače bi svaki upit gradio LLM
+        # klijenta i pokušavao mrežu (skupo + rate-limit prozor sklizne).
+        # LLM izlaz je nepovjerljiv: write se NE izvršava, samo sprema kao
+        # jednokratni vlasnički token za /chat/potvrdi.
+        if actor.role not in _AGENT_ROLES or router_mod.route(body.q) != "chat":
             return _answer(body.q, actor, fresh=body.fresh)
         llm = LLMClient(model_settings.apply(spine, cfg))
         try:
