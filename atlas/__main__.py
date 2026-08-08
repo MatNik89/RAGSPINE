@@ -1,6 +1,8 @@
 """ATLAS CLI entrypoint: python -m atlas <cmd>."""
 import argparse
 import getpass
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -347,6 +349,41 @@ def _cmd_trust(args) -> int:
     return 0
 
 
+def _elevated() -> bool:
+    """Windows: admin preko shell32 (ctypes.windll ne postoji izvan Windowsa
+    -> AttributeError, uhvaćeno). POSIX: root (uid 0)."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            return bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            return False
+    return os.geteuid() == 0
+
+
+def _cmd_servis(args) -> int:
+    """atlas servis <install|uninstall|status> — WinSW (Windows) / systemd
+    (Linux) servis oko `atlas serve` (spec 2026-08-08). install/uninstall
+    traže elevaciju; status ne."""
+    from atlas.config import get_config
+    from atlas.core.spine import init_spine
+    from atlas.ops import winsvc
+
+    if args.akcija == "status":
+        print(winsvc.service_status())
+        return 0
+    if not _elevated():
+        print("Pokreni kao administrator (Windows) / sudo (Linux, macOS).")
+        return 1
+    cfg = get_config()
+    if args.akcija == "install":
+        spine = init_spine(cfg.db_path)
+        _, port, _, _ = _net_overrides(spine, cfg)
+        exe = shutil.which("atlas") or f"{sys.executable} -m atlas"
+        return 0 if winsvc.install_service(exe, cfg.data_dir, port) else 1
+    return 0 if winsvc.uninstall_service(cfg.data_dir) else 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="atlas")
     sub = p.add_subparsers(dest="cmd")
@@ -402,6 +439,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ocr = sub.add_parser("ocr")
     p_ocr.add_argument("path")
     p_ocr.set_defaults(func=_cmd_ocr)
+
+    p_servis = sub.add_parser("servis")
+    p_servis.add_argument("akcija", choices=["install", "uninstall", "status"])
+    p_servis.set_defaults(func=_cmd_servis)
 
     return p
 

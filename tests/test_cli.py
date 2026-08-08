@@ -97,6 +97,100 @@ def test_serve_starts_bootstrap_when_cert_present(cfg, monkeypatch, capsys):
     assert "/postavi" in out
 
 
+def test_servis_status_ne_treba_elevaciju(tmp_path, monkeypatch, capsys):
+    from atlas.ops import winsvc
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(winsvc, "service_status", lambda **k: "not-installed")
+    assert main(["servis", "status"]) == 0
+    assert "not-installed" in capsys.readouterr().out
+
+
+def test_servis_install_bez_elevacije_vraca_1(tmp_path, monkeypatch, capsys):
+    import atlas.__main__ as m
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(m, "_elevated", lambda: False)
+    assert main(["servis", "install"]) == 1
+    out = capsys.readouterr().out.lower()
+    assert "administrator" in out or "sudo" in out
+
+
+def test_servis_uninstall_bez_elevacije_vraca_1(tmp_path, monkeypatch):
+    import atlas.__main__ as m
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(m, "_elevated", lambda: False)
+    assert main(["servis", "uninstall"]) == 1
+
+
+def test_servis_install_elevated_zove_winsvc(cfg, monkeypatch):
+    # cfg fixture (ne samo ATLAS_DATA_DIR env): _cmd_servis ide preko
+    # get_config(), koji keša globalno — bez cfg fixture teardowna curi u
+    # susjedne testove (get_config() vrati stari data_dir iz ranijeg testa).
+    import atlas.__main__ as m
+    from atlas.ops import winsvc
+    monkeypatch.setattr(m, "_elevated", lambda: True)
+    calls = []
+    monkeypatch.setattr(winsvc, "install_service",
+                        lambda exe, data_dir, port, **k: calls.append((exe, data_dir, port)) or True)
+    assert main(["servis", "install"]) == 0
+    assert calls and calls[0][1] == cfg.data_dir
+
+
+def test_servis_install_elevated_pad_vraca_1(cfg, monkeypatch):
+    import atlas.__main__ as m
+    from atlas.ops import winsvc
+    monkeypatch.setattr(m, "_elevated", lambda: True)
+    monkeypatch.setattr(winsvc, "install_service", lambda *a, **k: False)
+    assert main(["servis", "install"]) == 1
+
+
+def test_servis_uninstall_elevated_zove_winsvc(cfg, monkeypatch):
+    import atlas.__main__ as m
+    from atlas.ops import winsvc
+    monkeypatch.setattr(m, "_elevated", lambda: True)
+    calls = []
+    monkeypatch.setattr(winsvc, "uninstall_service",
+                        lambda data_dir, **k: calls.append(data_dir) or True)
+    assert main(["servis", "uninstall"]) == 0
+    assert calls == [cfg.data_dir]
+
+
+def test_servis_nepoznata_akcija_exit_2():
+    assert main(["servis", "sta-god"]) == 2
+
+
+def test_elevated_windows_admin(monkeypatch):
+    import ctypes
+    from types import SimpleNamespace
+    import atlas.__main__ as m
+    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(ctypes, "windll",
+                        SimpleNamespace(shell32=SimpleNamespace(IsUserAnAdmin=lambda: 1)),
+                        raising=False)
+    assert m._elevated() is True
+
+
+def test_elevated_windows_bez_admin_api_vraca_false(monkeypatch):
+    import ctypes
+    import atlas.__main__ as m
+    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.delattr(ctypes, "windll", raising=False)   # simulira ne-Windows ctypes
+    assert m._elevated() is False
+
+
+def test_elevated_posix_root(monkeypatch):
+    import atlas.__main__ as m
+    monkeypatch.setattr(m.os, "name", "posix")
+    monkeypatch.setattr(m.os, "geteuid", lambda: 0, raising=False)
+    assert m._elevated() is True
+
+
+def test_elevated_posix_non_root(monkeypatch):
+    import atlas.__main__ as m
+    monkeypatch.setattr(m.os, "name", "posix")
+    monkeypatch.setattr(m.os, "geteuid", lambda: 1000, raising=False)
+    assert m._elevated() is False
+
+
 def test_serve_bootstrap_port_zero_skips(cfg, monkeypatch, capsys):
     """ATLAS_BOOTSTRAP_PORT=0 isključuje bootstrap server."""
     import uvicorn

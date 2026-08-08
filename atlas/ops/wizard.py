@@ -421,12 +421,22 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
     return True
 
 
-def _detached_kwargs() -> dict:
+def _detached_kwargs(data_dir: str | None = None) -> dict:
     """Popen kwargs da dijete preživi zatvaranje wizard konzole (isti obrazac
     kao preflight.start_ollama; getattr fallback za testove na Linuxu s
-    mockanim platform.system())."""
-    kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
-                    "stdin": subprocess.DEVNULL}
+    mockanim platform.system()). data_dir zadan (serve poziv) -> stdout/stderr
+    idu u <data_dir>/logs/serve.{out,err}.log (append) umjesto DEVNULL — tihi
+    crash servera inače ne ostavlja trag nigdje (E2E nalaz). Edge poziv nema
+    data_dir -> ostaje DEVNULL (nema što logirati)."""
+    if data_dir:
+        logs = Path(data_dir) / "logs"
+        logs.mkdir(parents=True, exist_ok=True)
+        kwargs: dict = {"stdout": open(logs / "serve.out.log", "ab"),
+                        "stderr": open(logs / "serve.err.log", "ab"),
+                        "stdin": subprocess.DEVNULL}
+    else:
+        kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+                  "stdin": subprocess.DEVNULL}
     if platform.system() == "Windows":
         kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0x8)
                                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
@@ -435,16 +445,34 @@ def _detached_kwargs() -> dict:
     return kwargs
 
 
+def _open_edge(url: str, *, out, popen) -> None:
+    """Otvori Edge app-prozor (Windows); drugdje samo uputa. Edge ne treba
+    log — DEVNULL preko _detached_kwargs bez data_dir."""
+    if platform.system() != "Windows":
+        out(f"Otvori u pregledniku: {url}")
+        return
+    try:
+        # start preko App Paths (msedge nije na PATH-u); "" = naslov prozora
+        popen(["cmd", "/c", "start", "", "msedge", f"--app={url}"], **_detached_kwargs())
+        out("Otvaram Edge app-prozor...")
+    except OSError:
+        out(f"Otvori ručno u pregledniku: {url}")
+
+
 def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen) -> None:
     """Ponudi start servera (detached) + Edge app-prozor. Poziva se IZA
     mark_complete — nikakav kvar ovdje ne smije poništiti dovršeni setup.
-    ponytail: pravi servis (autostart) čeka WinSW/NSSM wrapper (v. winsvc);
-    do tada je ovo ručni start koji preživi zatvaranje konzole."""
+    Ako je pravi servis (winsvc) već pokrenut, ne diže se detached kopija —
+    samo prečac + Edge na postojeći servis (spec 2026-08-08, servis t.2)."""
     host = spine.get_override("net", "host") or "127.0.0.1"
     port = spine.get_override("net", "port") or "8443"
     url_host = preflight.local_ip() if host == "0.0.0.0" else host
     url = f"https://{url_host}:{port}"
     shortcut.create_desktop_shortcut(url, out=out)
+    if winsvc.service_status() == "running":
+        out(f"Servis ATLAS već radi — {url}")
+        _open_edge(url, out=out, popen=popen)
+        return
     try:
         start = tui.prompt_yes_no(f"Pokreni ATLAS sada? ({url})", default=True,
                                   input_fn=input_fn, out=out)
@@ -467,21 +495,12 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         merged = list(dict.fromkeys(existing + roots))
         env = {**os.environ, "ATLAS_MOUNT_ROOTS": ",".join(merged)}
     try:
-        popen(cmd, env=env, **_detached_kwargs())
+        popen(cmd, env=env, **_detached_kwargs(getattr(cfg, "data_dir", None)))
     except OSError as e:
         out(f"⚠ Server nije pokrenut ({e}) — pokreni ručno: atlas serve")
         return
     out(f"✓ Server pokrenut u pozadini — {url}")
-    if platform.system() == "Windows":
-        try:
-            # start preko App Paths (msedge nije na PATH-u); "" = naslov prozora
-            popen(["cmd", "/c", "start", "", "msedge", f"--app={url}"],
-                  **_detached_kwargs())
-            out("Otvaram Edge app-prozor...")
-        except OSError:
-            out(f"Otvori ručno u pregledniku: {url}")
-    else:
-        out(f"Otvori u pregledniku: {url}")
+    _open_edge(url, out=out, popen=popen)
 
 
 def page_upgrade(spine, cfg, *, input_fn=input, out=print) -> bool:

@@ -89,6 +89,40 @@ def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
     assert any("zauzet" in l.lower() for l in lines)
 
 
+def test_page_mreza_servis_da_zove_install_service(tmp_path, monkeypatch):
+    """Potpis install_service (task 1: exe, data_dir, port, *, out=...) mora
+    ostati usklađen s pozivom na stranici mreže."""
+    from atlas.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    _mreza_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(wizard.shutil, "which", lambda name: "/usr/bin/atlas")
+    calls = []
+    monkeypatch.setattr(wizard.winsvc, "install_service",
+                        lambda exe, data_dir, port, **k: calls.append((exe, data_dir, port)) or True)
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "", "", "da"),
+                           out=lambda *_: None)
+    assert ok is True
+    assert calls == [("/usr/bin/atlas", str(tmp_path), 8443)]
+
+
+def test_page_mreza_servis_neuspjeh_ispisuje_upozorenje(tmp_path, monkeypatch):
+    from atlas.core.spine import init_spine
+    s = init_spine(str(tmp_path / "t.db"))
+    _mreza_mocks(monkeypatch, tmp_path)
+    monkeypatch.setattr(wizard.winsvc, "install_service", lambda *a, **k: False)
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    lines = []
+    ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "", "", "da"),
+                           out=lines.append)
+    assert ok is True
+    assert any("nije instaliran" in l for l in lines)
+
+
 def test_render_preflight_blocks_on_fail():
     reqs = [
         {"key": "python", "naziv": "Python", "status": "ok", "detalj": "3.11", "fix": ""},
@@ -278,6 +312,7 @@ def test_run_resume_from_stage2_runs_pages_3_to_5(tmp_path, monkeypatch):
 def test_launch_now_odbijen_ne_pokrece_nista(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     calls = []
     lines = []
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
@@ -292,6 +327,7 @@ def test_launch_now_windows_pokrece_serve_i_edge(tmp_path, monkeypatch):
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     calls = []
     wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
                       popen=lambda cmd, **k: calls.append(cmd))
@@ -307,6 +343,7 @@ def test_launch_now_bind_sve_mreze_koristi_lan_ip(tmp_path, monkeypatch):
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.preflight, "local_ip", lambda: "192.168.1.7")
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     lines = []
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lines.append,
                       popen=lambda *a, **k: None)
@@ -316,6 +353,7 @@ def test_launch_now_bind_sve_mreze_koristi_lan_ip(tmp_path, monkeypatch):
 def test_launch_now_bez_mapa_env_none(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     calls = []
     wizard.launch_now(s, None, input_fn=_reader(""), out=lambda *_: None,
                       popen=lambda cmd, **k: calls.append(k))
@@ -327,6 +365,7 @@ def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path, mon
     from atlas.business import folders
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     mapa = tmp_path / "propisi"
     mapa.mkdir()
     folders.register(s, types.SimpleNamespace(mount_roots=[str(mapa)]),
@@ -342,6 +381,7 @@ def test_launch_now_s_registriranom_mapom_prosljedjuje_mount_roots(tmp_path, mon
 def test_launch_now_oserror_ne_rusi(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
 
     def _boom(cmd, **k):
         raise OSError("nema binarke")
@@ -353,6 +393,7 @@ def test_launch_now_oserror_ne_rusi(tmp_path, monkeypatch):
 def test_launch_now_eof_tretira_kao_ne(tmp_path, monkeypatch):
     s = init_spine(str(tmp_path / "t.db"))
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
 
     def _eof(_=""):
         raise EOFError()
@@ -368,9 +409,70 @@ def test_launch_now_stvara_precac(tmp_path, monkeypatch):
     made = []
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut",
                         lambda url, **k: made.append(url) or True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
     wizard.launch_now(s, None, input_fn=_reader("n"), out=lambda *_: None,
                       popen=lambda *a, **k: None)
     assert made and made[0].startswith("https://")
+
+
+def test_launch_now_servis_vec_radi_ne_pokrece_kopiju(tmp_path, monkeypatch):
+    """Ako je pravi WinSW/systemd servis već pokrenut, launch_now ne smije
+    dići detached kopiju servera — samo prečac + poruka + Edge (spec t.2)."""
+    s = init_spine(str(tmp_path / "t.db"))
+    s.set_override("net", "host", "192.168.1.7")
+    s.set_override("net", "port", "8443")
+    monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "running")
+    calls = []
+    lines = []
+    wizard.launch_now(s, None, input_fn=_reader(""), out=lines.append,
+                      popen=lambda cmd, **k: calls.append(cmd))
+    assert len(calls) == 1                       # samo Edge, bez serve popena
+    assert calls[0][:4] == ["cmd", "/c", "start", ""]
+    text = "\n".join(lines)
+    assert "Servis ATLAS već radi" in text and "192.168.1.7:8443" in text
+
+
+def test_detached_kwargs_bez_data_dir_ostaje_devnull():
+    kwargs = wizard._detached_kwargs()
+    assert kwargs["stdout"] == wizard.subprocess.DEVNULL
+    assert kwargs["stderr"] == wizard.subprocess.DEVNULL
+
+
+def test_detached_kwargs_s_data_dir_otvara_log_datoteke(tmp_path):
+    kwargs = wizard._detached_kwargs(str(tmp_path))
+    try:
+        assert kwargs["stdout"] != wizard.subprocess.DEVNULL
+        assert kwargs["stdout"].name.endswith("serve.out.log")
+        assert kwargs["stderr"].name.endswith("serve.err.log")
+        assert (tmp_path / "logs" / "serve.out.log").exists()
+        assert (tmp_path / "logs" / "serve.err.log").exists()
+    finally:
+        kwargs["stdout"].close()
+        kwargs["stderr"].close()
+
+
+def test_launch_now_serve_pise_log_umjesto_devnull(tmp_path, monkeypatch):
+    """launch_now prosljeđuje cfg.data_dir do _detached_kwargs — serve popen
+    dobiva log-datoteke, ne DEVNULL (E2E: tihi crash mora ostati čitljiv)."""
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    calls = []
+    wizard.launch_now(s, _Cfg(), input_fn=_reader(""), out=lambda *_: None,
+                      popen=lambda cmd, **k: calls.append(k))
+    kw = calls[0]
+    try:
+        assert kw["stdout"] != wizard.subprocess.DEVNULL
+        assert (tmp_path / "logs" / "serve.out.log").exists()
+        assert (tmp_path / "logs" / "serve.err.log").exists()
+    finally:
+        kw["stdout"].close()
+        kw["stderr"].close()
 
 
 def test_choose_embed_model_bge_when_ram_allows(monkeypatch):
@@ -846,6 +948,7 @@ def test_launch_now_edge_oserror_ne_rusi(tmp_path, monkeypatch):
     s.set_override("net", "port", "8443")
     monkeypatch.setattr(wizard.platform, "system", lambda: "Windows")
     monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
 
     calls = []
 
