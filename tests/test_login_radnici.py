@@ -57,7 +57,7 @@ def test_login_activate_happy_path(spine, cfg):
     row = spine.read().execute("SELECT pw_hash FROM users WHERE username='boris'").fetchone()
     assert row["pw_hash"] is not None and row["pw_hash"].startswith("pbkdf2$")
     audit = spine.read().execute("SELECT * FROM audit_log WHERE action='user_activate'").fetchone()
-    assert audit is not None and audit["detail"] == "user aktiviran"
+    assert audit is not None and audit["detail"].startswith("user aktiviran ip=")
     # odmah prijavljen — token radi na zaštićenoj ruti
     tok = r.json()["token"]
     assert c.get("/org", headers=_h(tok)).status_code == 200
@@ -104,6 +104,37 @@ def test_login_activate_unknown_user_404(spine, cfg):
     r = _client(spine, cfg).post("/login/activate",
         json={"username": "ne-postoji", "password": "lozinka1", "password2": "lozinka1"})
     assert r.status_code == 404
+
+
+# C1 — napad: neautenticirano preuzimanje pending admin računa kroz /login/activate.
+def test_login_activate_blocks_pending_admin_account_takeover(spine, cfg):
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana", "sifra-ane")
+    r = c.post("/radnici", json={"username": "napadnuti-admin", "role": "admin"}, headers=_h(owner_tok))
+    assert r.status_code == 200
+    # napadač pogodi username (otkriven kroz /login/step "activate" state) i
+    # pokuša postaviti svoju sifru bez ikakve autentikacije
+    r = c.post("/login/activate",
+        json={"username": "napadnuti-admin", "password": "napadacevaLoz1", "password2": "napadacevaLoz1"})
+    assert r.status_code == 403
+    row = spine.read().execute(
+        "SELECT pw_hash FROM users WHERE username='napadnuti-admin'").fetchone()
+    assert row["pw_hash"] is None  # racun i dalje netaknut
+    # napadac nema token (aktivacija je odbijena) — admin-only ruta i dalje zakljucana
+    # (svjez klijent bez ownerova cookieja iz _tok — c i dalje nosi ownerovu sesiju)
+    assert _client(spine, cfg).get("/radnici").status_code in (401, 403)
+    assert c.post("/auth/login",
+        json={"username": "napadnuti-admin", "password": "napadacevaLoz1"}).status_code == 401
+
+
+def test_login_activate_allows_member_role_self_activation(spine, cfg):
+    # kontrolni test: member (radnik) i dalje smije sam sebe aktivirati — samo
+    # admin/owner-tier pending racuni su blokirani C1 zastitom.
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana", "sifra-ane")
+    c.post("/radnici", json={"username": "boris", "role": "member"}, headers=_h(owner_tok))
+    r = c.post("/login/activate", json={"username": "boris", "password": "borislozinka1", "password2": "borislozinka1"})
+    assert r.status_code == 200
 
 
 # ---------- Admin-kao-radnik ----------
@@ -157,6 +188,36 @@ def test_own_password_login_has_no_impersonated_claim(spine, cfg):
     assert "impersonated_by" not in payload
 
 
+# I1 — napad: timing enumeracija kroz admin-fallback petlju (poznat user + kriva
+# lozinka radi vise verify_password poziva nego nepoznat user, sto otkriva
+# postojanje racuna kroz latenciju — mora biti isti broj poziva).
+def test_admin_fallback_timing_equal_verify_calls_known_vs_unknown(spine, cfg, monkeypatch):
+    import atlas.web.api as api_mod
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana", "sifra-ane")   # jedini owner/admin u default orgu
+    c.post("/radnici", json={"username": "boris", "role": "member"}, headers=_h(owner_tok))
+
+    calls = {"n": 0}
+    real_verify = api_mod.verify_password
+
+    def counting(pw, stored):
+        calls["n"] += 1
+        return real_verify(pw, stored)
+
+    monkeypatch.setattr(api_mod, "verify_password", counting)
+
+    calls["n"] = 0
+    c.post("/auth/login", json={"username": "boris", "password": "kriva-lozinka"})
+    known_wrong_calls = calls["n"]
+
+    calls["n"] = 0
+    c.post("/auth/login", json={"username": "ne-postoji-nikad-xyz", "password": "kriva-lozinka"})
+    unknown_calls = calls["n"]
+
+    assert known_wrong_calls == unknown_calls
+    assert known_wrong_calls >= 2  # vlastita provjera + barem jedan admin-fallback pokusaj
+
+
 # ---------- Radnici API ----------
 
 def test_radnici_add_list_reset_delete(spine, cfg):
@@ -206,11 +267,37 @@ def test_radnici_admin_cannot_reset_or_delete_owner(spine, cfg):
     assert c.delete(f"/radnici/{owner_id}", headers=_h(admin_tok)).status_code == 403
 
 
-def test_radnici_owner_can_reset_self(spine, cfg):
+def test_radnici_owner_can_reset_self_when_not_last_owner(spine, cfg):
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana")
+    members = c.get("/org", headers=_h(owner_tok)).json()["members"]
+    owner_id = next(m["user_id"] for m in members if m["username"] == "ana")
+    boris_tok = _tok(c, spine, "boris")
+    boris_id = next(m["user_id"] for m in c.get("/org", headers=_h(owner_tok)).json()["members"]
+                    if m["username"] == "boris")
+    c.post(f"/org/members/{boris_id}/role", json={"role": "owner"}, headers=_h(owner_tok))
+    assert c.post(f"/radnici/{owner_id}/reset", headers=_h(owner_tok)).status_code == 200
+
+
+# I2 — napad: jedini owner sam sebe obrise/resetira → org bez ijedne uprave,
+# trajni lockout bez UI oporavka (nitko ne moze admin-kao-radnik ući nazad).
+def test_radnici_last_owner_cannot_reset_self(spine, cfg):
     c = _client(spine, cfg)
     owner_tok = _tok(c, spine, "ana")
     owner_id = c.get("/org", headers=_h(owner_tok)).json()["members"][0]["user_id"]
-    assert c.post(f"/radnici/{owner_id}/reset", headers=_h(owner_tok)).status_code == 200
+    r = c.post(f"/radnici/{owner_id}/reset", headers=_h(owner_tok))
+    assert r.status_code == 409
+    row = spine.read().execute("SELECT pw_hash FROM users WHERE id=?", (owner_id,)).fetchone()
+    assert row["pw_hash"] is not None  # owner ostaje funkcionalan
+
+
+def test_radnici_last_owner_cannot_delete_self(spine, cfg):
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana")
+    owner_id = c.get("/org", headers=_h(owner_tok)).json()["members"][0]["user_id"]
+    r = c.delete(f"/radnici/{owner_id}", headers=_h(owner_tok))
+    assert r.status_code == 409
+    assert c.get("/org", headers=_h(owner_tok)).status_code == 200  # jos uvijek clan/owner
 
 
 def test_radnici_add_duplicate_username_409(spine, cfg):

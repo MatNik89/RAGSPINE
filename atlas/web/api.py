@@ -534,16 +534,32 @@ def create_app(spine, cfg) -> FastAPI:
         ip = request.client.host if request.client else "?"
         if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
             raise HTTPException(429, "previše pokušaja — pričekajte minutu")
+        if not limiter.allow(f"login:{ip}:{body.username}", _LOGIN_PER_MIN):
+            raise HTTPException(429, "previše pokušaja — pričekajte minutu")
         row = spine.read().execute(
             "SELECT pw_hash FROM users WHERE username=?", (body.username,)).fetchone()
         if row is not None and not row["pw_hash"]:
             return {"state": "activate"}
         return {"state": "password"}
 
+    def _is_admin_tier_pending(user_id: int, sys_role: str) -> bool:
+        """C1: sprječava samoposlužnu aktivaciju admin/owner računa — napadač koji
+        pogodi pending username ne smije POST /login/activate pretvoriti u puno
+        preuzimanje ureda bez ijednog tokena. Provjerava i sys-role stupac (kako
+        /radnici POST bilježi rolu) i stvarnu org-člansku ulogu (owner/admin)."""
+        if sys_role == "admin":
+            return True
+        m = spine.read().execute(
+            "SELECT role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+            (user_id,)).fetchone()
+        return m is not None and m["role"] in ("admin", "owner")
+
     @app.post("/login/activate")
     def login_activate(body: LoginActivateBody, request: Request):
         ip = request.client.host if request.client else "?"
         if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
+            raise HTTPException(429, "previše pokušaja — pričekajte minutu")
+        if not limiter.allow(f"login:{ip}:{body.username}", _LOGIN_PER_MIN):
             raise HTTPException(429, "previše pokušaja — pričekajte minutu")
         if body.password != body.password2:
             raise HTTPException(400, "lozinke se ne poklapaju")
@@ -553,6 +569,9 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, "nepoznat korisnik")
         if row["pw_hash"]:
             raise HTTPException(409, "račun je već aktiviran")
+        if _is_admin_tier_pending(row["id"], row["role"]):
+            raise HTTPException(403, "administratorski račun se ne aktivira ovim putem — "
+                                     "neka te postojeći administrator uvede (admin-kao-radnik ulaz)")
         new_hash = hash_password(body.password)
         with spine.write() as c:
             # WHERE pw_hash IS NULL = atomski utrka-guard: ako je netko drugi
@@ -561,7 +580,7 @@ def create_app(spine, cfg) -> FastAPI:
                              (new_hash, row["id"]))
             if cur.rowcount == 0:
                 raise HTTPException(409, "račun je već aktiviran")
-        spine.audit(body.username, "user_activate", f"user:{row['id']}", "user aktiviran")
+        spine.audit(body.username, "user_activate", f"user:{row['id']}", f"user aktiviran ip={ip}")
         org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
         token = jwt_encode({"sub": body.username, "role": row["role"],
                             "uid": row["id"], "org_id": org_id}, cfg.jwt_secret)
@@ -592,8 +611,24 @@ def create_app(spine, cfg) -> FastAPI:
         row = spine.read().execute(
             "SELECT id, pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
+        # I1 (timing enumeracija): admin-fallback petlja niže radi N dodatnih
+        # verify_password poziva za POZNAT usera s krivom lozinkom (N = broj
+        # admin/owner članova u njegovom orgu) — bez ekvivalentnog rada za
+        # NEPOZNAT username ta razlika u broju PBKDF2 poziva otkriva postojanje
+        # računa kroz latenciju, poništavajući anti-enumeraciju /login/stepa.
+        # Fix: nepoznat username odradi ISTI oblik posla — dummy "vlastita"
+        # provjera + dummy fallback petlja duljine kao default-org admin/owner
+        # broj (jedini org do kojeg app doseže kroz javni API — vidi
+        # tenancy.default_org_id/resolve_login_org).
+        def _admin_tier_count(org_id: int) -> int:
+            return spine.read().execute(
+                "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role IN ('admin','owner')",
+                (org_id,)).fetchone()["n"]
+
         if row is None:
             verify_password(password, _DUMMY_PW_HASH)  # constant-time-ish: keep latency ~equal
+            for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
+                verify_password(password, _DUMMY_PW_HASH)
             raise HTTPException(401, "invalid credentials")
         # Admin-kao-radnik: vlastita lozinka prvo; padne li (ili je pw_hash NULL
         # jer radnik čeka aktivaciju), probaj OWNER/ADMIN hasheve ISTOG orga —
@@ -615,6 +650,12 @@ def create_app(spine, cfg) -> FastAPI:
                     if verify_password(password, a["pw_hash"]):
                         impersonated_by = a["username"]
                         break
+            else:
+                # bez membershipa (legacy CLI račun): nema ciljni org za pravu
+                # provjeru, ali i dalje odradi dummy petlju iste duljine kao
+                # default org — inače OVAJ known-user grana opet curi timing.
+                for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
+                    verify_password(password, _DUMMY_PW_HASH)
             if impersonated_by is None:
                 raise HTTPException(401, "invalid credentials")
         if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
@@ -749,17 +790,32 @@ def create_app(spine, cfg) -> FastAPI:
         spine.audit(actor.username, "radnik_add", f"user:{uid}", username)
         return {"id": uid, "user": username, "role": body.role, "aktivan": False, "device": None}
 
+    def _block_last_owner(org_id: int, role: str) -> None:
+        """I2: zrcali last-owner guard iz /org/members/{id}/role — reset/ukloni
+        zadnjeg ownera bi ostavio org bez ijedne uprave, i (nakon C1) bez ikoga
+        tko se smije samoposlužno aktivirati preko /login/activate → trajni
+        lockout bez UI oporavka."""
+        if role != "owner":
+            return
+        owners = spine.read().execute(
+            "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role='owner'",
+            (org_id,)).fetchone()["n"]
+        if owners <= 1:
+            raise HTTPException(409, "zadnji vlasnik organizacije se ne može ukloniti niti resetirati")
+
     @app.post("/radnici/{radnik_id}/reset")
-    def radnici_reset(radnik_id: int, actor: Actor = Depends(require_actor_web)):
+    def radnici_reset(radnik_id: int, request: Request, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         role = tenancy.role_of(spine, actor.org_id, radnik_id)
         if role is None:
             raise HTTPException(404, "nije član organizacije")
         if role == "owner" and actor.user_id != radnik_id:
             raise HTTPException(403, "vlasnika smije resetirati samo on sam")
+        _block_last_owner(actor.org_id, role)
         with spine.write() as c:
             c.execute("UPDATE users SET pw_hash=NULL WHERE id=?", (radnik_id,))
-        spine.audit(actor.username, "radnik_reset", f"user:{radnik_id}")
+        ip = request.client.host if request.client else "?"
+        spine.audit(actor.username, "radnik_reset", f"user:{radnik_id}", f"ip={ip}")
         return {"ok": True}
 
     @app.delete("/radnici/{radnik_id}")
@@ -770,6 +826,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, "nije član organizacije")
         if role == "owner" and actor.user_id != radnik_id:
             raise HTTPException(403, "vlasnika smije ukloniti samo on sam")
+        _block_last_owner(actor.org_id, role)
         with spine.write() as c:
             c.execute("DELETE FROM memberships WHERE org_id=? AND user_id=?",
                       (actor.org_id, radnik_id))
