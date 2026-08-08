@@ -64,3 +64,125 @@ def test_unavailable(cfg, monkeypatch):
     monkeypatch.setattr("atlas.core.llm._ollama_alive", lambda cfg: False)
     with pytest.raises(LLMUnavailable):
         LLMClient(cfg).complete([{"role": "user", "content": "x"}])
+
+
+# --- tool-calling (Faza 3, Task 2) -----------------------------------------
+
+_TOOLS = [{"name": "pretrazi", "description": "Pretraži.",
+           "schema": {"type": "object", "properties": {"upit": {"type": "string"}},
+                      "required": ["upit"]}}]
+
+
+def test_anthropic_tools_sent_in_provider_format(cfg):
+    cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "claude-sonnet-5"
+    seen = {}
+
+    def transport(url, headers, body):
+        seen["body"] = body
+        return {"content": [{"type": "text", "text": "odgovor"}], "model": body["model"], "usage": {}}
+
+    LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}], tools=_TOOLS)
+    assert seen["body"]["tools"] == [
+        {"name": "pretrazi", "description": "Pretraži.",
+         "input_schema": {"type": "object", "properties": {"upit": {"type": "string"}},
+                           "required": ["upit"]}}
+    ]
+
+
+def test_anthropic_tool_use_parsed(cfg):
+    cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "claude-sonnet-5"
+
+    def transport(url, headers, body):
+        return {"content": [
+            {"type": "text", "text": "gledam"},
+            {"type": "tool_use", "id": "t1", "name": "pretrazi", "input": {"upit": "PDV rok"}},
+        ], "model": body["model"], "usage": {}}
+
+    r = LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}], tools=_TOOLS)
+    assert r.text == "gledam"
+    assert r.tool_calls == [{"name": "pretrazi", "args": {"upit": "PDV rok"}}]
+
+
+def test_anthropic_no_tools_unchanged(cfg):
+    # bez tools= poziv mora ostati bajt-identičan starom ponašanju (nema "tools" u body, tool_calls=[]).
+    cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "claude-sonnet-5"
+    seen = {}
+
+    def transport(url, headers, body):
+        seen["body"] = body
+        return {"content": [{"type": "text", "text": "odgovor"}], "model": body["model"], "usage": {}}
+
+    r = LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}])
+    assert "tools" not in seen["body"]
+    assert r.tool_calls == []
+
+
+def test_openai_tools_sent_in_provider_format(cfg):
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "deepseek-chat"
+    seen = {}
+
+    def transport(url, headers, body):
+        seen["body"] = body
+        return {"choices": [{"message": {"content": "odgovor"}}], "model": body["model"], "usage": {}}
+
+    LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}], tools=_TOOLS)
+    assert seen["body"]["tools"] == [
+        {"type": "function", "function": {
+            "name": "pretrazi", "description": "Pretraži.",
+            "parameters": {"type": "object", "properties": {"upit": {"type": "string"}},
+                            "required": ["upit"]}}}
+    ]
+    assert seen["body"]["tool_choice"] == "auto"
+
+
+def test_openai_tool_calls_parsed(cfg):
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "deepseek-chat"
+
+    def transport(url, headers, body):
+        return {"choices": [{"message": {
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                             "function": {"name": "pretrazi", "arguments": '{"upit": "PDV rok"}'}}],
+        }}], "model": body["model"], "usage": {}}
+
+    r = LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}], tools=_TOOLS)
+    assert r.tool_calls == [{"name": "pretrazi", "args": {"upit": "PDV rok"}}]
+
+
+def test_openai_no_tools_unchanged(cfg):
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "deepseek-chat"
+    seen = {}
+
+    def transport(url, headers, body):
+        seen["body"] = body
+        return {"choices": [{"message": {"content": "odgovor"}}], "model": body["model"], "usage": {}}
+
+    r = LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}])
+    assert "tools" not in seen["body"] and "tool_choice" not in seen["body"]
+    assert r.tool_calls == []
+
+
+def test_openai_malformed_tool_call_args_falls_back_to_empty(cfg):
+    # nevažeći JSON u function.arguments -> ne rušiti, args={} uz zadržan text/name.
+    cfg.llm_base_url = "https://api.deepseek.com"; cfg.llm_api_key = "k"; cfg.llm_model = "deepseek-chat"
+
+    def transport(url, headers, body):
+        return {"choices": [{"message": {
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                             "function": {"name": "pretrazi", "arguments": "not-json"}}],
+        }}], "model": body["model"], "usage": {}}
+
+    r = LLMClient(cfg, transport=transport).complete([{"role": "user", "content": "hej"}], tools=_TOOLS)
+    assert r.tool_calls == [{"name": "pretrazi", "args": {}}]
+
+
+def test_supports_tools(cfg):
+    cfg.llm_base_url = "https://api.anthropic.com"; cfg.llm_api_key = "k"; cfg.llm_model = "x"
+    assert LLMClient(cfg).supports_tools() is True
+
+    cfg.llm_base_url = "https://api.deepseek.com"
+    assert LLMClient(cfg).supports_tools() is True
+
+    cfg.llm_provider = "ollama"
+    assert LLMClient(cfg).supports_tools() is True
