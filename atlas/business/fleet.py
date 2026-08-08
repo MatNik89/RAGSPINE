@@ -1,0 +1,137 @@
+"""Faza 5: radnička flota — tokeni uređaja, program-allowlista, red naredbi.
+
+Token = "<device_id>.<secret>": device_id je javan pokazivač, hash tajne se
+sprema po device_id -> verify je O(1) (bez enumeracije/timing curenja). Server
+NIKAD ne šalje naredbeni string agentu — samo `program_key` iz allowliste; agent
+drži vlastitu key->argv mapu i odbija nepoznato.
+"""
+import hashlib
+import json
+import re
+import secrets
+
+# Tvrda allowlista radnji — i server i agent je provjeravaju
+ACTIONS = ("run_program", "shutdown", "enable_wol", "status")
+
+
+def _digest(secret: str) -> str:
+    # Tajna je nasumičnih 256 bita -> PBKDF2 (spor, anti-bruteforce) NIJE potreban
+    # i stvara CPU-DoS amplifikaciju po pollu; SHA-256 + constant-time usporedba
+    # je dovoljna i brza (Codex T1 nalaz).
+    return hashlib.sha256(secret.encode()).hexdigest()
+
+
+def _norm_key(key: str) -> str:
+    if not isinstance(key, str):
+        raise ValueError("key mora biti string")
+    k = key.strip().lower()
+    for a, b in zip("čćžšđ", "cczsd"):
+        k = k.replace(a, b)
+    k = re.sub(r"[^a-z0-9]+", "_", k).strip("_")
+    if not k:
+        raise ValueError("key je obavezan")
+    return k
+
+
+# --- tokeni ----------------------------------------------------------------
+
+def issue_token(spine, device_id: int) -> str:
+    """Izdaj (ili rotiraj) token uređaja. Plaintext se vraća JEDNOM."""
+    with spine.write() as c:
+        if c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+            raise ValueError(f"nepoznat uređaj: {device_id}")
+        secret = secrets.token_urlsafe(32)
+        c.execute(
+            """INSERT INTO device_tokens(device_id, token_hash, revoked) VALUES(?,?,0)
+               ON CONFLICT(device_id) DO UPDATE SET token_hash=excluded.token_hash,
+               revoked=0, created_at=datetime('now')""",
+            (device_id, _digest(secret)))
+    return f"{device_id}.{secret}"
+
+
+def revoke_token(spine, device_id: int) -> None:
+    with spine.write() as c:
+        c.execute("UPDATE device_tokens SET revoked=1 WHERE device_id=?", (device_id,))
+
+
+def verify_token(spine, token: str):
+    """Vrati device_id ako token vrijedi i nije opozvan, inače None (svježe)."""
+    if not token or "." not in token:
+        return None
+    did_s, _, secret = token.partition(".")
+    try:
+        did = int(did_s)
+    except ValueError:
+        return None
+    row = spine.read().execute(
+        "SELECT token_hash FROM device_tokens WHERE device_id=? AND revoked=0",
+        (did,)).fetchone()
+    if row is None or not secrets.compare_digest(_digest(secret), row["token_hash"] or ""):
+        return None
+    return did
+
+
+# --- program allowlist -----------------------------------------------------
+
+def add_program(spine, key: str, label: str, user: str = "?") -> str:
+    key = _norm_key(key)
+    label = (label or "").strip() or key
+    with spine.write() as c:
+        c.execute(
+            """INSERT INTO fleet_programs(key, label, added_by) VALUES(?,?,?)
+               ON CONFLICT(key) DO UPDATE SET label=excluded.label""",
+            (key, label, user))
+    return key
+
+
+def list_programs(spine) -> list[dict]:
+    return [dict(r) for r in spine.read().execute(
+        "SELECT key, label, added_by, added_at FROM fleet_programs ORDER BY key").fetchall()]
+
+
+def remove_program(spine, key: str) -> None:
+    with spine.write() as c:
+        c.execute("DELETE FROM fleet_programs WHERE key=?", (_norm_key(key),))
+
+
+# --- red naredbi -----------------------------------------------------------
+
+def enqueue(spine, device_id: int, action: str, program_key: str | None = None) -> int:
+    if action not in ACTIONS:
+        raise ValueError(f"nedozvoljena radnja: {action!r}")
+    with spine.write() as c:
+        if c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
+            raise ValueError(f"nepoznat uređaj: {device_id}")
+        if action == "run_program":
+            program_key = _norm_key(program_key or "")
+            if c.execute("SELECT 1 FROM fleet_programs WHERE key=?", (program_key,)).fetchone() is None:
+                raise ValueError(f"program nije na allowlisti: {program_key!r}")
+        else:
+            program_key = None
+        return c.execute(
+            "INSERT INTO agent_commands(device_id, action, program_key) VALUES(?,?,?)",
+            (device_id, action, program_key)).lastrowid
+
+
+def next_command(spine, device_id: int) -> dict | None:
+    """Najstariji pending za uređaj -> in_progress. JEDNA atomska claim naredba
+    (UPDATE ... RETURNING) — dva istovremena polla ne mogu dobiti istu naredbu
+    (drugi UPDATE ne pogodi red jer više nije 'pending'). (Codex T1 nalaz.)"""
+    with spine.write() as c:
+        row = c.execute(
+            "UPDATE agent_commands SET status='in_progress' "
+            "WHERE id=(SELECT id FROM agent_commands WHERE device_id=? AND status='pending' "
+            "ORDER BY id LIMIT 1) AND status='pending' "
+            "RETURNING id, action, program_key",
+            (device_id,)).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "action": row["action"], "program_key": row["program_key"]}
+
+
+def complete(spine, cmd_id: int, result) -> None:
+    with spine.write() as c:
+        c.execute(
+            "UPDATE agent_commands SET status='done', result=?, done_at=datetime('now') "
+            "WHERE id=?",
+            (json.dumps(result, ensure_ascii=False, default=str), cmd_id))
