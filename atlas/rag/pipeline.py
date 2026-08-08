@@ -159,8 +159,9 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
 
     handler = LANE_HANDLERS.get(lane)
     if handler is not None:
-        if lane == "arhitektura":
-            # side-effect lane mora znati TKO pita (admin-gate u handleru)
+        if lane in ("arhitektura", "learn"):
+            # side-effect lane mora znati TKO pita (role-gate u handleru:
+            # arhitektura=admin, learn=member+)
             res = handler(spine, cfg, query, llm, actor=actor)
         elif lane in ("sql", "graph"):
             # SQL agregati + graf traversal moraju biti scopeani na vidljive

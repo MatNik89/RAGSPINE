@@ -13,7 +13,7 @@ from atlas.rag import agent_tools
 
 SYSTEM_PROMPT = """Ti si ATLAS, asistent u računovodstvenom uredu.
 
-Pomažeš radnicima: pretražuješ interno znanje i po potrebi internet, dajеš
+Pomažeš radnicima: pretražuješ interno znanje i po potrebi internet, daješ
 popis mjesečnih obveza (PDV, JOPPD...) i cjeloviti dosje klijenta. Kad je
 potrebna promjena podataka, možeš predložiti: dodavanje klijenta, uređivanje
 podataka klijenta, označavanje obveze kao poslane, zakazivanje roka isteka

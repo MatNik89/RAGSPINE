@@ -646,6 +646,40 @@ function addAssistant(data) {
     });
     div.appendChild(wrap);
   }
+  if (data.pending && data.pending.token) {
+    const box = document.createElement('div');
+    box.className = 'pending';
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'btn';
+    ok.textContent = 'Potvrdi';
+    ok.addEventListener('click', function () { resolvePending(data.pending.token, true, box); });
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'btn btn-ghost';
+    no.textContent = 'Odustani';
+    no.addEventListener('click', function () { resolvePending(data.pending.token, false, box); });
+    box.appendChild(ok);
+    box.appendChild(no);
+    div.appendChild(box);
+  }
+}
+
+async function resolvePending(token, confirm, box) {
+  box.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+  const url = confirm ? '/chat/potvrdi' : '/chat/odustani';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: token }),
+    });
+    if (!res.ok) { addMsg('error', 'Greška: ' + res.status); return; }
+    addMsg('assistant', confirm ? 'Napravljeno.' : 'Odustao od radnje.');
+  } catch (err) {
+    addMsg('error', 'Greška u komunikaciji sa serverom.');
+  }
 }
 
 async function send() {
