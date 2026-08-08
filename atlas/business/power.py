@@ -5,9 +5,15 @@ nestanku struje gasi uređaje po `caps.shutdown_order` iz faze 2. Gašenje je
 DESTRUKTIVNO: default `armed=False` (samo alarm), izvršenje tek kad korisnik
 izričito naoruža.
 """
+import sys
+
+from atlas.business import devices
 from atlas.core import lan
+from atlas.core import subproc
+from atlas.core.ups import read_status
 
 _MODULE = "napajanje"
+_STATE = "napajanje_state"  # runtime stanje stroja (odvojeno od config-a)
 
 _DEFAULTS = {
     "enabled": False,
@@ -79,3 +85,131 @@ def save_config(spine, **fields) -> dict:
         stored = "1" if (key in _BOOL_FIELDS and val) else "0" if key in _BOOL_FIELDS else str(val)
         spine.set_override(_MODULE, key, stored)
     return get_config(spine)
+
+
+# --- T2: stroj stanja + gašenje redom --------------------------------------
+
+def _local_shutdown_cmd() -> list[str]:
+    if sys.platform.startswith("win"):
+        return ["shutdown", "/s", "/t", "0"]
+    return ["shutdown", "-h", "now"]
+
+
+def _ssh_safe(token: str) -> bool:
+    # ssh SAM tumači argv koji počinje s '-' kao OPCIJU (npr. -oProxyCommand=...),
+    # pa arg-lista NE štiti od injection preko user/host — vodeći '-' = RCE na
+    # serveru. Dopusti samo miran skup znakova za hostname/username.
+    return bool(token) and not token.startswith("-") and all(
+        ch.isalnum() or ch in ".-_:" for ch in token)
+
+
+def ssh_shutdown_cmd(device: dict) -> list[str]:
+    """Argv za gašenje udaljenog uređaja preko sustavnog ssh. NIKAD shell.
+    Odbija user/host koji bi ssh protumačio kao opciju (vodeći '-') ili sadrži
+    neočekivane znakove (@, razmak, '=') — inače ProxyCommand injection = RCE."""
+    user = (device.get("worker_username") or "root").strip()
+    host = (device.get("host") or "").strip()
+    if not _ssh_safe(user) or not _ssh_safe(host):
+        raise ValueError(f"nesiguran ssh cilj: user={user!r} host={host!r}")
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            f"{user}@{host}", "shutdown", "-h", "now"]
+
+
+def shutdown_plan(spine) -> dict:
+    """Uređaji s caps.shutdown_order (ne-None) uzlazno (radnici prvo), server
+    kao sintetički zadnji korak. Uređaj bez hosta se ne može ugasiti bez agenta
+    (faza 5) -> u 'skipped'."""
+    steps, skipped = [], []
+    cand = [d for d in devices.list_devices(spine)
+            if d.get("caps", {}).get("shutdown_order") is not None]
+    cand.sort(key=lambda d: d["caps"]["shutdown_order"])
+    for d in cand:
+        if not d.get("host"):
+            skipped.append(d["name"])
+            continue
+        steps.append({"name": d["name"], "host": d["host"],
+                      "worker_username": d.get("worker_username"),
+                      "order": d["caps"]["shutdown_order"], "method": "ssh"})
+    steps.append({"name": "server", "method": "local"})  # server uvijek zadnji
+    return {"steps": steps, "skipped": skipped}
+
+
+def _default_runner(step: dict) -> None:
+    cmd = _local_shutdown_cmd() if step["method"] == "local" else ssh_shutdown_cmd(step)
+    subproc.run_isolated(cmd, timeout=30)
+
+
+def _default_notifier(spine):
+    def notify(kind: str, body: str) -> None:
+        with spine.write() as c:
+            c.execute("INSERT INTO notifications(kind, body) VALUES(?,?)", (kind, body))
+    return notify
+
+
+def _cur_state(status: dict) -> str:
+    return "LB" if status["low"] else "OB" if status["on_battery"] else "OL"
+
+
+def evaluate(spine, cfg, now, reader=read_status, runner=None, notifier=None) -> dict:
+    """Jedan tik stroja stanja. Injektabilno (reader/runner/notifier/now) za
+    testove. `now` = epoch sekunde. Gasi SAMO kad armed I (održivo OB > prag
+    ILI LB), jednom (idempotentno do povratka struje). ok=False NE gasi."""
+    pc = get_config(spine)
+    notifier = notifier or _default_notifier(spine)
+    runner = runner or _default_runner
+
+    prev = spine.get_override(_STATE, "last_state", "OL")
+
+    st = reader(pc["nut_host"], pc["nut_port"], pc["ups_name"])
+    if not st.get("ok"):
+        # NE gasi na nepoznato stanje; alarmiraj SAMO na prijelaz (inače bi svaki
+        # 30s tik spamao istu obavijest dok je UPS nedostupan)
+        if prev != "unknown":
+            notifier("napajanje", f"UPS nedostupan: {st.get('error', '?')}")
+        spine.set_override(_STATE, "last_state", "unknown")
+        return {"status": "unknown", "shutdown": False, "executed": []}
+
+    cur = _cur_state(st)
+    since_raw = spine.get_override(_STATE, "on_battery_since", "") or None
+
+    if cur != prev:
+        if cur == "LB" and prev != "LB":
+            notifier("napajanje", "Niska baterija UPS-a — gasim redom ako je naoružano.")
+        elif cur == "OB" and prev not in ("OB", "LB"):
+            notifier("napajanje", "Nestanak struje — UPS radi na bateriji.")
+        elif cur == "OL" and prev in ("OB", "LB"):
+            notifier("napajanje", "Struja se vratila — napajanje uredno.")
+
+    if cur == "OL":
+        since = None
+    elif prev in ("OL", "unknown") or since_raw is None:
+        since = float(now)  # tek ušao na bateriju (ili iz nepoznatog stanja)
+    else:
+        since = float(since_raw)
+
+    do_shutdown = False
+    if pc["armed"] and cur in ("OB", "LB"):
+        if cur == "LB":
+            do_shutdown = True
+        elif since is not None and (float(now) - since) >= pc["on_battery_seconds"]:
+            do_shutdown = True
+
+    already = spine.get_override(_STATE, "shutdown_done", "0") == "1"
+    executed = []
+    if do_shutdown and not already:
+        plan = shutdown_plan(spine)
+        for step in plan["steps"]:
+            try:
+                runner(step)
+                spine.audit("napajanje", "power_shutdown", step["name"], step["method"])
+                executed.append(step["name"])
+            except Exception as e:  # jedan pad ne smije zaustaviti ostatak reda
+                spine.audit("napajanje", "power_shutdown_fail", step["name"], str(e))
+        spine.set_override(_STATE, "shutdown_done", "1")
+
+    spine.set_override(_STATE, "last_state", cur)
+    spine.set_override(_STATE, "on_battery_since", "" if since is None else str(since))
+    if cur == "OL":
+        spine.set_override(_STATE, "shutdown_done", "0")  # reset za idući nestanak
+
+    return {"status": cur, "shutdown": bool(executed), "executed": executed}
