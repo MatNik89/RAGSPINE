@@ -2,7 +2,7 @@
 import json
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -19,6 +19,18 @@ class LLMResult:
     text: str
     model: str
     usage: dict
+    tool_calls: list[dict] = field(default_factory=list)
+
+
+def _tools_anthropic(tools: list[dict]) -> list[dict]:
+    return [{"name": t["name"], "description": t["description"], "input_schema": t["schema"]}
+            for t in tools]
+
+
+def _tools_openai(tools: list[dict]) -> list[dict]:
+    return [{"type": "function", "function": {
+        "name": t["name"], "description": t["description"], "parameters": t["schema"]}}
+        for t in tools]
 
 
 def detect_provider(base_url: str) -> str:
@@ -94,8 +106,15 @@ class LLMClient:
             return "openai", cfg.llm_base_url or "https://api.openai.com", token, True
         raise LLMUnavailable("no LLM provider configured: no base_url/key, Ollama unreachable, no OAuth token")
 
+    def supports_tools(self) -> bool:
+        # ponytail: ollama ovisi o modelu — agent hvata grešku/degradira, pa
+        # umjesto probe-poziva ovdje samo javljamo "pokušaj" (True). Upgrade
+        # path: cache-irati stvarni ishod prvog pokušaja po modelu.
+        return True
+
     def complete(self, messages: list[dict], system: str | None = None,
-                 model=None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResult:
+                 model=None, max_tokens: int = 1024, temperature: float = 0.2,
+                 tools: list[dict] | None = None) -> LLMResult:
         cfg = self.cfg
         provider, base, key, is_oauth = self._resolve()
         model = model or cfg.llm_model
@@ -110,14 +129,29 @@ class LLMClient:
             body = {"model": model, "max_tokens": max_tokens, "messages": messages}
             if system is not None:
                 body["system"] = system
+            if tools:
+                body["tools"] = _tools_anthropic(tools)
             resp = self.transport(url, headers, body)
+            if not tools:
+                try:
+                    blocks = resp["content"]
+                    block = next((b for b in blocks if b.get("type") == "text"), blocks[0])
+                    text = block["text"]
+                except (KeyError, IndexError, TypeError):
+                    raise LLMError(f"malformed provider response: {resp}") from None
+                return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
             try:
                 blocks = resp["content"]
-                block = next((b for b in blocks if b.get("type") == "text"), blocks[0])
-                text = block["text"]
+                text_block = next((b for b in blocks if b.get("type") == "text"), None)
+                tool_calls = [{"name": b["name"], "args": b.get("input", {})}
+                              for b in blocks if b.get("type") == "tool_use"]
+                text = text_block["text"] if text_block is not None else ""
+                if text_block is None and not tool_calls:
+                    text = blocks[0]["text"]  # ni text ni tool_use: čuvaj staro (moguće) rušenje
             except (KeyError, IndexError, TypeError):
                 raise LLMError(f"malformed provider response: {resp}") from None
-            return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
+            return LLMResult(text=text, model=resp.get("model", model or ""),
+                              usage=resp.get("usage", {}), tool_calls=tool_calls)
 
         # B10: put iza base_url dolazi iz kataloga (business/model_settings.py PROVIDER_CATALOG),
         # koji apply() upiše u cfg.llm_path po odabranom provideru; prazno/zadano = staro ponašanje.
@@ -128,9 +162,30 @@ class LLMClient:
             headers["authorization"] = f"Bearer {key}"
         msgs = ([{"role": "system", "content": system}] if system else []) + messages
         body = {"model": model, "max_tokens": max_tokens, "temperature": temperature, "messages": msgs}
+        if not tools:
+            resp = self.transport(url, headers, body)
+            try:
+                text = resp["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                raise LLMError(f"malformed provider response: {resp}") from None
+            return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
+
+        body["tools"] = _tools_openai(tools)
+        body["tool_choice"] = "auto"
         resp = self.transport(url, headers, body)
         try:
-            text = resp["choices"][0]["message"]["content"]
+            message = resp["choices"][0]["message"]
+            text = message.get("content") or ""
+            tool_calls = []
+            for tc in message.get("tool_calls") or []:
+                fn = tc["function"]
+                args_raw = fn.get("arguments", "{}")
+                try:
+                    args = json.loads(args_raw) if isinstance(args_raw, str) else (args_raw or {})
+                except ValueError:
+                    args = {}
+                tool_calls.append({"name": fn["name"], "args": args})
         except (KeyError, IndexError, TypeError):
             raise LLMError(f"malformed provider response: {resp}") from None
-        return LLMResult(text=text, model=resp.get("model", model or ""), usage=resp.get("usage", {}))
+        return LLMResult(text=text, model=resp.get("model", model or ""),
+                          usage=resp.get("usage", {}), tool_calls=tool_calls)

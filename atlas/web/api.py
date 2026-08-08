@@ -1,8 +1,10 @@
 import base64
 import binascii
 import dataclasses
+import json
 import os
 import re
+import secrets
 from datetime import date
 from urllib.parse import quote
 
@@ -47,7 +49,9 @@ from atlas.knowledge import features as features_mod
 from atlas.knowledge import patterns as patterns_mod
 from atlas.knowledge import translate as translate_mod
 from atlas.ops import doctor, health, model_recommender, nis2
+from atlas.rag import agent, agent_tools
 from atlas.rag import pipeline
+from atlas.rag import router as router_mod
 from atlas.rag import versioning
 from atlas.rag import sql_lane, graphrag  # noqa: F401 — register sql/graph lane handlers
 from atlas.web import learn  # noqa: F401 — register learn lane handler
@@ -69,6 +73,14 @@ from atlas.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, k
 class ChatBody(BaseModel):
     q: str
     fresh: bool = False
+
+
+class PendingTokenBody(BaseModel):
+    token: str
+
+
+_AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
+_PENDING_TTL_MIN = 10
 
 
 class ChatCompletionsBody(BaseModel):
@@ -949,7 +961,60 @@ def create_app(spine, cfg) -> FastAPI:
         # require_actor_web: prima i cookie i Bearer — web UI šalje cookie
         # (E2E nalaz: require_actor je samo-Bearer pa je web chat uvijek 401).
         _chat_gate(actor)
-        return _answer(body.q, actor, fresh=body.fresh)
+        # Agentski put samo za korisnike koji smiju akcije I samo za slobodni
+        # "chat" lane. Determinističke lane (reject, sql, ocr, greeting...) se
+        # rješavaju bez LLM-a kroz _answer — inače bi svaki upit gradio LLM
+        # klijenta i pokušavao mrežu (skupo + rate-limit prozor sklizne).
+        # LLM izlaz je nepovjerljiv: write se NE izvršava, samo sprema kao
+        # jednokratni vlasnički token za /chat/potvrdi.
+        if actor.role not in _AGENT_ROLES or router_mod.route(body.q) != "chat":
+            return _answer(body.q, actor, fresh=body.fresh)
+        llm = LLMClient(model_settings.apply(spine, cfg))
+        try:
+            res = agent.run_agent(spine, cfg, body.q, actor, llm)
+        except (LLMUnavailable, LLMError):
+            return _answer(body.q, actor, fresh=body.fresh)
+        out = {"answer": res["text"], "lane": "agent", "confidence": 1,
+               "sources": res["sources"], "cached": False}
+        pending = res.get("pending")
+        if pending:
+            token = secrets.token_urlsafe(24)
+            with spine.write() as c:
+                c.execute("INSERT INTO agent_pending(token,user_id,org_id,tool,args_json) "
+                          "VALUES(?,?,?,?,?)",
+                          (token, actor.user_id, actor.org_id, pending["tool"],
+                           json.dumps(pending["args"], ensure_ascii=False)))
+            out["pending"] = {"token": token, "summary": pending["summary"]}
+        return out
+
+    @app.post("/chat/potvrdi")
+    def chat_potvrdi(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
+        # Atomično potroši vlasnički, ne-istekli token (jedan writer serijalizira
+        # SELECT+DELETE — dvostruko klikanje ne izvrši dvaput). Ovlasti se PONOVO
+        # provjere u run_tool sad, ne na vrijeme prijedloga.
+        with spine.write() as c:
+            row = c.execute(
+                "SELECT tool, args_json FROM agent_pending "
+                "WHERE token=? AND user_id=? AND org_id=? "
+                "AND created_at > datetime('now', ?)",
+                (body.token, actor.user_id, actor.org_id, f"-{_PENDING_TTL_MIN} minutes")).fetchone()
+            if row is None:
+                raise HTTPException(404, "prijedlog ne postoji ili je istekao")
+            c.execute("DELETE FROM agent_pending WHERE token=?", (body.token,))
+            tool, args_json = row["tool"], row["args_json"]
+        try:
+            result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        spine.audit(actor.username, "agent_execute", tool, args_json)
+        return {"ok": True, "tool": tool, "result": result}
+
+    @app.post("/chat/odustani")
+    def chat_odustani(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
+        with spine.write() as c:
+            c.execute("DELETE FROM agent_pending WHERE token=? AND user_id=? AND org_id=?",
+                      (body.token, actor.user_id, actor.org_id))
+        return {"ok": True}
 
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):

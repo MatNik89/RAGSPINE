@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS doc_extracts(doc_id INTEGER PRIMARY KEY, doc_type_key
   at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action TEXT,
   entity TEXT, detail TEXT, at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS agent_pending(token TEXT PRIMARY KEY, user_id INTEGER,
+  org_id INTEGER, tool TEXT, args_json TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS hash_chain(id INTEGER PRIMARY KEY, event TEXT, prev_hash TEXT,
   hash TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY, question TEXT, answer TEXT,

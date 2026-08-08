@@ -80,12 +80,20 @@ def learn_url(spine, cfg, url: str, user: str, fetch=None) -> dict:
     return {"url": url, "overrides_set": overrides, "doc_id": doc_id}
 
 
-def handle(spine, cfg, query: str, llm, fetch=None) -> str:
+_WRITE_ROLES = ("member", "admin", "owner")  # viewer ne smije mijenjati korpus/config
+
+
+def handle(spine, cfg, query: str, llm, fetch=None, actor=None) -> str:
+    # Side-effect lane: dohvat URL-a + upis prireza u config + ingest u korpus.
+    # Zato zahtijeva barem člansku ulogu — inače read-only viewer može trovati
+    # RAG korpus i mijenjati kalkulatorske stope (adversarial review, MEDIUM).
+    if actor is None or actor.role not in _WRITE_ROLES:
+        return "Za učenje s weba potrebna je barem članska (member) uloga."
     m = _URL_RE.search(query)
     if not m:
         return "Pošalji URL, npr: nauči s https://..."
     url = m.group(0).rstrip(_TRAILING_PUNCT)
-    result = learn_url(spine, cfg, url, "sustav", fetch=fetch)
+    result = learn_url(spine, cfg, url, actor.username or "sustav", fetch=fetch)
     if not result["overrides_set"]:
         return f"Naučeno s {result['url']}: stranica spremljena, brojke nisu prepoznate."
     parts = ", ".join(f"{c} ({r})" for c, r in result["overrides_set"].items())
