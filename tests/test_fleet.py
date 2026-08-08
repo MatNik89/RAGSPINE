@@ -117,7 +117,30 @@ def test_complete_stores_result(spine):
     did = _dev(spine)
     cid = fleet.enqueue(spine, did, "status")
     fleet.next_command(spine, did)
-    fleet.complete(spine, cid, {"ok": True, "detail": "radi"})
+    assert fleet.complete(spine, cid, did, {"ok": True, "detail": "radi"}) is True
     row = spine.read().execute("SELECT status, result FROM agent_commands WHERE id=?",
                                (cid,)).fetchone()
     assert row["status"] == "done" and "radi" in row["result"]
+
+
+def test_complete_requires_in_progress_and_owner(spine):
+    d1 = _dev(spine)
+    d2 = _dev(spine, "PC2")
+    cid = fleet.enqueue(spine, d1, "status")
+    # pending (nije in_progress) se ne može zatvoriti -> spriječi preskakanje izvršenja
+    assert fleet.complete(spine, cid, d1, {"ok": True}) is False
+    fleet.next_command(spine, d1)  # sad in_progress
+    assert fleet.complete(spine, cid, d2, {"ok": True}) is False  # tuđi uređaj
+    assert fleet.complete(spine, cid, d1, {"ok": True}) is True
+    assert fleet.complete(spine, cid, d1, {"ok": True}) is False  # već done, bez prepisivanja
+
+
+def test_removed_program_command_not_delivered(spine):
+    did = _dev(spine)
+    fleet.add_program(spine, "kalkulator", "Kalk", user="a")
+    fleet.enqueue(spine, did, "run_program", program_key="kalkulator")
+    fleet.remove_program(spine, "kalkulator")  # ownerov opoziv
+    assert fleet.next_command(spine, did) is None  # otkazana, ne isporučuje se
+    row = spine.read().execute(
+        "SELECT status FROM agent_commands WHERE device_id=?", (did,)).fetchone()
+    assert row["status"] == "cancelled"

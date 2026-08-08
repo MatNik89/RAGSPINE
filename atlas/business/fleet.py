@@ -90,8 +90,13 @@ def list_programs(spine) -> list[dict]:
 
 
 def remove_program(spine, key: str) -> None:
+    key = _norm_key(key)
     with spine.write() as c:
-        c.execute("DELETE FROM fleet_programs WHERE key=?", (_norm_key(key),))
+        c.execute("DELETE FROM fleet_programs WHERE key=?", (key,))
+        # ownerovo opozivanje mora odmah otkazati već enqueueane naredbe tog
+        # programa — inače admin unaprijed napuni red pa opoziv nema učinka
+        c.execute("UPDATE agent_commands SET status='cancelled' "
+                  "WHERE action='run_program' AND program_key=? AND status='pending'", (key,))
 
 
 # --- red naredbi -----------------------------------------------------------
@@ -118,20 +123,34 @@ def next_command(spine, device_id: int) -> dict | None:
     (UPDATE ... RETURNING) — dva istovremena polla ne mogu dobiti istu naredbu
     (drugi UPDATE ne pogodi red jer više nije 'pending'). (Codex T1 nalaz.)"""
     with spine.write() as c:
-        row = c.execute(
-            "UPDATE agent_commands SET status='in_progress' "
-            "WHERE id=(SELECT id FROM agent_commands WHERE device_id=? AND status='pending' "
-            "ORDER BY id LIMIT 1) AND status='pending' "
-            "RETURNING id, action, program_key",
-            (device_id,)).fetchone()
-        if row is None:
-            return None
-        return {"id": row["id"], "action": row["action"], "program_key": row["program_key"]}
+        while True:
+            row = c.execute(
+                "UPDATE agent_commands SET status='in_progress' "
+                "WHERE id=(SELECT id FROM agent_commands WHERE device_id=? AND status='pending' "
+                "ORDER BY id LIMIT 1) AND status='pending' "
+                "RETURNING id, action, program_key",
+                (device_id,)).fetchone()
+            if row is None:
+                return None
+            # claim-time re-provjera allowliste: ako je program u međuvremenu
+            # maknut, NE isporuči ga (ownerov opoziv je autoritativan)
+            if row["action"] == "run_program" and c.execute(
+                    "SELECT 1 FROM fleet_programs WHERE key=?", (row["program_key"],)).fetchone() is None:
+                c.execute(
+                    "UPDATE agent_commands SET status='cancelled', result=?, done_at=datetime('now') "
+                    "WHERE id=?",
+                    (json.dumps({"ok": False, "detail": "program uklonjen s allowliste"}), row["id"]))
+                continue  # preskoči, uzmi idući pending
+            return {"id": row["id"], "action": row["action"], "program_key": row["program_key"]}
 
 
-def complete(spine, cmd_id: int, result) -> None:
+def complete(spine, cmd_id: int, device_id: int, result) -> bool:
+    """Zatvori naredbu SAMO ako je 'in_progress' i pripada uređaju — spriječi da
+    agent preskoči izvršenje (pending->done) ili prepiše već završen rezultat.
+    Vrati True ako je red stvarno zatvoren."""
     with spine.write() as c:
-        c.execute(
+        cur = c.execute(
             "UPDATE agent_commands SET status='done', result=?, done_at=datetime('now') "
-            "WHERE id=?",
-            (json.dumps(result, ensure_ascii=False, default=str), cmd_id))
+            "WHERE id=? AND device_id=? AND status='in_progress'",
+            (json.dumps(result, ensure_ascii=False, default=str), cmd_id, device_id))
+        return cur.rowcount == 1
