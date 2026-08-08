@@ -30,6 +30,7 @@ from atlas.business import notes
 from atlas.business import doc_registry, obveze
 from atlas.business import onboarding
 from atlas.business import peer_compare
+from atlas.business import power as power_mod
 from atlas.business import sop as sop_mod
 from atlas.business import sop_images
 from atlas.business import tenancy
@@ -77,6 +78,20 @@ class ChatBody(BaseModel):
 
 class PendingTokenBody(BaseModel):
     token: str
+
+
+class PowerConfigBody(BaseModel):
+    # 'armed' NAMJERNO izostavljen — naoružavanje ide samo kroz /napajanje/arm
+    # (jedno mjesto, auditirano). Inače bi config-POST tiho naoružao gašenje.
+    enabled: bool | None = None
+    nut_host: str | None = None
+    nut_port: int | None = None
+    ups_name: str | None = None
+    on_battery_seconds: int | None = None
+
+
+class ArmBody(BaseModel):
+    armed: bool
 
 
 _AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
@@ -725,6 +740,14 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(403, "potrebna admin uloga")
         return actor
 
+    def _require_owner(actor: Actor) -> Actor:
+        # Napajanje/gašenje je STROJNO (jedan fizički UPS/server) i globalno za
+        # instalaciju — ne po organizaciji. Zato mutacije traže NAJVIŠU ulogu
+        # (owner), ne bilo kojeg tenant-admina.
+        if actor.role != "owner":
+            raise HTTPException(403, "potrebna owner uloga (strojno napajanje)")
+        return actor
+
     def _active_owner_count(org_id: int) -> int:
         """I2 (re-review): broji SAMO owner-članove s postavljenom lozinkom.
         Pending owner (pw_hash NULL) ne može se prijaviti niti ga admin-kao-radnik
@@ -1016,6 +1039,46 @@ def create_app(spine, cfg) -> FastAPI:
                       (body.token, actor.user_id, actor.org_id))
         return {"ok": True}
 
+    # --- Napajanje (UPS/NUT + gašenje redom) — sve admin-only ---
+    @app.get("/napajanje/config")
+    def napajanje_config_get(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        return power_mod.get_config(spine)
+
+    @app.post("/napajanje/config")
+    def napajanje_config_set(body: PowerConfigBody, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        fields = body.model_dump(exclude_none=True)
+        before = power_mod.get_config(spine)
+        try:
+            after = power_mod.save_config(spine, **fields)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        changed = {k: after[k] for k in fields if before.get(k) != after.get(k)}
+        if changed:  # svaka promjena uvjeta gašenja u audit
+            spine.audit(actor.username, "napajanje_config", "", str(changed))
+        return after
+
+    @app.get("/napajanje/status")
+    def napajanje_status(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        pc = power_mod.get_config(spine)
+        st = power_mod.read_status(pc["nut_host"], pc["nut_port"], pc["ups_name"])
+        st["flags"] = sorted(st.get("flags", []))  # set -> JSON lista
+        return st
+
+    @app.get("/napajanje/plan")
+    def napajanje_plan(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        return power_mod.shutdown_plan(spine)  # dry-run: samo pregled reda
+
+    @app.post("/napajanje/arm")
+    def napajanje_arm(body: ArmBody, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        power_mod.save_config(spine, armed=body.armed)
+        spine.audit(actor.username, "napajanje_arm", "", "1" if body.armed else "0")
+        return {"armed": body.armed}
+
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):
         _chat_gate(actor)
@@ -1187,6 +1250,15 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from atlas.web.templates_devices import devices_page
         return devices_page()
+
+    @app.get("/ui/napajanje", response_class=HTMLResponse)
+    def ui_napajanje(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from atlas.web.templates_ui import napajanje_page
+        return napajanje_page()
 
     @app.get("/ui/posta", response_class=HTMLResponse)
     def ui_posta(request: Request):
