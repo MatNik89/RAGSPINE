@@ -126,14 +126,16 @@ def apply(spine, cfg):
     base = s["base_url"]
     embed = s["embed_model"] or cfg.embed_model
     if prov == "ollama":
+        # llm_path="" — reset od eventualnog prijašnjeg openai-kompat odabira (npr.
+        # Gemini); inače cfg nosi tuđi put dok se aplikacija ne restarta (review nalaz).
         return dataclasses.replace(cfg, llm_provider="ollama", llm_base_url="", llm_api_key="",
-                                   llm_model=model,
+                                   llm_model=model, llm_path="",
                                    ollama_url=(s["ollama_url"] or base or cfg.ollama_url),
                                    embed_model=embed)
     if prov == "anthropic":
         b = base or cfg.anthropic_base_url
         return dataclasses.replace(cfg, llm_provider="anthropic", llm_base_url=b,
-                                   llm_api_key=s["api_key"], llm_model=model,
+                                   llm_api_key=s["api_key"], llm_model=model, llm_path="",
                                    anthropic_base_url=b, embed_model=embed)
     # openai-compat (svi ostali katalog ključevi, uklj. "custom"): put iza base_url
     # dolazi iz kataloga (B10) — zadano "/v1/chat/completions" ako ključ nije poznat.

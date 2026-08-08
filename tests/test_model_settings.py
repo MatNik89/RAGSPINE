@@ -119,6 +119,17 @@ def test_apply_ollama_clears_key(spine, cfg):
     assert applied.llm_model == "llama3.1"
 
 
+def test_apply_switch_from_gemini_to_ollama_resets_llm_path(spine, cfg):
+    # Review nalaz: gemini upiše nestandardni llm_path u cfg; prebacivanje na
+    # ollamu mora ga resetirati, inače chat gađa .../v1beta/... na Ollami.
+    model_settings.save(spine, "gemini", api_key="k")
+    applied = model_settings.apply(spine, cfg)
+    assert applied.llm_path == "/v1beta/openai/chat/completions"
+    model_settings.save(spine, "ollama", base_url="http://x:11434")
+    applied = model_settings.apply(spine, applied)
+    assert applied.llm_path == ""
+
+
 def test_apply_no_selection_returns_cfg_unchanged(spine, cfg):
     assert model_settings.apply(spine, cfg) is cfg
 

@@ -1,5 +1,7 @@
 """HTML za /ui/model — odabir LLM providera (mozak vs gorivo). API ključ se
 šalje ali nikad ne vraća (GET daje samo has_api_key). Reuse design-shell."""
+import html
+
 from atlas.business.model_settings import PROVIDER_CATALOG
 from atlas.web.templates_ui import page_shell
 
@@ -55,8 +57,8 @@ loadModel();
 def _provider_options() -> str:
     opts = []
     for p in PROVIDER_CATALOG:
-        opts.append(
-            f'<option value="{p["key"]}" data-baseurl="{p["base_url"]}">{p["naziv"]}</option>')
+        key, base, naziv = (html.escape(p["key"]), html.escape(p["base_url"]), html.escape(p["naziv"]))
+        opts.append(f'<option value="{key}" data-baseurl="{base}">{naziv}</option>')
     return "\n      ".join(opts)
 
 

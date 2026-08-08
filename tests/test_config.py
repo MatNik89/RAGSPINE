@@ -12,6 +12,15 @@ def test_env_override(tmp_path, monkeypatch):
     monkeypatch.setenv("ATLAS_PORT", "9000")
     assert Config.from_env().port == 9000
 
+def test_llm_path_env_default_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    assert Config.from_env().llm_path == ""
+
+def test_llm_path_env_override(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ATLAS_LLM_PATH", "/v1beta/openai/chat/completions")
+    assert Config.from_env().llm_path == "/v1beta/openai/chat/completions"
+
 def test_jwt_secret_persisted(tmp_path, monkeypatch):
     monkeypatch.setenv("ATLAS_DATA_DIR", str(tmp_path))
     s1 = Config.from_env().jwt_secret

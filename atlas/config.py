@@ -83,6 +83,7 @@ class Config:
             llm_base_url=e("LLM_BASE_URL", ""), llm_api_key=e("LLM_API_KEY", ""),
             llm_model=e("LLM_MODEL", ""),
             llm_provider=e("LLM_PROVIDER", ""),
+            llm_path=e("LLM_PATH", ""),  # B10: env-only put uz LLM_BASE_URL (npr. Gemini)
             anthropic_base_url=e("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
             ollama_url=e("OLLAMA_URL", "http://127.0.0.1:11434"),
             # Default = mali multilingual (220MB, dim 384, hrvatski OK) — pouzdano
