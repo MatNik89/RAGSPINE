@@ -56,7 +56,9 @@ def hash_password(pw: str) -> str:
     return f"pbkdf2${_PBKDF2_ITERS}${salt.hex()}${h.hex()}"
 
 
-def verify_password(pw: str, stored: str) -> bool:
+def verify_password(pw: str, stored: str | None) -> bool:
+    if not stored:  # NULL/prazan = "čeka aktivaciju" — nikad ne prolazi verify
+        return False
     try:
         if stored.startswith("pbkdf2$"):
             _, iters_s, salt_hex, hash_hex = stored.split("$")

@@ -36,6 +36,10 @@ def test_password_malformed_stored():
     assert not sec.verify_password("x", "not-a-valid-format")
     assert not sec.verify_password("x", "")
 
+def test_password_none_stored_never_crashes():
+    # pw_hash NULL = "čeka aktivaciju" — mora vratiti False, nikad iznimku.
+    assert sec.verify_password("bilo-sto", None) is False
+
 def test_oib():
     assert sec.oib_valid("69435151530")      # validan testni OIB
     assert not sec.oib_valid("69435151531")

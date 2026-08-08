@@ -120,6 +120,21 @@ class SetupOwnerBody(BaseModel):
     password: str = Field(min_length=8, max_length=128)
 
 
+class LoginStepBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+
+
+class LoginActivateBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=128)
+    password2: str = Field(min_length=8, max_length=128)
+
+
+class RadnikCreateBody(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    role: str = "member"
+
+
 class DiscoverCommitBody(BaseModel):
     folder_id: int
     items: list[dict]
@@ -493,6 +508,49 @@ def create_app(spine, cfg) -> FastAPI:
         resp.delete_cookie(COOKIE_NAME)
         return resp
 
+    @app.post("/login/step")
+    def login_step(body: LoginStepBody, request: Request):
+        """Prvi korak dvokoračnog logina: bez otkrivanja postoje li useri —
+        nepoznat user vraća isto 'password' stanje kao i već aktiviran."""
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
+            raise HTTPException(429, "previše pokušaja — pričekajte minutu")
+        row = spine.read().execute(
+            "SELECT pw_hash FROM users WHERE username=?", (body.username,)).fetchone()
+        if row is not None and not row["pw_hash"]:
+            return {"state": "activate"}
+        return {"state": "password"}
+
+    @app.post("/login/activate")
+    def login_activate(body: LoginActivateBody, request: Request):
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
+            raise HTTPException(429, "previše pokušaja — pričekajte minutu")
+        if body.password != body.password2:
+            raise HTTPException(400, "lozinke se ne poklapaju")
+        row = spine.read().execute(
+            "SELECT id, role, pw_hash FROM users WHERE username=?", (body.username,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznat korisnik")
+        if row["pw_hash"]:
+            raise HTTPException(409, "račun je već aktiviran")
+        new_hash = hash_password(body.password)
+        with spine.write() as c:
+            # WHERE pw_hash IS NULL = atomski utrka-guard: ako je netko drugi
+            # već aktivirao između SELECT-a i ovog UPDATE-a, rowcount je 0.
+            cur = c.execute("UPDATE users SET pw_hash=? WHERE id=? AND pw_hash IS NULL",
+                             (new_hash, row["id"]))
+            if cur.rowcount == 0:
+                raise HTTPException(409, "račun je već aktiviran")
+        spine.audit(body.username, "user_activate", f"user:{row['id']}", "user aktiviran")
+        org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
+        token = jwt_encode({"sub": body.username, "role": row["role"],
+                            "uid": row["id"], "org_id": org_id}, cfg.jwt_secret)
+        resp = JSONResponse({"token": token})
+        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=86400,
+                         secure=cfg.https_only)
+        return resp
+
     @app.post("/auth/login")
     async def login(request: Request):
         ctype = request.headers.get("content-type", "")
@@ -518,19 +576,44 @@ def create_app(spine, cfg) -> FastAPI:
         if row is None:
             verify_password(password, _DUMMY_PW_HASH)  # constant-time-ish: keep latency ~equal
             raise HTTPException(401, "invalid credentials")
-        if not verify_password(password, row["pw_hash"]):
-            raise HTTPException(401, "invalid credentials")
-        if not row["pw_hash"].startswith("pbkdf2$"):
+        # Admin-kao-radnik: vlastita lozinka prvo; padne li (ili je pw_hash NULL
+        # jer radnik čeka aktivaciju), probaj OWNER/ADMIN hasheve ISTOG orga —
+        # uspjeh = prijava KAO radnik (rola dolazi svježe iz membershipa niže,
+        # ne raste ovim putem), samo audit + impersonated_by claim pamte tko je ušao.
+        impersonated_by = None
+        own_ok = verify_password(password, row["pw_hash"])
+        if not own_ok:
+            m = spine.read().execute(
+                "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+                (row["id"],)).fetchone()
+            if m is not None:
+                admins = spine.read().execute(
+                    """SELECT u.username, u.pw_hash FROM memberships mm
+                       JOIN users u ON u.id = mm.user_id
+                       WHERE mm.org_id=? AND mm.role IN ('admin','owner') AND u.id != ?""",
+                    (m["org_id"], row["id"])).fetchall()
+                for a in admins:
+                    if verify_password(password, a["pw_hash"]):
+                        impersonated_by = a["username"]
+                        break
+            if impersonated_by is None:
+                raise HTTPException(401, "invalid credentials")
+        if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
             # legacy 200k hash (bez prefiksa): rehash na aktualne parametre
             # pri uspješnoj prijavi — lozinku imamo samo sada, u plaintextu.
+            # Vrijedi SAMO za vlastitu lozinku — admin fallback ne dira radnikov hash.
             with spine.write() as c:
                 c.execute("UPDATE users SET pw_hash=? WHERE id=?",
                           (hash_password(password), row["id"]))
         # uid+org_id su pokazivači za Actor lookup; org-uloga se NE stavlja u
         # token (čita se svježa iz memberships na svakom zahtjevu).
         org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
-        token = jwt_encode({"sub": username, "role": row["role"],
-                            "uid": row["id"], "org_id": org_id}, cfg.jwt_secret)
+        payload = {"sub": username, "role": row["role"], "uid": row["id"], "org_id": org_id}
+        if impersonated_by:
+            payload["impersonated_by"] = impersonated_by
+            spine.audit(impersonated_by, "impersonate", f"user:{username}",
+                        f"admin {impersonated_by} ušao kao {username}")
+        token = jwt_encode(payload, cfg.jwt_secret)
         # ponytail: CSRF for POST /obveze/mark deferred — SameSite=Lax already blocks
         # cross-site POST-with-cookie on top-level navigation; a CSRF token is the
         # upgrade path if that stops being sufficient (e.g. subdomain untrusted).
@@ -612,6 +695,63 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, "nije član organizacije")
         client_visibility.set_policy(spine, worker_id, body.sees_all,
                                      body.client_ids, actor_name=actor.username)
+        return {"ok": True}
+
+    # /radnici — račun-razina upravljanja radnicima (Postavke → Radnici), za
+    # razliku od /workers gore koji upravlja samo vidljivošću klijenata.
+    @app.get("/radnici")
+    def radnici_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        rows = spine.read().execute(
+            """SELECT u.id, u.username, mm.role, u.pw_hash FROM memberships mm
+               JOIN users u ON u.id = mm.user_id WHERE mm.org_id=? ORDER BY u.username""",
+            (actor.org_id,)).fetchall()
+        return [{"id": r["id"], "user": r["username"], "role": r["role"],
+                 "aktivan": bool(r["pw_hash"]), "device": None} for r in rows]
+
+    @app.post("/radnici")
+    def radnici_add(body: RadnikCreateBody, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        if body.role not in ("member", "admin"):
+            raise HTTPException(400, "nepoznata uloga")
+        username = body.username.strip()
+        if not username:
+            raise HTTPException(400, "korisničko ime je obavezno")
+        if spine.read().execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+            raise HTTPException(409, "korisnik već postoji")
+        sys_role = "admin" if body.role == "admin" else "radnik"
+        with spine.write() as c:
+            uid = c.execute("INSERT INTO users(username, pw_hash, role) VALUES(?,?,?)",
+                            (username, None, sys_role)).lastrowid
+        tenancy.add_member(spine, actor.org_id, uid, body.role, user=actor.username)
+        spine.audit(actor.username, "radnik_add", f"user:{uid}", username)
+        return {"id": uid, "user": username, "role": body.role, "aktivan": False, "device": None}
+
+    @app.post("/radnici/{radnik_id}/reset")
+    def radnici_reset(radnik_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        role = tenancy.role_of(spine, actor.org_id, radnik_id)
+        if role is None:
+            raise HTTPException(404, "nije član organizacije")
+        if role == "owner" and actor.user_id != radnik_id:
+            raise HTTPException(403, "vlasnika smije resetirati samo on sam")
+        with spine.write() as c:
+            c.execute("UPDATE users SET pw_hash=NULL WHERE id=?", (radnik_id,))
+        spine.audit(actor.username, "radnik_reset", f"user:{radnik_id}")
+        return {"ok": True}
+
+    @app.delete("/radnici/{radnik_id}")
+    def radnici_delete(radnik_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)
+        role = tenancy.role_of(spine, actor.org_id, radnik_id)
+        if role is None:
+            raise HTTPException(404, "nije član organizacije")
+        if role == "owner" and actor.user_id != radnik_id:
+            raise HTTPException(403, "vlasnika smije ukloniti samo on sam")
+        with spine.write() as c:
+            c.execute("DELETE FROM memberships WHERE org_id=? AND user_id=?",
+                      (actor.org_id, radnik_id))
+        spine.audit(actor.username, "radnik_remove", f"user:{radnik_id}")
         return {"ok": True}
 
     @app.get("/wiki")
