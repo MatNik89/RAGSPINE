@@ -2,7 +2,6 @@
 import argparse
 import getpass
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -365,6 +364,7 @@ def _cmd_servis(args) -> int:
     """atlas servis <install|uninstall|status> — WinSW (Windows) / systemd
     (Linux) servis oko `atlas serve` (spec 2026-08-08). install/uninstall
     traže elevaciju; status ne."""
+    from atlas.business import folders
     from atlas.config import get_config
     from atlas.core.spine import init_spine
     from atlas.ops import winsvc
@@ -379,8 +379,10 @@ def _cmd_servis(args) -> int:
     if args.akcija == "install":
         spine = init_spine(cfg.db_path)
         _, port, _, _ = _net_overrides(spine, cfg)
-        exe = shutil.which("atlas") or f"{sys.executable} -m atlas"
-        return 0 if winsvc.install_service(exe, cfg.data_dir, port) else 1
+        exe, cmd_args = winsvc.resolve_atlas_cmd()
+        roots = [m["path"] for m in folders.list_folders(spine)]
+        ok = winsvc.install_service(exe, cmd_args, cfg.data_dir, port, mount_roots=roots)
+        return 0 if ok else 1
     return 0 if winsvc.uninstall_service(cfg.data_dir) else 1
 
 

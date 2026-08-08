@@ -128,11 +128,35 @@ def test_servis_install_elevated_zove_winsvc(cfg, monkeypatch):
     import atlas.__main__ as m
     from atlas.ops import winsvc
     monkeypatch.setattr(m, "_elevated", lambda: True)
+    monkeypatch.setattr(winsvc, "resolve_atlas_cmd", lambda: ("/usr/bin/atlas", ["serve"]))
     calls = []
     monkeypatch.setattr(winsvc, "install_service",
-                        lambda exe, data_dir, port, **k: calls.append((exe, data_dir, port)) or True)
+                        lambda exe, args, data_dir, port, **k:
+                        calls.append((exe, args, data_dir, port, k.get("mount_roots"))) or True)
     assert main(["servis", "install"]) == 0
-    assert calls and calls[0][1] == cfg.data_dir
+    assert calls and calls[0] == ("/usr/bin/atlas", ["serve"], cfg.data_dir, cfg.port, [])
+
+
+def test_servis_install_elevated_prosljedjuje_mount_roots(cfg, monkeypatch):
+    """review IMPORTANT 2: registrirane mape moraju stići do install_service —
+    folders su fail-closed bez ATLAS_MOUNT_ROOTS u servisnom envu."""
+    import types
+    import atlas.__main__ as m
+    from atlas.business import folders
+    from atlas.core.spine import init_spine
+    from atlas.ops import winsvc
+    spine = init_spine(cfg.db_path)
+    mapa = Path(cfg.data_dir) / "propisi"
+    mapa.mkdir()
+    folders.register(spine, types.SimpleNamespace(mount_roots=[str(mapa)]),
+                     str(mapa), "propisi", label="Propisi", user="test")
+    monkeypatch.setattr(m, "_elevated", lambda: True)
+    monkeypatch.setattr(winsvc, "resolve_atlas_cmd", lambda: ("/usr/bin/atlas", ["serve"]))
+    calls = []
+    monkeypatch.setattr(winsvc, "install_service",
+                        lambda exe, args, data_dir, port, **k: calls.append(k.get("mount_roots")) or True)
+    assert main(["servis", "install"]) == 0
+    assert calls == [[str(mapa.resolve())]]
 
 
 def test_servis_install_elevated_pad_vraca_1(cfg, monkeypatch):

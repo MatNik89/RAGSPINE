@@ -53,3 +53,4 @@ def test_registry_slojevi_su_noop_izvan_windowsa():
     assert winpath.refresh_path_from_registry() is False
     assert winpath.persist_user_env("X", "y") is False
     assert winpath.append_user_path("/tmp") is False
+    assert winpath.get_user_env("X") is None

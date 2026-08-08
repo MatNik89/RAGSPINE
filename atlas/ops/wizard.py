@@ -346,8 +346,12 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     # 7) servis (preskočivo; neuspjeh ne ruši stranicu)
     if tui.prompt_yes_no("Instaliraj kao servis (autostart)?", default=False,
                          input_fn=input_fn, out=out):
-        exe = shutil.which("atlas") or f"{sys.executable} -m atlas"
-        if not winsvc.install_service(exe, getattr(cfg, "data_dir", "."), port, out=out):
+        from atlas.business import folders
+        exe, cmd_args = winsvc.resolve_atlas_cmd()
+        roots = [m["path"] for m in folders.list_folders(spine)]
+        ok = winsvc.install_service(exe, cmd_args, getattr(cfg, "data_dir", "."), port,
+                                    mount_roots=roots, out=out)
+        if not ok:
             out("⚠ Servis nije instaliran — možeš ponoviti kasnije (admin konzola).")
     return True
 
@@ -494,11 +498,20 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         existing = [p for p in config._env("MOUNT_ROOTS", "").split(",") if p.strip()]
         merged = list(dict.fromkeys(existing + roots))
         env = {**os.environ, "ATLAS_MOUNT_ROOTS": ",".join(merged)}
+    kwargs = _detached_kwargs(getattr(cfg, "data_dir", None))
     try:
-        popen(cmd, env=env, **_detached_kwargs(getattr(cfg, "data_dir", None)))
+        popen(cmd, env=env, **kwargs)
     except OSError as e:
         out(f"⚠ Server nije pokrenut ({e}) — pokreni ručno: atlas serve")
         return
+    finally:
+        # Popen (kad je pravi subprocess) duplicira fd u dijete — roditelj
+        # svoju kopiju log-datoteka mora zatvoriti i na uspjehu i na OSError
+        # putu, inače curi otvoreni file handle u wizard procesu.
+        for key in ("stdout", "stderr"):
+            fh = kwargs.get(key)
+            if hasattr(fh, "close"):
+                fh.close()
     out(f"✓ Server pokrenut u pozadini — {url}")
     _open_edge(url, out=out, popen=popen)
 

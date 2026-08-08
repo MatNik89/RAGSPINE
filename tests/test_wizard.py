@@ -90,22 +90,29 @@ def test_page_mreza_busy_port_retries(tmp_path, monkeypatch):
 
 
 def test_page_mreza_servis_da_zove_install_service(tmp_path, monkeypatch):
-    """Potpis install_service (task 1: exe, data_dir, port, *, out=...) mora
-    ostati usklađen s pozivom na stranici mreže."""
+    """exe/args RAZDVOJENI (review CRITICAL 1) i mount_roots iz registriranih
+    mapa (review IMPORTANT 2) moraju stići do install_service."""
+    import types
+    from atlas.business import folders
     from atlas.core.spine import init_spine
     s = init_spine(str(tmp_path / "t.db"))
     _mreza_mocks(monkeypatch, tmp_path)
-    monkeypatch.setattr(wizard.shutil, "which", lambda name: "/usr/bin/atlas")
+    mapa = tmp_path / "propisi"
+    mapa.mkdir()
+    folders.register(s, types.SimpleNamespace(mount_roots=[str(mapa)]),
+                     str(mapa), "propisi", label="Propisi", user="test")
+    monkeypatch.setattr(wizard.winsvc, "resolve_atlas_cmd", lambda: ("/usr/bin/atlas", ["serve"]))
     calls = []
     monkeypatch.setattr(wizard.winsvc, "install_service",
-                        lambda exe, data_dir, port, **k: calls.append((exe, data_dir, port)) or True)
+                        lambda exe, args, data_dir, port, **k:
+                        calls.append((exe, args, data_dir, port, k.get("mount_roots"))) or True)
 
     class _Cfg:
         data_dir = str(tmp_path)
     ok = wizard.page_mreza(s, _Cfg(), input_fn=_reader("1", "", "", "da"),
                            out=lambda *_: None)
     assert ok is True
-    assert calls == [("/usr/bin/atlas", str(tmp_path), 8443)]
+    assert calls == [("/usr/bin/atlas", ["serve"], str(tmp_path), 8443, [str(mapa.resolve())])]
 
 
 def test_page_mreza_servis_neuspjeh_ispisuje_upozorenje(tmp_path, monkeypatch):
@@ -466,13 +473,33 @@ def test_launch_now_serve_pise_log_umjesto_devnull(tmp_path, monkeypatch):
     wizard.launch_now(s, _Cfg(), input_fn=_reader(""), out=lambda *_: None,
                       popen=lambda cmd, **k: calls.append(k))
     kw = calls[0]
-    try:
-        assert kw["stdout"] != wizard.subprocess.DEVNULL
-        assert (tmp_path / "logs" / "serve.out.log").exists()
-        assert (tmp_path / "logs" / "serve.err.log").exists()
-    finally:
-        kw["stdout"].close()
-        kw["stderr"].close()
+    assert kw["stdout"] != wizard.subprocess.DEVNULL
+    assert (tmp_path / "logs" / "serve.out.log").exists()
+    assert (tmp_path / "logs" / "serve.err.log").exists()
+    # MINOR 8: launch_now zatvara SVOJU (roditeljsku) kopiju odmah nakon popena —
+    # dijete je već naslijedilo fd, roditelj ga ne smije držati otvorenim.
+    assert kw["stdout"].closed is True
+    assert kw["stderr"].closed is True
+
+
+def test_launch_now_zatvara_log_handleove_i_na_oserror(tmp_path, monkeypatch):
+    """MINOR 8: zatvaranje mora se dogoditi i kad popen za serve puca (OSError)."""
+    s = init_spine(str(tmp_path / "t.db"))
+    monkeypatch.setattr(wizard.shortcut, "create_desktop_shortcut", lambda url, **k: True)
+    monkeypatch.setattr(wizard.winsvc, "service_status", lambda **k: "not-installed")
+
+    class _Cfg:
+        data_dir = str(tmp_path)
+    captured = {}
+
+    def _boom(cmd, **k):
+        captured.update(k)
+        raise OSError("nema binarke")
+    lines = []
+    wizard.launch_now(s, _Cfg(), input_fn=_reader(""), out=lines.append, popen=_boom)
+    assert captured["stdout"].closed is True
+    assert captured["stderr"].closed is True
+    assert any("atlas serve" in l for l in lines)
 
 
 def test_choose_embed_model_bge_when_ram_allows(monkeypatch):

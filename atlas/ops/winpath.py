@@ -62,6 +62,22 @@ def find_binary(key: str) -> str | None:
     return None
 
 
+def get_user_env(name: str) -> str | None:
+    """Pročitaj HKCU\\Environment vrijednost (npr. TESSDATA_PREFIX postavljen
+    trajno u prošloj sesiji preko persist_user_env) — servis pod LocalService
+    ima drugu logon sesiju i ne vidi tekući os.environ pa se mora eksplicitno
+    pročitati iz registryja. Ne-Windows / ne postoji: None."""
+    if os.name != "nt":
+        return None
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            val, _t = winreg.QueryValueEx(k, name)
+            return val
+    except OSError:
+        return None
+
+
 def persist_user_env(name: str, value: str) -> bool:
     """Trajni upis u HKCU\\Environment + WM_SETTINGCHANGE broadcast (novi
     procesi vide odmah). Čuva postojeći registry tip vrijednosti."""
