@@ -634,20 +634,42 @@ def create_app(spine, cfg) -> FastAPI:
         # jer radnik čeka aktivaciju), probaj OWNER/ADMIN hasheve ISTOG orga —
         # uspjeh = prijava KAO radnik (rola dolazi svježe iz membershipa niže,
         # ne raste ovim putem), samo audit + impersonated_by claim pamte tko je ušao.
+        # I1(a) (re-review): pw_hash NULL (pending radnik/admin) kroz
+        # verify_password kratko spaja BEZ ijednog PBKDF2 poziva (security.py
+        # guard) — svaka provjera protiv "moguće nepostojećeg hasha" mora
+        # uvijek potrošiti točno jedan pravi PBKDF2, inače pending curi kao
+        # mjerljivo brži. NE smije se samo staviti "stored or _DUMMY_PW_HASH":
+        # _DUMMY_PW_HASH je poznata konstanta u izvoru — bez ovog wrappera bi
+        # napadač koji pošalje TOČNO tu dummy-lozinku dobio matched=True na bilo
+        # kojem pending računu (pa i crash na row['pw_hash'].startswith(None)).
+        def _verify_always_pbkdf2(pw: str, stored: str | None) -> bool:
+            if stored:
+                return verify_password(pw, stored)
+            verify_password(pw, _DUMMY_PW_HASH)  # cijena, rezultat se odbacuje
+            return False
+
         impersonated_by = None
-        own_ok = verify_password(password, row["pw_hash"])
+        own_ok = _verify_always_pbkdf2(password, row["pw_hash"])
         if not own_ok:
             m = spine.read().execute(
                 "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
                 (row["id"],)).fetchone()
             if m is not None:
+                # I1(b) (re-review): NE isključuje sebe (aktivan admin/owner cilj
+                # mora se i dalje pojaviti u ovoj petlji — inače admin-tier cilj
+                # ima jedan PBKDF2 poziv manje od membera/nepoznatog usera, opet
+                # mjerljivo "brži"). Redundantan re-check vlastitog hasha je
+                # bezopasan (deterministički već promašen u own_ok gore).
                 admins = spine.read().execute(
                     """SELECT u.username, u.pw_hash FROM memberships mm
                        JOIN users u ON u.id = mm.user_id
-                       WHERE mm.org_id=? AND mm.role IN ('admin','owner') AND u.id != ?""",
-                    (m["org_id"], row["id"])).fetchall()
+                       WHERE mm.org_id=? AND mm.role IN ('admin','owner')""",
+                    (m["org_id"],)).fetchall()
                 for a in admins:
-                    if verify_password(password, a["pw_hash"]):
+                    # verify_password se zove PRIJE username-provjere (ne obratno)
+                    # da self-redak ne izbjegne PBKDF2 kratkim spajanjem na 'and'.
+                    matched = _verify_always_pbkdf2(password, a["pw_hash"])
+                    if matched and a["username"] != username:
                         impersonated_by = a["username"]
                         break
             else:
@@ -691,6 +713,18 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(403, "potrebna admin uloga")
         return actor
 
+    def _active_owner_count(org_id: int) -> int:
+        """I2 (re-review): broji SAMO owner-članove s postavljenom lozinkom.
+        Pending owner (pw_hash NULL) ne može se prijaviti niti ga admin-kao-radnik
+        pokrene bez ijednog DRUGOG admina/ownera — brojati ga kao "pokriće" bio
+        bi zaobilazak: promoviraj pending membera u ownera (count=2 uključi
+        pending), obriši sebe (prođe last-owner check), ostane samo pending
+        owner kojeg C1 blokira od samoaktivacije → trajni lockout."""
+        return spine.read().execute(
+            """SELECT COUNT(*) AS n FROM memberships mm JOIN users u ON u.id = mm.user_id
+               WHERE mm.org_id=? AND mm.role='owner' AND u.pw_hash IS NOT NULL""",
+            (org_id,)).fetchone()["n"]
+
     @app.get("/org")
     def org_info(actor: Actor = Depends(require_actor_web)):
         org = spine.read().execute("SELECT id, name FROM orgs WHERE id=?",
@@ -729,12 +763,8 @@ def create_app(spine, cfg) -> FastAPI:
         # owner ulogu dira samo owner; zadnji owner je nedegradabilan
         if (current == "owner" or body.role == "owner") and actor.role != "owner":
             raise HTTPException(403, "samo owner mijenja owner ulogu")
-        if current == "owner" and body.role != "owner":
-            owners = spine.read().execute(
-                "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role='owner'",
-                (actor.org_id,)).fetchone()["n"]
-            if owners <= 1:
-                raise HTTPException(400, "zadnji owner se ne može degradirati")
+        if current == "owner" and body.role != "owner" and _active_owner_count(actor.org_id) <= 1:
+            raise HTTPException(400, "zadnji owner se ne može degradirati")
         tenancy.add_member(spine, actor.org_id, member_id, body.role, user=actor.username)
         return {"ok": True}
 
@@ -792,15 +822,13 @@ def create_app(spine, cfg) -> FastAPI:
 
     def _block_last_owner(org_id: int, role: str) -> None:
         """I2: zrcali last-owner guard iz /org/members/{id}/role — reset/ukloni
-        zadnjeg ownera bi ostavio org bez ijedne uprave, i (nakon C1) bez ikoga
-        tko se smije samoposlužno aktivirati preko /login/activate → trajni
-        lockout bez UI oporavka."""
+        zadnjeg AKTIVNOG ownera bi ostavio org bez ijedne uprave, i (nakon C1)
+        bez ikoga tko se smije samoposlužno aktivirati preko /login/activate →
+        trajni lockout bez UI oporavka. Broji SAMO aktivne (pw_hash != NULL) —
+        vidi _active_owner_count."""
         if role != "owner":
             return
-        owners = spine.read().execute(
-            "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role='owner'",
-            (org_id,)).fetchone()["n"]
-        if owners <= 1:
+        if _active_owner_count(org_id) <= 1:
             raise HTTPException(409, "zadnji vlasnik organizacije se ne može ukloniti niti resetirati")
 
     @app.post("/radnici/{radnik_id}/reset")

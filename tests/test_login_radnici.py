@@ -313,3 +313,84 @@ def test_radnici_add_invalid_role_400(spine, cfg):
     owner_tok = _tok(c, spine, "ana")
     r = c.post("/radnici", json={"username": "boris", "role": "owner"}, headers=_h(owner_tok))
     assert r.status_code == 400
+
+
+# ---------- I2 re-review: last-owner guard mora brojati SAMO aktivne ownere ----------
+
+def test_last_owner_guard_ignores_pending_owner_no_bypass_lockout(spine, cfg):
+    """Napad: promoviraj pending (neaktiviranog) membera u ownera → naivan
+    last-owner guard vidi count=2 i pusti self-delete jedinog AKTIVNOG ownera.
+    Ostaje samo pending owner kojeg C1 blokira od /login/activate → trajni
+    lockout. Guard mora brojati samo owner-članove s postavljenom lozinkom."""
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana")
+    owner_id = c.get("/org", headers=_h(owner_tok)).json()["members"][0]["user_id"]
+    r = c.post("/radnici", json={"username": "pending-owner", "role": "member"}, headers=_h(owner_tok))
+    pending_id = r.json()["id"]
+    # promocija u ownera DOK JE JOŠ pending (pw_hash NULL) — /org/members/role
+    # ne provjerava aktivaciju, samo membership
+    assert c.post(f"/org/members/{pending_id}/role", json={"role": "owner"},
+                  headers=_h(owner_tok)).status_code == 200
+    # ana pokusa obrisati SAME sebe (jedinog AKTIVNOG ownera) — mora pasti,
+    # inace ostaje samo pending owner koji se ne moze aktivirati (C1)
+    r = c.delete(f"/radnici/{owner_id}", headers=_h(owner_tok))
+    assert r.status_code == 409
+    assert spine.read().execute(
+        "SELECT 1 FROM memberships WHERE org_id=(SELECT org_id FROM memberships WHERE user_id=?) "
+        "AND user_id=?", (owner_id, owner_id)).fetchone() is not None  # ana i dalje clan
+
+
+def test_org_role_degrade_guard_ignores_pending_owner(spine, cfg):
+    """Ista klasa rupe na postojećem /org/members/{id}/role degrade-guardu."""
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana")
+    owner_id = c.get("/org", headers=_h(owner_tok)).json()["members"][0]["user_id"]
+    r = c.post("/radnici", json={"username": "pending-owner2", "role": "member"}, headers=_h(owner_tok))
+    pending_id = r.json()["id"]
+    c.post(f"/org/members/{pending_id}/role", json={"role": "owner"}, headers=_h(owner_tok))
+    # ana (jedini AKTIVNI owner) pokusava se degradirati u membera — mora pasti
+    r = c.post(f"/org/members/{owner_id}/role", json={"role": "member"}, headers=_h(owner_tok))
+    assert r.status_code == 400
+
+
+# ---------- I1 re-review: mora se izjednaciti STVARNI PBKDF2 rad, ne samo broj poziva ----------
+
+def test_pbkdf2_work_identical_across_pending_active_member_active_admin_unknown(spine, cfg, monkeypatch):
+    import hashlib as hashlib_mod
+    from atlas.core.security import hash_password as _hp
+    c = _client(spine, cfg)
+    owner_tok = _tok(c, spine, "ana", "sifra-ane")             # aktivan owner
+    c.post("/radnici", json={"username": "pending-radnik", "role": "member"}, headers=_h(owner_tok))
+    c.post("/radnici", json={"username": "aktivni-radnik", "role": "member"}, headers=_h(owner_tok))
+    c.post("/login/activate", json={"username": "aktivni-radnik",
+                                    "password": "aktivnaLoz1", "password2": "aktivnaLoz1"})
+    c.post("/radnici", json={"username": "aktivni-admin", "role": "admin"}, headers=_h(owner_tok))
+    # C1 blokira samoposluzno /login/activate za admin-tier — admin ovdje
+    # dobiva sifru "izvana" (npr. admin ju postavi za drugog admina), izravan
+    # DB upis simulira taj put bez izmisljanja jos jedne API rute.
+    with spine.write() as wc:
+        wc.execute("UPDATE users SET pw_hash=? WHERE username='aktivni-admin'",
+                   (_hp("adminovaLoz1"),))
+
+    calls = {"n": 0}
+    real_pbkdf2 = hashlib_mod.pbkdf2_hmac
+
+    def counting(*a, **kw):
+        calls["n"] += 1
+        return real_pbkdf2(*a, **kw)
+
+    monkeypatch.setattr(hashlib_mod, "pbkdf2_hmac", counting)
+
+    def _count_for(username):
+        calls["n"] = 0
+        c.post("/auth/login", json={"username": username, "password": "kriva-lozinka-xyz"})
+        return calls["n"]
+
+    n_pending = _count_for("pending-radnik")
+    n_active_member = _count_for("aktivni-radnik")
+    n_active_admin = _count_for("aktivni-admin")
+    n_unknown = _count_for("nikad-registriran-korisnik-xyz")
+
+    assert n_pending == n_active_member == n_active_admin == n_unknown, (
+        n_pending, n_active_member, n_active_admin, n_unknown)
+    assert n_pending >= 2  # vlastita provjera + barem jedan admin-fallback pokusaj
