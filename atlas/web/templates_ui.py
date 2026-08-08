@@ -725,6 +725,7 @@ def postavke_page() -> str:
         ("Mrežne mape", "/ui/mape", "Poveži NAS / Windows mape i dodijeli im uloge (propisi, klijenti…)."),
         ("Arhitektura mapa", "/ui/arhitektura", "Predložena struktura (obavezne + po klijentu) — pregled pa kreiranje."),
         ("Uređaji", "/ui/uredjaji", "Skeneri i pisači u mreži — pronađi, dodaj, biraj pri skeniranju/printanju."),
+        ("Napajanje", "/ui/napajanje", "UPS (NUT) nadzor i uredno gašenje redom pri nestanku struje."),
         ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
         ("Vrste dokumenata", "/ui/dok-tipovi", "Dokumenti s poljima za automatsko čitanje (osobna, putovnica…) i istekom."),
         ("Organizacija", "/ui/org", "Članovi i uloge (viewer/member/admin/owner)."),
@@ -742,6 +743,89 @@ def postavke_page() -> str:
 <p class="meta">Konfiguracija ureda — odvojeno od svakodnevnog rada.</p>
 <div class="grid">{tiles}</div>"""
     return page_shell("Postavke", body, active="postavke")
+
+
+_NAPAJANJE_JS = """
+function $(id) { return document.getElementById(id); }
+async function jget(u) { const r = await fetch(u, {credentials:'same-origin'});
+  return r.ok ? r.json() : null; }
+async function jpost(u, body) {
+  const r = await fetch(u, {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  return r; }
+
+async function loadConfig() {
+  const c = await jget('/napajanje/config');
+  if (!c) { toast('Samo admin vidi napajanje.', 'bad'); return; }
+  $('enabled').checked = c.enabled; $('nut_host').value = c.nut_host;
+  $('nut_port').value = c.nut_port; $('ups_name').value = c.ups_name;
+  $('obs').value = c.on_battery_seconds; $('armed').checked = c.armed;
+}
+async function saveConfig() {
+  const body = { enabled: $('enabled').checked, nut_host: $('nut_host').value.trim(),
+    nut_port: parseInt($('nut_port').value, 10), ups_name: $('ups_name').value.trim(),
+    on_battery_seconds: parseInt($('obs').value, 10) };
+  const r = await jpost('/napajanje/config', body);
+  toast(r.ok ? 'Spremljeno.' : 'Greška pri spremanju.', r.ok ? 'ok' : 'bad');
+}
+async function toggleArm() {
+  const r = await jpost('/napajanje/arm', { armed: $('armed').checked });
+  toast(r.ok ? ($('armed').checked ? 'Automatsko gašenje UKLJUČENO.' : 'Isključeno.') : 'Greška.',
+        r.ok ? 'ok' : 'bad');
+}
+async function refreshStatus() {
+  const s = await jget('/napajanje/status');
+  const el = $('status');
+  if (!s) { el.textContent = '—'; return; }
+  el.textContent = s.ok
+    ? ('Stanje: ' + (s.flags.join(' ') || '?') + (s.charge != null ? ' · baterija ' + s.charge + '%' : ''))
+    : ('UPS nedostupan: ' + (s.error || '?'));
+}
+async function refreshPlan() {
+  const p = await jget('/napajanje/plan');
+  const ol = $('plan'); ol.textContent = '';
+  if (!p) return;
+  p.steps.forEach(function (st) {
+    const li = document.createElement('li');
+    li.textContent = st.name + (st.method === 'local' ? ' (ovaj server)' : ' (ssh ' + st.host + ')');
+    ol.appendChild(li);
+  });
+  if (p.skipped && p.skipped.length) {
+    const li = document.createElement('li'); li.className = 'meta';
+    li.textContent = 'Preskočeno (nema hosta): ' + p.skipped.join(', ');
+    ol.appendChild(li);
+  }
+}
+$('save').addEventListener('click', saveConfig);
+$('armed').addEventListener('change', toggleArm);
+$('refresh').addEventListener('click', function () { refreshStatus(); refreshPlan(); });
+loadConfig(); refreshStatus(); refreshPlan();
+"""
+
+
+def napajanje_page() -> str:
+    body = f"""<h1>Napajanje</h1>
+<p class="meta">UPS nadzor preko NUT-a. Automatsko gašenje redom (radnici prvo,
+server zadnji) po rednom broju iz Uređaji. Gašenje je isključeno dok ga
+izričito ne uključiš.</p>
+<div class="card">
+  <label><input type="checkbox" id="enabled"> Nadzor uključen</label><br>
+  <label>NUT adresa (LAN) <input type="text" id="nut_host" placeholder="192.168.1.5"></label>
+  <label>Port <input type="number" id="nut_port" value="3493" style="width:6em"></label>
+  <label>UPS naziv <input type="text" id="ups_name" placeholder="ups"></label><br>
+  <label>Gasi nakon (sekundi na bateriji) <input type="number" id="obs" value="120" style="width:7em"></label><br>
+  <button type="button" class="btn" id="save">Spremi</button>
+</div>
+<div class="card">
+  <label class="warn"><input type="checkbox" id="armed">
+    <strong>Automatsko gašenje redom</strong> — kad struje nema dovoljno dugo, ATLAS gasi uređaje.</label>
+  <p id="status" class="meta">—</p>
+  <button type="button" class="btn btn-ghost" id="refresh">Osvježi</button>
+  <p class="meta">Redoslijed gašenja (pregled):</p>
+  <ol id="plan"></ol>
+</div>
+<script>{_NAPAJANJE_JS}</script>"""
+    return page_shell("Napajanje", body, active="postavke")
 
 
 def chat_page() -> str:

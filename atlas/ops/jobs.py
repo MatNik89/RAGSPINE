@@ -1,9 +1,10 @@
 """Scheduler jobs: thin wrappers over the existing doer modules. Each fn has
 signature fn(spine, cfg) -> None per ops/scheduler.py's Job contract."""
 import logging
+import time
 from datetime import date
 
-from atlas.business import expiry, folder_sync, kalendar, obveze, rokovi
+from atlas.business import expiry, folder_sync, kalendar, obveze, power, rokovi
 from atlas.core import memory
 from atlas.docs import imap_fetch
 from atlas.ops import digest, health, reminders_dump
@@ -120,6 +121,15 @@ def memory_distill_job(spine, cfg) -> None:
     logger.info("memory_distill_job: %d/%d korisnika destilirano", done, len(pairs))
 
 
+def power_job(spine, cfg) -> None:
+    """UPS poller: jedan tik stroja stanja kad je nadzor uključen."""
+    if not power.get_config(spine)["enabled"]:
+        return
+    out = power.evaluate(spine, cfg, now=time.time())
+    if out.get("executed"):
+        logger.warning("power_job: gašenje redom izvršeno: %s", out["executed"])
+
+
 def register_defaults(sched) -> None:
     sched.register(Job(name="watchlist", fn=watchlist_job, interval_s=3600))
     sched.register(Job(name="imap", fn=imap_job, interval_s=300))
@@ -130,6 +140,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))
+    sched.register(Job(name="power", fn=power_job, interval_s=30))
     sched.register(Job(name="backup", fn=backup_job, interval_s=0, daily=True, at_hour=2))
     sched.register(
         Job(name="digest", fn=digest.digest_job, interval_s=0, daily=True, at_hour=sched.cfg.digest_hour)
