@@ -112,7 +112,7 @@ def test_seqfile_atomic_and_fail_closed_on_corruption(tmp_path):
     assert s.last() == 0  # nema datoteke = svjež
     assert s.set(7) is True and s.last() == 7
     import pathlib
-    pathlib.Path(p).write_text("smeće")  # korupcija
+    pathlib.Path(p).write_text("nije-broj", encoding="utf-8")  # korupcija (ne-numericki)
     import pytest
     with pytest.raises(ValueError):
         s.last()  # nečitljivo -> raise (pozivatelj fail-closed)
