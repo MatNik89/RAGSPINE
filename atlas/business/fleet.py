@@ -6,12 +6,44 @@ NIKAD ne šalje naredbeni string agentu — samo `program_key` iz allowliste; ag
 drži vlastitu key->argv mapu i odbija nepoznato.
 """
 import hashlib
+import hmac
 import json
 import re
 import secrets
 
 # Tvrda allowlista radnji — i server i agent je provjeravaju
 ACTIONS = ("run_program", "shutdown", "enable_wol", "status")
+
+
+def _master_signing_key(spine) -> str:
+    """Per-instalacija MASTER ključ (tajna, ne izlazi iz servera). Atomičan
+    get-or-create (INSERT OR IGNORE pa re-read) — dvije paralelne prve izdaje
+    ne mogu dati različite ključeve (Codex nalaz)."""
+    with spine.write() as c:
+        c.execute("INSERT OR IGNORE INTO config_overrides(module,key,value,updated_at) "
+                  "VALUES('fleet','signing_key',?,datetime('now'))",
+                  (secrets.token_urlsafe(32),))
+    return spine.get_override("fleet", "signing_key", "")
+
+
+def device_sign_key(spine, device_id: int) -> str:
+    """PER-UREĐAJ ključ = HMAC(master, device_id). Kompromitacija jednog uređaja
+    ne daje mogućnost potpisa za DRUGI (master nikad ne napušta server); opoziv
+    je vezan uz uređaj (Codex nalaz: dijeljeni simetrični ključ = fleet-wide forge)."""
+    return hmac.new(_master_signing_key(spine).encode(), str(device_id).encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def _canon(device_id: int, cmd: dict) -> bytes:
+    # potpis veže i device_id i id (monotoni, anti-replay se provjerava kod agenta)
+    return json.dumps({"device_id": int(device_id), "id": cmd.get("id"),
+                       "action": cmd.get("action"), "program_key": cmd.get("program_key")},
+                      sort_keys=True, separators=(",", ":")).encode()
+
+
+def sign_command(spine, device_id: int, cmd: dict) -> str:
+    return hmac.new(device_sign_key(spine, device_id).encode(),
+                    _canon(device_id, cmd), hashlib.sha256).hexdigest()
 
 
 def _digest(secret: str) -> str:

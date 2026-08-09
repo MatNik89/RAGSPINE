@@ -19,10 +19,12 @@ _UNIT_NAME = "atlas-agent.service"
 _TOKEN_RE = re.compile(r"^\d+\.[A-Za-z0-9_-]{20,}$")
 
 
-def write_config(path: str, server_url: str, token: str, program_map: dict | None = None) -> dict:
+def write_config(path: str, server_url: str, token: str, program_map: dict | None = None,
+                 sign_key: str = "") -> dict:
     if not server_url.lower().startswith("https://"):
         raise ValueError("server_url mora biti https:// (token ne ide cleartextom)")
-    cfg = {"server_url": server_url, "token": token, "program_map": program_map or {}}
+    cfg = {"server_url": server_url, "token": token, "program_map": program_map or {},
+           "sign_key": sign_key}
     data = json.dumps(cfg, ensure_ascii=False, indent=2).encode()
     # Atomarno stvori s 0600 PRIJE pisanja tokena i ne slijedi symlink — inače
     # postoji prozor u kojem je token svima čitljiv (Codex T5 nalaz).
@@ -79,12 +81,12 @@ def register_autostart(python_exe: str, config_path: str, runner=None,
     runner(autostart_argv(python_exe, config_path, platform=platform))
 
 
-def install(server_url: str, token: str, config_path: str | None = None,
+def install(server_url: str, token: str, sign_key: str = "", config_path: str | None = None,
             python_exe: str | None = None, program_map: dict | None = None,
             runner=None, platform: str | None = None, unit_dir: str | None = None) -> str:
     config_path = config_path or os.path.expanduser("~/.atlas-agent.json")
     python_exe = python_exe or sys.executable
-    write_config(config_path, server_url, token, program_map)
+    write_config(config_path, server_url, token, program_map, sign_key=sign_key)
     register_autostart(python_exe, config_path, runner=runner, platform=platform,
                        unit_dir=unit_dir)
     return config_path
@@ -95,13 +97,17 @@ def main(argv=None) -> None:
                                  description="Postavi atlas-agenta u sesiju.")
     ap.add_argument("--server", required=True, help="https://SERVER:8443")
     ap.add_argument("--token", required=True, help="token uređaja iz Postavke→Uređaji")
+    ap.add_argument("--sign-key", required=True,
+                    help="ključ za provjeru potpisa naredbi (uz token, iz Postavke→Uređaji)")
     ap.add_argument("--config", default=None, help="put do configa (default ~/.atlas-agent.json)")
     ap.add_argument("--no-autostart", action="store_true", help="samo zapiši config")
     args = ap.parse_args(argv)
     if not _TOKEN_RE.match(args.token):  # blokira injektiran/pokvaren token (defense-in-depth)
         ap.error("neispravan format tokena")
+    if not args.sign_key.strip():  # potpis obavezan za nove instalacije (ne fail-open)
+        ap.error("sign-key je obavezan (agent bez njega ne provjerava potpise)")
     path = os.path.expanduser(args.config) if args.config else os.path.expanduser("~/.atlas-agent.json")
-    write_config(path, args.server, args.token)
+    write_config(path, args.server, args.token, sign_key=args.sign_key)
     if not args.no_autostart:
         register_autostart(sys.executable, path)
     print(f"Config zapisan: {path}")

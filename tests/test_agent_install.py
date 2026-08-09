@@ -46,8 +46,15 @@ def test_install_writes_config_and_unit_and_enables_linux(tmp_path):
 def test_main_cli_writes_config(tmp_path):
     p = tmp_path / "cli.json"
     install.main(["--server", "https://s.lan:8443", "--token", "9." + "a" * 43,
-                  "--config", str(p), "--no-autostart"])
-    assert json.loads(p.read_text(encoding="utf-8"))["token"] == "9." + "a" * 43
+                  "--sign-key", "k" * 40, "--config", str(p), "--no-autostart"])
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert d["token"] == "9." + "a" * 43 and d["sign_key"] == "k" * 40
+
+
+def test_main_cli_requires_sign_key(tmp_path):
+    with pytest.raises(SystemExit):  # sign-key obavezan (ne fail-open)
+        install.main(["--server", "https://s.lan:8443", "--token", "9." + "a" * 43,
+                      "--config", str(tmp_path / "x.json"), "--no-autostart"])
 
 
 def test_main_cli_rejects_injection_token(tmp_path):
@@ -56,7 +63,8 @@ def test_main_cli_rejects_injection_token(tmp_path):
                 "9.aaa bbb"):
         with pytest.raises(SystemExit):  # argparse ap.error -> SystemExit
             install.main(["--server", "https://s.lan:8443", "--token", bad,
-                          "--config", str(tmp_path / "x.json"), "--no-autostart"])
+                          "--sign-key", "k" * 40, "--config", str(tmp_path / "x.json"),
+                          "--no-autostart"])
 
 
 def test_write_config_rejects_cleartext_http(tmp_path):
