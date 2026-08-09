@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" role="img" aria-label="ATLAS">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="1000" height="1000" rx="220" fill="url(#g)"/>
+  <g transform="translate(110,110) scale(0.78)" fill="none" stroke="#fff"
+     stroke-linecap="round" stroke-linejoin="round">
+    <path d="M500 205 L255 815" stroke-width="158"/>
+    <path d="M500 205 L745 815" stroke-width="158"/>
+    <path d="M360 612 L640 612" stroke-width="128"/>
+  </g>
+</svg>
