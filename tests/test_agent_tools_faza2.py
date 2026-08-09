@@ -1,10 +1,15 @@
 """Faza 2 promocija: novi alati (dodaj_vrstu_obveze, nedostajuci_dokumenti,
 upit_baze, nauci_izvor, pokreni_program) — svaki tanki omot nad business slojem."""
+import importlib.util
+
 import pytest
 
 from atlas.business import devices, doc_registry, fleet, obveze, tenancy
 from atlas.business.acl import Actor
 from atlas.rag import agent, agent_tools
+
+_HAS_OPENPYXL = importlib.util.find_spec("openpyxl") is not None
+_needs_xlsx = pytest.mark.skipif(not _HAS_OPENPYXL, reason="openpyxl je optional (atlas[full])")
 
 
 def _actor(spine, role="admin", username="ana"):
@@ -89,6 +94,7 @@ def test_izvezi_excel_asks_when_underspecified(spine, cfg):
     assert any("period" in p.lower() or "mjesec" in p.lower() for p in out2["pitanja"])
 
 
+@_needs_xlsx
 def test_izvezi_excel_klijenti_builds_downloadable(spine, cfg):
     _client(spine, "Alfa"); _client(spine, "Beta")
     a = _actor(spine, "viewer")
@@ -100,6 +106,7 @@ def test_izvezi_excel_klijenti_builds_downloadable(spine, cfg):
     assert excel_export.path_for(cfg, "../../etc/passwd") is None  # path traversal blokiran
 
 
+@_needs_xlsx
 def test_export_endpoint_auth_and_404(spine, cfg):
     from fastapi.testclient import TestClient
     from atlas.web.api import create_app
