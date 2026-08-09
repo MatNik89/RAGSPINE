@@ -9,10 +9,14 @@ Pokretanje na radnom stroju:
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
 _UNIT_NAME = "atlas-agent.service"
+# Token uređaja = "<device_id>.<secret>" (secrets.token_urlsafe). Strogi format
+# blokira argument-injection (npr. token koji sadrži razmak/navodnike/--config).
+_TOKEN_RE = re.compile(r"^\d+\.[A-Za-z0-9_-]{20,}$")
 
 
 def write_config(path: str, server_url: str, token: str, program_map: dict | None = None) -> dict:
@@ -94,6 +98,8 @@ def main(argv=None) -> None:
     ap.add_argument("--config", default=None, help="put do configa (default ~/.atlas-agent.json)")
     ap.add_argument("--no-autostart", action="store_true", help="samo zapiši config")
     args = ap.parse_args(argv)
+    if not _TOKEN_RE.match(args.token):  # blokira injektiran/pokvaren token (defense-in-depth)
+        ap.error("neispravan format tokena")
     path = os.path.expanduser(args.config) if args.config else os.path.expanduser("~/.atlas-agent.json")
     write_config(path, args.server, args.token)
     if not args.no_autostart:
