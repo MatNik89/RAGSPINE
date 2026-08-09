@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS obligation_types(kind TEXT PRIMARY KEY, label TEXT,
   active INTEGER DEFAULT 1, sort INTEGER DEFAULT 100, description TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS client_obligation_types(client_id INTEGER, kind TEXT,
   PRIMARY KEY(client_id, kind));
+CREATE TABLE IF NOT EXISTS obligation_fields(id INTEGER PRIMARY KEY, key TEXT UNIQUE,
+  label TEXT, type TEXT DEFAULT 'text', sort INTEGER DEFAULT 100,
+  created_by TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS wiki_pages(id INTEGER PRIMARY KEY, org_id INTEGER,
   type TEXT, title TEXT, slug TEXT, body TEXT, locked INTEGER DEFAULT 0,
   version INTEGER DEFAULT 1, owner_user_id INTEGER, visibility TEXT DEFAULT 'org',
@@ -254,6 +257,8 @@ class Spine:
                 "org_id": "INTEGER",
             })
             _ensure_columns(c, "knowledge", {"org_id": "INTEGER"})
+            # user-defined polja obveza žive u JSON meta (registar = obligation_fields)
+            _ensure_columns(c, "obligations", {"meta": "TEXT"})
             # sees_all_clients=1 (zadano) → radnik vidi sve klijente; 0 → samo
             # one iz client_visibility (per-radnik ograničenje vidljivosti)
             _ensure_columns(c, "users", {"sees_all_clients": "INTEGER DEFAULT 1"})

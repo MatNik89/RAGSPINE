@@ -741,6 +741,8 @@ def postavke_page() -> str:
         ("Uređaji", "/ui/uredjaji", "Skeneri i pisači u mreži — pronađi, dodaj, biraj pri skeniranju/printanju."),
         ("Napajanje", "/ui/napajanje", "UPS (NUT) nadzor i uredno gašenje redom pri nestanku struje."),
         ("Vrste obveza", "/ui/obveze-tipovi", "Dodaj i uredi vrste obveza (PDV, JOPPD, najam…)."),
+        ("Polja obveza", "/ui/obveze-polja", "Vlastiti stupci na obvezama (napomena, iznos…); core stupci zaključani."),
+        ("Aktivnost radnika", "/ui/obveze-aktivnost", "Tko koje obveze zatvara i kad — nadzorni uvid."),
         ("Vrste dokumenata", "/ui/dok-tipovi", "Dokumenti s poljima za automatsko čitanje (osobna, putovnica…) i istekom."),
         ("Organizacija", "/ui/org", "Članovi i uloge (viewer/member/admin/owner)."),
         ("Radnici", "/ui/radnici", "Dodaj radnike, aktivacija prvom prijavom, reset šifre, uklanjanje."),
@@ -815,6 +817,97 @@ $('armed').addEventListener('change', toggleArm);
 $('refresh').addEventListener('click', function () { refreshStatus(); refreshPlan(); });
 loadConfig(); refreshStatus(); refreshPlan();
 """
+
+
+_AKTIVNOST_JS = """
+function $(id){return document.getElementById(id);}
+async function load(){
+  const since = $('since').value;
+  const url = '/obveze/aktivnost' + (since ? ('?since=' + encodeURIComponent(since)) : '');
+  const res = await fetch(url, {credentials:'same-origin'});
+  const tb = $('rows'); tb.textContent='';
+  if(!res.ok){ toast('Samo admin.', 'bad'); return; }
+  const data = await res.json();
+  if(!data.length){ const tr=document.createElement('tr'); const td=document.createElement('td');
+    td.colSpan=3; td.className='meta'; td.textContent='Nema zatvorenih obveza u razdoblju.';
+    tr.appendChild(td); tb.appendChild(tr); return; }
+  data.forEach(function(w){
+    const tr=document.createElement('tr');
+    const a=document.createElement('td'); a.textContent=w.worker;
+    const b=document.createElement('td'); b.textContent=w.closed;
+    const c=document.createElement('td'); c.className='meta'; c.textContent=w.last_at||'';
+    tr.appendChild(a); tr.appendChild(b); tr.appendChild(c); tb.appendChild(tr);
+  });
+}
+$('load').addEventListener('click', load);
+load();
+"""
+
+
+_POLJA_JS = """
+function $(id){return document.getElementById(id);}
+async function load(){
+  const res = await fetch('/obveze/polja', {credentials:'same-origin'});
+  const tb = $('rows'); tb.textContent='';
+  if(!res.ok) return;
+  const data = await res.json();
+  data.forEach(function(f){
+    const tr=document.createElement('tr');
+    const a=document.createElement('td'); a.textContent=f.label;
+    const b=document.createElement('td'); b.className='meta'; b.textContent=f.type;
+    const cc=document.createElement('td');
+    const del=document.createElement('button'); del.type='button'; del.className='btn btn-ghost';
+    del.textContent='Obriši';
+    del.addEventListener('click', function(){ remove(f.key); });
+    cc.appendChild(del); tr.appendChild(a); tr.appendChild(b); tr.appendChild(cc); tb.appendChild(tr);
+  });
+}
+async function add(){
+  const label = $('label').value.trim(); if(!label) return;
+  const res = await fetch('/obveze/polja', {method:'POST', credentials:'same-origin',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({label: label, type: $('type').value})});
+  if(!res.ok){ toast('Samo vlasnik može dodati polje ili je naziv zaključan.', 'bad'); return; }
+  $('label').value=''; toast('Dodano.', 'ok'); load();
+}
+async function remove(key){
+  const res = await fetch('/obveze/polja/' + encodeURIComponent(key), {method:'DELETE', credentials:'same-origin'});
+  if(!res.ok){ toast('Samo vlasnik.', 'bad'); return; } load();
+}
+$('add').addEventListener('click', add);
+load();
+"""
+
+
+def obveze_polja_page() -> str:
+    body = f"""<h1>Polja obveza</h1>
+<p class="meta">Vlastiti stupci na obvezama (npr. napomena, iznos, rok). Core
+stupci (klijent, rok, poslano, tko/kad) su zaključani i ne mogu se dirati.
+Dodavanje polja radi vlasnik; vrijednosti popunjava radnik na obvezi.</p>
+<div class="chat-input">
+  <input type="text" id="label" placeholder="Naziv stupca (npr. Napomena)">
+  <select id="type"><option value="text">tekst</option><option value="number">broj</option>
+    <option value="date">datum</option><option value="bool">da/ne</option></select>
+  <button type="button" class="btn" id="add">Dodaj stupac</button>
+</div>
+<table><thead><tr><th>Stupac</th><th>Tip</th><th></th></tr></thead>
+<tbody id="rows"></tbody></table>
+<script>{_POLJA_JS}</script>"""
+    return page_shell("Polja obveza", body, active="postavke")
+
+
+def obveze_aktivnost_page() -> str:
+    body = f"""<h1>Aktivnost radnika — obveze</h1>
+<p class="meta">Tko je koliko obveza zatvorio i kad. Podaci iz evidencije slanja
+(sent_by/sent_at) — nadzorni uvid, samo admin.</p>
+<div class="chat-input">
+  <label>Od datuma <input type="date" id="since"></label>
+  <button type="button" class="btn" id="load">Prikaži</button>
+</div>
+<table><thead><tr><th>Radnik</th><th>Zatvorenih</th><th>Zadnji put</th></tr></thead>
+<tbody id="rows"></tbody></table>
+<script>{_AKTIVNOST_JS}</script>"""
+    return page_shell("Aktivnost radnika", body, active="obveze")
 
 
 def postavi_agent_page() -> str:

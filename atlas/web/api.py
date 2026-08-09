@@ -111,6 +111,16 @@ class ProgramBody(BaseModel):
     label: str = ""
 
 
+class ObligationFieldBody(BaseModel):
+    label: str
+    type: str = "text"
+
+
+class FieldValueBody(BaseModel):
+    key: str
+    value: str | float | int | bool | None = None
+
+
 _AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
 _PENDING_TTL_MIN = 10
 
@@ -1425,6 +1435,77 @@ def create_app(spine, cfg) -> FastAPI:
     def pwa_offline():
         return _PWA_OFFLINE_HTML
 
+    @app.get("/obveze/aktivnost")
+    def obveze_aktivnost(since: str | None = None, worker: str | None = None,
+                         actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # tko-što-radi je nadzorni uvid
+        if worker:
+            return obveze.worker_closed(spine, worker, since=since)
+        return obveze.worker_activity(spine, since=since)
+
+    # --- user-defined polja obveza (registar + JSON meta, core zaključan) ---
+    @app.get("/obveze/polja")
+    def obveze_polja_list(actor: Actor = Depends(require_actor_web)):
+        # čitanje definicija polja = svaki prijavljeni (radnik treba znati stupce
+        # da popuni vrijednost / renderira tablicu); definiranje je owner-only
+        from atlas.business import obligation_fields
+        return obligation_fields.list_fields(spine)
+
+    @app.post("/obveze/polja")
+    def obveze_polja_add(body: ObligationFieldBody, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import obligation_fields
+        _require_owner(actor)  # definiranje "stupaca" = strukturna politika
+        try:
+            key = obligation_fields.add_field(spine, body.label, body.type, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"key": key}
+
+    @app.delete("/obveze/polja/{key}")
+    def obveze_polja_remove(key: str, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import obligation_fields
+        _require_owner(actor)
+        obligation_fields.remove_field(spine, key, user=actor.username)
+        return {"ok": True}
+
+    @app.post("/obveze/{obligation_id}/polje")
+    def obveze_polje_set(obligation_id: int, body: FieldValueBody,
+                         actor: Actor = Depends(require_actor_web)):
+        from atlas.business import obligation_fields
+        # punjenje vrijednosti = svakodnevni rad (member+); definiranje je owner
+        if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
+            raise HTTPException(403, "potrebna barem članska uloga")
+        row = spine.read().execute(
+            "SELECT client_id FROM obligations WHERE id=?", (obligation_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznata obveza")
+        if row["client_id"] is not None:  # obveza vezana na klijenta -> provjeri vidljivost (anti-IDOR)
+            _guard_client(actor, row["client_id"])
+        try:
+            meta = obligation_fields.set_value(spine, obligation_id, body.key, body.value,
+                                               user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"obligation_id": obligation_id, "meta": meta}
+
+    @app.get("/ui/obveze-polja", response_class=HTMLResponse)
+    def ui_obveze_polja(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from atlas.web.templates_ui import obveze_polja_page
+        return obveze_polja_page()
+
+    @app.get("/ui/obveze-aktivnost", response_class=HTMLResponse)
+    def ui_obveze_aktivnost(request: Request):
+        try:
+            require_user_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        from atlas.web.templates_ui import obveze_aktivnost_page
+        return obveze_aktivnost_page()
+
     @app.get("/postavi-agent", response_class=HTMLResponse)
     def ui_postavi_agent(request: Request):
         try:
@@ -1820,7 +1901,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/obveze", response_class=HTMLResponse)
     def obveze_page(request: Request, kind: str | None = None, period: str | None = None):
         try:
-            require_user_web(request)
+            actor = require_actor_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         tabs = [(t["kind"], t["label"]) for t in obveze.list_types(spine, active_only=True)]
@@ -1833,17 +1914,18 @@ def create_app(spine, cfg) -> FastAPI:
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
         obveze.ensure_period(spine, kind, period)
-        rows = obveze.list_period(spine, kind, period)
+        rows = _visible_rows(actor, obveze.list_period(spine, kind, period))
         return render_obveze(kind, period, rows, tabs)
 
     @app.get("/obveze.json")
     def obveze_json(kind: str = "PDV", period: str | None = None,
-                     user: str = Depends(require_user_web)):
+                     actor: Actor = Depends(require_actor_web)):
         if obveze.get_type(spine, kind) is None:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
-        return obveze.list_period(spine, kind, period)
+        # restringirani radnik ne vidi obveze (ni meta) tuđih klijenata
+        return _visible_rows(actor, obveze.list_period(spine, kind, period))
 
     @app.get("/obveze/tipovi")
     def obveze_types_list(user: str = Depends(require_user_web)):
