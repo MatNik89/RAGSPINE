@@ -165,6 +165,58 @@ def _run_zapisi_belesku(spine, cfg, actor, args) -> dict:
     return {"id": note_id, "client_id": row["id"]}
 
 
+# --- Faza 2: promocija — više business sposobnosti kao alati --------------
+
+def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
+    kind = obveze.upsert_type(
+        spine, args["kind"], args.get("label") or args["kind"], args.get("rule", ""),
+        args.get("frequency", "monthly"), args.get("applies_to", "all_active"),
+        active=bool(args.get("active", True)), category=args.get("category"),
+        user=actor.username)
+    return {"kind": kind, "label": args.get("label") or kind}
+
+
+def _run_nedostajuci_dokumenti(spine, cfg, actor, args) -> dict:
+    row = _resolve_visible(spine, actor, args["klijent"])
+    required = [r["doc_type_key"] for r in spine.read().execute(
+        "SELECT doc_type_key FROM client_doc_types WHERE client_id=?", (row["id"],)).fetchall()]
+    present = {r["doc_type"] for r in spine.read().execute(
+        "SELECT DISTINCT doc_type FROM documents WHERE client_id=?", (row["id"],)).fetchall()}
+    missing = [k for k in required if k not in present]
+    return {"klijent": row["name"], "obavezni": required,
+            "prisutni": sorted(present), "nedostaju": missing}
+
+
+def _run_upit_baze(spine, cfg, actor, args) -> dict:
+    from atlas.rag import sql_lane
+    visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+    return {"odgovor": sql_lane.handle(spine, args["pitanje"], visible=visible)}
+
+
+def _run_nauci_izvor(spine, cfg, actor, args) -> dict:
+    from atlas.web import learn
+    return learn.learn_url(spine, cfg, args["url"], actor.username)
+
+
+def _run_pokreni_program(spine, cfg, actor, args) -> dict:
+    from atlas.business import fleet
+    res = fleet.open_on_worker(spine, args["radnik"], args["program"], actor_role=actor.role)
+    if not res.get("ok"):
+        raise ValueError(res["message"])
+    return res
+
+
+def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
+    from atlas.business import excel_export
+    sto, period = args.get("sto"), args.get("period")
+    pitanja = excel_export.clarify(sto, period)
+    if pitanja:  # nedostaje info -> AI postavi ova pitanja korisniku (ne izvozi)
+        return {"pitanja": pitanja}
+    visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+    token, rows = excel_export.build(spine, cfg, sto, period, visible)
+    return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": sto}
+
+
 # --- registar ---------------------------------------------------------
 
 TOOLS: dict[str, Tool] = {
@@ -238,6 +290,56 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"klijent": {"type": "string"}, "tekst": {"type": "string"}},
                 "required": ["klijent", "tekst"]},
         readonly=False, min_role="member", run=_run_zapisi_belesku,
+    ),
+    "nedostajuci_dokumenti": Tool(
+        name="nedostajuci_dokumenti",
+        description="Koji obavezni dokumenti nedostaju klijentu (iz popisa obaveznih vrsta).",
+        schema={"type": "object", "properties": {"klijent": {"type": "string"}},
+                "required": ["klijent"]},
+        readonly=True, min_role="viewer", run=_run_nedostajuci_dokumenti,
+    ),
+    "upit_baze": Tool(
+        name="upit_baze",
+        description="Brojčani upit nad bazom (koliko klijenata/računa, zbroj, top...).",
+        schema={"type": "object", "properties": {"pitanje": {"type": "string"}},
+                "required": ["pitanje"]},
+        readonly=True, min_role="viewer", run=_run_upit_baze,
+    ),
+    "dodaj_vrstu_obveze": Tool(
+        name="dodaj_vrstu_obveze",
+        description="Dodaj ili uredi VRSTU mjesečne obveze (npr. PDV, najam) i njen rok.",
+        schema={"type": "object",
+                "properties": {
+                    "kind": {"type": "string"}, "label": {"type": "string"},
+                    "rule": {"type": "string"}, "frequency": {"type": "string"},
+                    "applies_to": {"type": "string"}, "category": {"type": "string"},
+                    "active": {"type": "boolean"}},
+                "required": ["kind"]},
+        readonly=False, min_role="member", run=_run_dodaj_vrstu_obveze,
+    ),
+    "nauci_izvor": Tool(
+        name="nauci_izvor",
+        description="Nauči s web-stranice (URL): spremi sadržaj i prepoznate podatke u znanje.",
+        schema={"type": "object", "properties": {"url": {"type": "string"}},
+                "required": ["url"]},
+        readonly=False, min_role="member", run=_run_nauci_izvor,
+    ),
+    "pokreni_program": Tool(
+        name="pokreni_program",
+        description="Pokreni odobreni program na radnikovoj radnoj stanici (kod <ime> otvori <program>).",
+        schema={"type": "object",
+                "properties": {"radnik": {"type": "string"}, "program": {"type": "string"}},
+                "required": ["radnik", "program"]},
+        readonly=False, min_role="admin", run=_run_pokreni_program,
+    ),
+    "izvezi_excel": Tool(
+        name="izvezi_excel",
+        description="Izvezi podatke u Excel (klijenti ili obveze za mjesec). Ako "
+                    "nedostaje info, vrati pitanja da doznaš što i kako izvesti.",
+        schema={"type": "object",
+                "properties": {"sto": {"type": "string"}, "period": {"type": "string"}},
+                "required": []},
+        readonly=True, min_role="viewer", run=_run_izvezi_excel,
     ),
 }
 

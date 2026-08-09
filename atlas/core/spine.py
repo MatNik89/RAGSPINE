@@ -259,6 +259,12 @@ class Spine:
             _ensure_columns(c, "knowledge", {"org_id": "INTEGER"})
             # user-defined polja obveza žive u JSON meta (registar = obligation_fields)
             _ensure_columns(c, "obligations", {"meta": "TEXT"})
+            # category marker na vrsti obveze (JOPPD = plaće); migracija postojećih
+            _ensure_columns(c, "obligation_types", {"category": "TEXT DEFAULT ''"})
+            c.execute("UPDATE obligation_types SET category='place' "
+                      "WHERE kind='JOPPD' AND (category IS NULL OR category='')")
+            c.execute("UPDATE obligation_types SET label='Plaće' "
+                      "WHERE kind='JOPPD' AND label='JOPPD'")
             # sees_all_clients=1 (zadano) → radnik vidi sve klijente; 0 → samo
             # one iz client_visibility (per-radnik ograničenje vidljivosti)
             _ensure_columns(c, "users", {"sees_all_clients": "INTEGER DEFAULT 1"})

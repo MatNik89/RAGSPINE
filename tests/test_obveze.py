@@ -319,7 +319,7 @@ def test_obveze_page_has_type_tabs_and_two_sections(spine, cfg):
     text = r.text
     # type selector tabs (PDV + JOPPD), PDV active
     assert 'class="obveze-tab active"' in text and "PDV</a>" in text
-    assert "JOPPD</a>" in text
+    assert "Plaće</a>" in text  # JOPPD preimenovan u "Plaće" (label)
     # two sections: unsent above, predano below; checkbox marks + drops down
     assert "Za predati" in text and "Predano" in text
     assert "onToggle(this)" in text

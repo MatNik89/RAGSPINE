@@ -7,15 +7,18 @@
 # Ugrađene default-vrste — seed-aju se lijeno (INSERT OR IGNORE) pa admin-izmjene
 # ostaju. (kind, label, rule, frequency, applies_to, sort, active)
 import json
+from datetime import date
 # active=0 znači: postoji u registru, ali nije tab dok ga radnik ne uključi.
 DEFAULT_TYPES = [
+    # (kind, label, rule, frequency, applies_to, sort, active, category)
     # PDV: od 1.1.2026. rok predaje = ZADNJI dan mjeseca (izmjene Zakona o
     # PDV-u; bilo 20.) — monthly:31 se clampa na kraj mjeseca u due_for_month.
-    ("PDV", "PDV", "monthly:31", "monthly", "pdv", 10, 1),
-    ("JOPPD", "JOPPD", "monthly:15", "monthly", "employees", 20, 1),
-    ("DOH", "Prijava poreza na dohodak (DOH)", "yearly:02-28", "yearly", "dohodak", 30, 0),
-    ("PO-SD", "Paušalno izvješće (PO-SD)", "yearly:01-15", "yearly", "pausal", 40, 0),
-    ("PD", "Prijava poreza na dobit (PD)", "yearly:04-30", "yearly", "dobit", 50, 0),
+    ("PDV", "PDV", "monthly:31", "monthly", "pdv", 10, 1, ""),
+    # JOPPD = plaće; label "Plaće" + category 'place' da AI/UI raspoznaju plaće.
+    ("JOPPD", "Plaće", "monthly:15", "monthly", "employees", 20, 1, "place"),
+    ("DOH", "Prijava poreza na dohodak (DOH)", "yearly:02-28", "yearly", "dohodak", 30, 0, ""),
+    ("PO-SD", "Paušalno izvješće (PO-SD)", "yearly:01-15", "yearly", "pausal", 40, 0, ""),
+    ("PD", "Prijava poreza na dobit (PD)", "yearly:04-30", "yearly", "dobit", 50, 0, ""),
 ]
 
 # Back-compat: neki moduli/testovi importaju obveze.KINDS. Registar je izvor
@@ -42,16 +45,16 @@ def _yearly_month(rule: str) -> int:
 
 def _ensure_seeded(spine) -> None:
     with spine.write() as c:
-        for kind, label, rule, freq, applies, sort, active in DEFAULT_TYPES:
+        for kind, label, rule, freq, applies, sort, active, category in DEFAULT_TYPES:
             c.execute(
                 """INSERT OR IGNORE INTO obligation_types
-                   (kind, label, rule, frequency, applies_to, active, sort)
-                   VALUES(?,?,?,?,?,?,?)""",
-                (kind, label, rule, freq, applies, active, sort),
+                   (kind, label, rule, frequency, applies_to, active, sort, category)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (kind, label, rule, freq, applies, active, sort, category),
             )
 
 
-_TYPE_COLS = "kind, label, rule, frequency, applies_to, active, sort, description"
+_TYPE_COLS = "kind, label, rule, frequency, applies_to, active, sort, description, category"
 
 
 def list_types(spine, active_only: bool = False) -> list[dict]:
@@ -77,7 +80,7 @@ def active_kinds(spine) -> list[str]:
 
 def upsert_type(spine, kind: str, label: str, rule: str, frequency: str,
                 applies_to: str, active: bool = True, sort: int = 100,
-                description: str = "", user: str = "?") -> str:
+                description: str = "", category: str | None = None, user: str = "?") -> str:
     """Kreira ili uređuje vrstu obveze. kind se normalizira na VELIKA slova
     (stabilan ključ). Vraća normalizirani kind."""
     kind = (kind or "").strip().upper()
@@ -89,23 +92,39 @@ def upsert_type(spine, kind: str, label: str, rule: str, frequency: str,
         raise ValueError(f"nepoznat applies_to: {applies_to!r}")
     rule = (rule or "").strip()
     if rule:
-        rf = rule.split(":", 1)[0]
+        rf, _, arg = rule.partition(":")
         if rf not in FREQUENCIES:
             raise ValueError(f"nepravilno pravilo roka: {rule!r}")
         if rf != frequency:
             raise ValueError(f"pravilo ({rf}) ne odgovara frekvenciji ({frequency})")
+        # validiraj i RASPON/format arg-a, ne samo prefiks — inače aktivna vrsta
+        # tiho ostane bez rokova (Codex nalaz)
+        if rf in ("monthly", "quarterly"):
+            if not (arg.isdigit() and 1 <= int(arg) <= 31):
+                raise ValueError(f"dan roka mora biti 1–31: {rule!r}")
+        else:  # yearly:MM-DD
+            try:
+                date.fromisoformat(f"2024-{arg}")  # 2024 = prijestupna, dopušta 02-29
+            except ValueError:
+                raise ValueError(f"godišnji rok mora biti MM-DD: {rule!r}") from None
     label = (label or "").strip() or kind
     _ensure_seeded(spine)
     with spine.write() as c:
+        # category None = "ne diraj" (novi red -> '', postojeći -> zadrži);
+        # eksplicitan string ga postavlja. Inače bi upsert bez category brisao
+        # postojeću (npr. JOPPD 'place') — Codex nalaz.
+        cat = None if category is None else category.strip()
         c.execute(
             """INSERT INTO obligation_types
-                 (kind, label, rule, frequency, applies_to, active, sort, description)
-               VALUES(?,?,?,?,?,?,?,?)
+                 (kind, label, rule, frequency, applies_to, active, sort, description, category)
+               VALUES(?,?,?,?,?,?,?,?,COALESCE(?, ''))
                ON CONFLICT(kind) DO UPDATE SET
                  label=excluded.label, rule=excluded.rule, frequency=excluded.frequency,
                  applies_to=excluded.applies_to, active=excluded.active,
-                 sort=excluded.sort, description=excluded.description""",
-            (kind, label, rule, frequency, applies_to, int(bool(active)), sort, description),
+                 sort=excluded.sort, description=excluded.description,
+                 category=CASE WHEN ? IS NULL THEN obligation_types.category ELSE ? END""",
+            (kind, label, rule, frequency, applies_to, int(bool(active)), sort, description,
+             cat, cat, cat),
         )
     spine.audit(user, "obligation_type_upsert", f"type:{kind}")
     return kind
