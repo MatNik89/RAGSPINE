@@ -1349,6 +1349,16 @@ def create_app(spine, cfg) -> FastAPI:
         from atlas.web.templates_devices import devices_page
         return devices_page()
 
+    @app.get("/postavi-agent", response_class=HTMLResponse)
+    def ui_postavi_agent(request: Request):
+        try:
+            actor = require_actor_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        _require_owner(actor)  # izdavanje agenta = strojno, owner-only
+        from atlas.web.templates_ui import postavi_agent_page
+        return postavi_agent_page()
+
     @app.get("/ui/napajanje", response_class=HTMLResponse)
     def ui_napajanje(request: Request):
         try:

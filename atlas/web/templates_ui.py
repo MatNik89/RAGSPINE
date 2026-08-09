@@ -803,6 +803,23 @@ loadConfig(); refreshStatus(); refreshPlan();
 """
 
 
+def postavi_agent_page() -> str:
+    body = """<h1>Postavi agenta na radno računalo</h1>
+<p class="meta">atlas-agent se vrti u radnikovoj sesiji i spaja se odlazno prema
+serveru (bez otvaranja portova na radnom stroju). Prima samo odobrene radnje:
+pokreni odobreni program, uredno ugasi, uključi WOL, javi status.</p>
+<ol>
+  <li>U <a href="/ui/uredjaji">Postavke → Uređaji</a> dodaj radnu stanicu i izdaj joj token.</li>
+  <li>Na tom računalu preuzmi ATLAS i postavi config:
+    <pre>python -m atlas.agent.install --server https://SERVER:8443 --token &lt;TOKEN&gt;</pre></li>
+  <li>Registriraj autostart pri prijavi (Task Scheduler / systemd --user) — install to napravi.</li>
+  <li>U <a href="/ui/uredjaji">Uređaji</a> dopuni koje programe agent smije pokretati
+    (allowlista: server šalje samo ključ, agent drži put do programa lokalno).</li>
+</ol>
+<p class="meta">Opoziv: obriši token uređaja — agent odmah ogluši.</p>"""
+    return page_shell("Postavi agenta", body, active="postavke")
+
+
 def napajanje_page() -> str:
     body = f"""<h1>Napajanje</h1>
 <p class="meta">UPS nadzor preko NUT-a. Automatsko gašenje redom (radnici prvo,
