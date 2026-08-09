@@ -629,7 +629,13 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok", "missing": optional.missing()}
+        # Javno: installer/monitoring provjeravaju da JE ovo ATLAS server (opcija B:
+        # radna stanica se veže tek kad server odgovori atlas=true + setup gotov).
+        import atlas
+        from atlas.ops import wizard_state
+        return {"status": "ok", "atlas": True, "version": atlas.__version__,
+                "setup_complete": wizard_state.is_complete(spine),
+                "missing": optional.missing()}
 
     @app.get("/login", response_class=HTMLResponse)
     def login_page():
