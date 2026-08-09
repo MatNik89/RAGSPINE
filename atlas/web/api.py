@@ -1324,8 +1324,27 @@ def create_app(spine, cfg) -> FastAPI:
         return dashboard_page()
 
     @app.get("/dashboard.json")
-    def dashboard_json(user: str = Depends(require_user_web)):
-        return dashboard.home_data(spine)
+    def dashboard_json(actor: Actor = Depends(require_actor_web)):
+        # restringiran radnik ne vidi obveze/istek/fali-dokumente tuđih klijenata
+        visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        return dashboard.home_data(spine, visible=visible)
+
+    @app.post("/expiry/{item_id}/podsjetnik")
+    def expiry_reminder(item_id: int, actor: Actor = Depends(require_actor_web)):
+        if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
+            raise HTTPException(403, "potrebna barem članska uloga")
+        row = spine.read().execute(
+            "SELECT client_id FROM expiry_items WHERE id=?", (item_id,)).fetchone()
+        if row is None:
+            raise HTTPException(404, "nepoznata stavka isteka")
+        if row["client_id"] is not None:
+            _guard_client(actor, row["client_id"])  # anti-IDOR
+        try:
+            res = expiry_mod.send_expiry_reminder(spine, cfg, item_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        spine.audit(actor.username, "expiry_reminder", f"item:{item_id}", res.get("status", ""))
+        return res
 
     @app.get("/ui/chat", response_class=HTMLResponse)
     def ui_chat(request: Request):

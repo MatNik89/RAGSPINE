@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 # fixed endpoint (mail relay, chat-bot API), not a generic webhook-to-anywhere.
 # Operator can extend this set later if a new provider is needed.
 ALLOWED_TARGET_SCHEMES = {
-    "mailto", "mailtos", "tgram", "discord", "slack", "twilio", "ntfy", "pover", "pushover",
+    # SAMO sheme s FIKSNIM provider-hostom. 'ntfy' izbačen: ntfy://<host>/topic
+    # dopušta proizvoljan host (self-hosted) -> SSRF na loopback/LAN (Codex nalaz).
+    "mailto", "mailtos", "tgram", "discord", "slack", "twilio", "pover", "pushover",
 }
 
 

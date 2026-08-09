@@ -98,7 +98,8 @@ def test_dashboard_json_has_expected_keys(spine, cfg):
     body = r.json()
     assert set(body) == {"orientation", "stats", "calendar", "deadlines", "unsent_obligations",
                           "unsent_by_client", "unsent_total", "unsent_clients_total",
-                          "expiring", "expiring_total", "notifications", "peer"}
+                          "expiring", "expiring_total", "missing_docs", "missing_docs_total",
+                          "notifications", "peer"}
     # calendar hero payload shape
     cal = body["calendar"]
     assert set(cal) == {"year", "month", "today", "events"}
