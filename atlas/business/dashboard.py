@@ -55,7 +55,7 @@ def _month_bounds(today: date) -> tuple[str, str]:
     return start.isoformat(), nxt.isoformat()
 
 
-def _month_events(spine, today: date) -> dict:
+def _month_events(spine, today: date, visible=None) -> dict:
     """Every dated obligation-deadline + document-expiry that falls in the
     current month, pinned to its day-of-month with an urgency state. Feeds the
     calendar hero (GET /dashboard.json -> calendar)."""
@@ -77,9 +77,12 @@ def _month_events(spine, today: date) -> dict:
     ).fetchall():
         _add(r["due"], r["kind"], r["kind"])
     for r in spine.read().execute(
-        "SELECT label, expires FROM expiry_items WHERE expires >= ? AND expires < ? ORDER BY expires",
+        "SELECT client_id, label, expires FROM expiry_items "
+        "WHERE expires >= ? AND expires < ? ORDER BY expires",
         (start, end),
     ).fetchall():
+        if visible is not None and r["client_id"] not in visible:
+            continue  # skriveni klijent ne curi u kalendar
         _add(r["expires"], "istek", r["label"])
     return {"year": today.year, "month": today.month, "today": today.day, "events": events}
 
@@ -132,7 +135,7 @@ def _unsent_obligations(spine, period: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def stats(spine) -> dict:
+def stats(spine, visible=None) -> dict:
     active_clients = spine.read().execute(
         "SELECT COUNT(*) AS n FROM clients WHERE active=1"
     ).fetchone()["n"]
@@ -140,11 +143,13 @@ def stats(spine) -> dict:
     # ponytail: interactions nema client_id (nema atribucije klijentu), pa
     # "top klijenti" računamo po broju bilješki — jedini dostupan signal.
     # Upgrade path: dodati clients.id atribuciju na interactions kad zatreba.
-    top_rows = spine.read().execute(
-        """SELECT c.name AS name, COUNT(*) AS cnt FROM notes n
+    top_all = spine.read().execute(
+        """SELECT c.id AS id, c.name AS name, COUNT(*) AS cnt FROM notes n
            JOIN clients c ON c.id = n.client_id
-           GROUP BY c.id ORDER BY cnt DESC, c.name LIMIT 5"""
+           GROUP BY c.id ORDER BY cnt DESC, c.name"""
     ).fetchall()
+    # restringiran radnik ne vidi imena skrivenih klijenata (Codex nalaz)
+    top_rows = [r for r in top_all if visible is None or r["id"] in visible][:5]
     unseen_notifications = spine.read().execute(
         "SELECT COUNT(*) AS n FROM notifications WHERE seen=0"
     ).fetchone()["n"]
@@ -161,31 +166,46 @@ def stats(spine) -> dict:
     }
 
 
-def home_data(spine, cap: int = 8) -> dict:
-    """Aggregated payload for the dashboard screen (GET /dashboard.json)."""
+def _vis(rows: list, visible) -> list:
+    """Zadrži samo retke vidljivih klijenata (client_id IS NULL = uredski, ostaje)."""
+    if visible is None:
+        return rows
+    return [r for r in rows if r.get("client_id") is None or r.get("client_id") in visible]
+
+
+def home_data(spine, cap: int = 8, visible=None) -> dict:
+    """Aggregated payload for the dashboard screen (GET /dashboard.json).
+    `visible` = set vidljivih client_id ili None (sve) — restringiran radnik ne
+    vidi obveze/istek/fali-dokumente tuđih klijenata."""
+    from atlas.business import doc_completeness
     today = _today()
-    st = stats(spine)
+    st = stats(spine, visible=visible)
 
     deadline_rows = _deadlines_window(spine, today)
     deadlines = [_with_state(r, "due", today) for r in deadline_rows][:cap]
 
     period = today.strftime("%Y-%m")
-    unsent_full = _unsent_obligations(spine, period)
+    unsent_full = _vis(_unsent_obligations(spine, period), visible)
     unsent = unsent_full[:cap]
 
-    calendar = _month_events(spine, today)
+    calendar = _month_events(spine, today, visible=visible)
     groups_full = _group_unsent(unsent_full, _kind_state(calendar["events"]))
     unsent_by_client = groups_full[:cap]
 
-    expiring_rows = [dict(r) for r in expiry.expiring(spine, days=30)]
+    missing_docs_full = doc_completeness.clients_missing_docs(spine, visible=visible)
+    missing_docs = missing_docs_full[:cap]
+
+    expiring_rows = _vis([dict(r) for r in expiry.expiring(spine, days=30)], visible)
     expiring = [_with_state(r, "expires", today) for r in expiring_rows][:cap]
 
+    # over-fetch pa filtriraj po vidljivosti prije capa — inače skriveni redovi
+    # izguraju vidljive ispod LIMIT-a, ili procure (Codex nalaz)
     notif_rows = spine.read().execute(
         """SELECT id, kind, body, client_id, seen, at FROM notifications
            WHERE seen=0 ORDER BY at DESC LIMIT ?""",
-        (cap,),
+        (cap * 20,),
     ).fetchall()
-    notifications = [dict(r) for r in notif_rows]
+    notifications = _vis([dict(r) for r in notif_rows], visible)[:cap]
 
     folders_rows = spine.read().execute(
         "SELECT f.id, f.label, f.role, f.path, s.n_subdirs, s.n_docs, s.n_pdf_no_text "
@@ -209,6 +229,8 @@ def home_data(spine, cap: int = 8) -> dict:
         "unsent_clients_total": len(groups_full),
         "expiring_total": len(expiring_rows),
         "expiring": expiring,
+        "missing_docs": missing_docs,
+        "missing_docs_total": len(missing_docs_full),
         "notifications": notifications,
         "peer": {"count": st["peer_disagreements"]},
     }

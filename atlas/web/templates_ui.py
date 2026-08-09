@@ -554,11 +554,63 @@ async function loadDashboard() {
     renderToday(data.deadlines);
     renderUnsentByClient(data.unsent_by_client || [], data.unsent_clients_total);
     renderNotifications(data.notifications);
+    renderMissingDocs(data.missing_docs || [], data.missing_docs_total || 0);
+    renderExpiring(data.expiring || []);
   } catch (err) {
     const banner = $('dashboard-error');
     banner.textContent = 'Greška pri učitavanju nadzorne ploče. Osvježite stranicu.';
     banner.style.display = 'block';
   }
+}
+
+function _q(id) { return document.getElementById(id); }
+
+function renderMissingDocs(rows, total) {
+  var el = _q('missing-docs-list'); el.textContent = '';
+  _q('missing-count').textContent = total ? String(total) : '';
+  if (!rows.length) { var p = document.createElement('p'); p.className = 'meta';
+    p.textContent = 'Svi klijenti imaju obavezne dokumente.'; el.appendChild(p); return; }
+  rows.forEach(function (r) {
+    var row = document.createElement('div'); row.className = 'row';
+    var a = document.createElement('a'); a.href = '/ui/klijent/' + r.client_id;
+    a.textContent = r.client; row.appendChild(a);
+    var m = document.createElement('span'); m.className = 'meta';
+    m.textContent = ' — fali: ' + r.nedostaju.join(', '); row.appendChild(m);
+    el.appendChild(row);
+  });
+}
+
+function renderExpiring(rows) {
+  var el = _q('expiring-list'); el.textContent = '';
+  _q('expiring-count').textContent = rows.length ? String(rows.length) : '';
+  if (!rows.length) { var p = document.createElement('p'); p.className = 'meta';
+    p.textContent = 'Ništa ne ističe uskoro.'; el.appendChild(p); return; }
+  rows.forEach(function (r) {
+    var row = document.createElement('div'); row.className = 'row';
+    var t = document.createElement('span');
+    t.textContent = (r.client_name || r.client || '') + ' · ' + r.label + ' (' + r.expires + ')';
+    if (r.state) t.className = 'g ' + r.state;
+    row.appendChild(t);
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-ghost';
+    b.textContent = 'Pošalji mail';
+    b.addEventListener('click', function () { sendReminder(r.id, b); });
+    row.appendChild(b);
+    el.appendChild(row);
+  });
+}
+
+async function sendReminder(id, btn) {
+  btn.disabled = true;
+  try {
+    var res = await fetch('/expiry/' + id + '/podsjetnik', { method: 'POST', credentials: 'same-origin' });
+    if (!res.ok) { toast('Greška: ' + res.status, 'bad'); btn.disabled = false; return; }
+    var data = await res.json();
+    var st = data.status || '';
+    if (st === 'sent') { toast('Podsjetnik poslan.', 'ok'); }
+    else if (st === 'dry_run') { toast('Test (dry-run): mail bi bio poslan.', 'ok'); btn.disabled = false; }
+    else if (st.indexOf('skipped') === 0) { toast('Klijent nema pristanak/kanal za mail.', 'bad'); btn.disabled = false; }
+    else { toast('Slanje nije uspjelo (' + (st || 'greška') + ').', 'bad'); btn.disabled = false; }
+  } catch (e) { toast('Greška u komunikaciji.', 'bad'); btn.disabled = false; }
 }
 
 loadDashboard();
@@ -610,6 +662,16 @@ def dashboard_page() -> str:
   <div class="panel">
     <div class="panel-head"><span class="panel-title">Nove obavijesti</span><span class="panel-count" id="notif-count"></span></div>
     <div id="notifications-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+</div>
+<div class="dash-board">
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">Fali dokumenata</span><span class="panel-count bad" id="missing-count"></span></div>
+    <div id="missing-docs-list"><p class="meta">Učitavanje…</p></div>
+  </div>
+  <div class="panel">
+    <div class="panel-head"><span class="panel-title">Istječe uskoro</span><span class="panel-count" id="expiring-count"></span></div>
+    <div id="expiring-list"><p class="meta">Učitavanje…</p></div>
   </div>
 </div>
 <script>{_DASHBOARD_JS}</script>"""

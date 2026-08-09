@@ -177,14 +177,12 @@ def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
 
 
 def _run_nedostajuci_dokumenti(spine, cfg, actor, args) -> dict:
+    from atlas.business import doc_completeness
     row = _resolve_visible(spine, actor, args["klijent"])
-    required = [r["doc_type_key"] for r in spine.read().execute(
-        "SELECT doc_type_key FROM client_doc_types WHERE client_id=?", (row["id"],)).fetchall()]
-    present = {r["doc_type"] for r in spine.read().execute(
-        "SELECT DISTINCT doc_type FROM documents WHERE client_id=?", (row["id"],)).fetchall()}
-    missing = [k for k in required if k not in present]
-    return {"klijent": row["name"], "obavezni": required,
-            "prisutni": sorted(present), "nedostaju": missing}
+    present = sorted({r["doc_type"] for r in spine.read().execute(
+        "SELECT DISTINCT doc_type FROM documents WHERE client_id=?", (row["id"],)).fetchall()})
+    return {"klijent": row["name"], "prisutni": present,
+            "nedostaju": doc_completeness.missing_for_client(spine, row["id"])}
 
 
 def _run_upit_baze(spine, cfg, actor, args) -> dict:
