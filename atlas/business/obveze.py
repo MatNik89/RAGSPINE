@@ -6,6 +6,7 @@
 
 # Ugrađene default-vrste — seed-aju se lijeno (INSERT OR IGNORE) pa admin-izmjene
 # ostaju. (kind, label, rule, frequency, applies_to, sort, active)
+import json
 # active=0 znači: postoji u registru, ali nije tab dok ga radnik ne uključi.
 DEFAULT_TYPES = [
     # PDV: od 1.1.2026. rok predaje = ZADNJI dan mjeseca (izmjene Zakona o
@@ -205,7 +206,8 @@ def ensure_period(spine, kind: str, period: str) -> None:
 def list_period(spine, kind: str, period: str) -> list[dict]:
     rows = spine.read().execute(
         """SELECT o.id AS obligation_id, o.client_id AS client_id, c.name AS client,
-                  COALESCE(s.sent, 0) AS sent, s.sent_by AS sent_by, s.sent_at AS sent_at
+                  COALESCE(s.sent, 0) AS sent, s.sent_by AS sent_by, s.sent_at AS sent_at,
+                  o.meta AS meta
            FROM obligations o
            JOIN clients c ON c.id = o.client_id
            LEFT JOIN obligation_status s ON s.obligation_id = o.id
@@ -213,7 +215,43 @@ def list_period(spine, kind: str, period: str) -> list[dict]:
            ORDER BY sent, c.name COLLATE NOCASE""",
         (kind, period),
     ).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["meta"] = json.loads(d["meta"]) if d["meta"] else {}
+        except (ValueError, TypeError):
+            d["meta"] = {}
+        out.append(d)
+    return out
+
+
+def worker_activity(spine, since: str | None = None) -> list[dict]:
+    """Tko je koliko obveza zatvorio + zadnji put. Iz obligation_status (sent=1).
+    Podatak već postoji (sent_by/sent_at) — ovo je agregacija za izvještaj."""
+    q = ("SELECT s.sent_by AS worker, COUNT(*) AS closed, MAX(s.sent_at) AS last_at "
+         "FROM obligation_status s JOIN obligations o ON o.id = s.obligation_id "
+         "WHERE s.sent=1 AND s.sent_by IS NOT NULL")
+    args: tuple = ()
+    if since:
+        q += " AND s.sent_at >= ?"
+        args = (since,)
+    q += " GROUP BY s.sent_by ORDER BY closed DESC, worker COLLATE NOCASE"
+    return [dict(r) for r in spine.read().execute(q, args).fetchall()]
+
+
+def worker_closed(spine, worker: str, since: str | None = None) -> list[dict]:
+    """Pojedinačne obveze koje je taj radnik zatvorio (za drill-down)."""
+    q = ("SELECT o.kind AS kind, o.period AS period, c.name AS client, s.sent_at AS sent_at "
+         "FROM obligation_status s JOIN obligations o ON o.id = s.obligation_id "
+         "JOIN clients c ON c.id = o.client_id "
+         "WHERE s.sent=1 AND s.sent_by=?")
+    args: tuple = (worker,)
+    if since:
+        q += " AND s.sent_at >= ?"
+        args = (worker, since)
+    q += " ORDER BY s.sent_at DESC"
+    return [dict(r) for r in spine.read().execute(q, args).fetchall()]
 
 
 def mark_sent(spine, obligation_id: int, user: str, sent: bool = True) -> None:
