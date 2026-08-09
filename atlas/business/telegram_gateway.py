@@ -110,6 +110,18 @@ def _consume_pairing(spine, token: str, chat_id: int, username: str) -> bool:
     return True
 
 
+def format_agent_reply(res: dict) -> str:
+    """Tekst za Telegram iz rezultata agenta. WRITE prijedlog (pending) se NE
+    izvršava preko Telegrama — bounce na potvrdu u aplikaciji (nema tihog
+    write-a s telefona bez potvrde)."""
+    text = res.get("text") or res.get("answer") or ""
+    pending = res.get("pending")
+    if pending:
+        text = (pending.get("summary", text) +
+                "\n\n⚠ Za POTVRDU i izvršenje otvori ATLAS chat u aplikaciji.")
+    return text or "(prazan odgovor)"
+
+
 def _resolve_actor(spine, link):
     from atlas.business import tenancy
     actor = tenancy.actor_for(spine, link["org_id"], link["user_id"])

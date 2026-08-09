@@ -1435,6 +1435,15 @@ def create_app(spine, cfg) -> FastAPI:
     def pwa_offline():
         return _PWA_OFFLINE_HTML
 
+    @app.get("/export/{token}")
+    def export_download(token: str, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import excel_export
+        path = excel_export.path_for(cfg, token)
+        if path is None:
+            raise HTTPException(404, "izvoz ne postoji ili je istekao")
+        return FileResponse(path, filename="atlas-izvoz.xlsx",
+                            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
     @app.get("/obveze/aktivnost")
     def obveze_aktivnost(since: str | None = None, worker: str | None = None,
                          actor: Actor = Depends(require_actor_web)):
@@ -2707,6 +2716,29 @@ def create_app(spine, cfg) -> FastAPI:
     def browser_agent(body: BrowserAgentBody, user: str = Depends(require_user_web)):
         return agent_mod.run_task(cfg, body.task, body.url)
 
+    # Determinističke lane koje ODMAH mijenjaju stanje (bez agent-potvrde) ne
+    # smiju se okinuti s telefona — inače "nauči s <URL>" / "kod Ane otvori X"
+    # izvrše write bez potvrde (Codex nalaz).
+    _TG_SIDE_EFFECT_LANES = ("learn", "flota", "arhitektura")
+
+    def _telegram_answer(query: str, actor: Actor) -> dict:
+        """Telegram kroz AGENTA (telefon dobiva READ akcije). Write (agent pending
+        ILI side-effect lane) se NE izvršava preko Telegrama — bounce na potvrdu."""
+        _chat_gate(actor)
+        lane = router_mod.route(query)
+        if lane in _TG_SIDE_EFFECT_LANES:
+            return {"answer": "⚠ Radnje koje mijenjaju podatke (učenje s weba, "
+                    "pokretanje programa, dogovor mapa) napravi i potvrdi u ATLAS aplikaciji."}
+        if actor.role not in _AGENT_ROLES or lane != "chat":
+            return _answer(query, actor)
+        try:
+            res = agent.run_agent(spine, cfg, query, actor,
+                                  LLMClient(model_settings.apply(spine, cfg)))
+        except (LLMUnavailable, LLMError):
+            return _answer(query, actor)
+        from atlas.business import telegram_gateway as _tgw
+        return {"answer": _tgw.format_agent_reply(res), "sources": res.get("sources", [])}
+
     def _maybe_start_telegram():
         """Ako je telegram_gateway konektor uključen, pokreni poll-thread. Bez
         konfiguriranog konektora (npr. u testovima) ne pokreće ništa."""
@@ -2725,7 +2757,7 @@ def create_app(spine, cfg) -> FastAPI:
         stop = threading.Event()
         app.state.tg_stop = stop
         app.state.tg_thread = threading.Thread(
-            target=tgw.poll_loop, args=(spine, cfg, token, _answer, stop),
+            target=tgw.poll_loop, args=(spine, cfg, token, _telegram_answer, stop),
             kwargs={"limiter": limiter, "key": f"c{row['id']}"},  # jedinstven offset po konektoru
             daemon=True, name="telegram-gateway")
         app.state.tg_thread.start()

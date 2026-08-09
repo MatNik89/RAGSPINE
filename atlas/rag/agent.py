@@ -45,6 +45,14 @@ def summarize_action(name: str, args: dict) -> str:
         tekst = args.get("tekst", "")
         kratko = tekst if len(tekst) <= 60 else tekst[:57] + "..."
         return f"Zapisat ću bilješku uz klijenta {args.get('klijent', '')}: \"{kratko}\"."
+    if name == "dodaj_vrstu_obveze":
+        freq = args.get("frequency", "monthly")
+        return (f"Dodat ću/urediti vrstu obveze {args.get('label') or args.get('kind', '')} "
+                f"({freq}, rok {args.get('rule', '—')}, za {args.get('applies_to', 'sve aktivne')}).")
+    if name == "nauci_izvor":
+        return f"Naučit ću s web-stranice: {args.get('url', '')}."
+    if name == "pokreni_program":
+        return f"Pokrenut ću {args.get('program', '')} na stanici radnika {args.get('radnik', '')}."
     return f"Izvršit ću akciju {name} s argumentima {args}."
 
 

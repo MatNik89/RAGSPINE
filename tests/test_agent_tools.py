@@ -32,7 +32,7 @@ def _mk_client(spine, name="Pekara Mlinar", oib=None):
 def test_tools_registry_has_all_first_round_tools():
     expected = {"pretrazi", "popis_obveza", "stanje_klijenta", "dodaj_klijenta",
                 "uredi_klijenta", "oznaci_obvezu", "zakazi_rok", "zapisi_belesku"}
-    assert expected == set(at.TOOLS)
+    assert expected <= set(at.TOOLS)  # prvi krug alata i dalje postoji; registar raste (Faza 2)
 
 
 def test_readonly_flags_match_spec():
