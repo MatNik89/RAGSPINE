@@ -114,6 +114,66 @@ class ProgramBody(BaseModel):
 _AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
 _PENDING_TTL_MIN = 10
 
+# ── PWA (omota web UI kao instalabilnu aplikaciju) ────────────────────────
+_PWA_THEME = "#4f46e5"
+_PWA_MANIFEST = json.dumps({
+    "name": "ATLAS", "short_name": "ATLAS",
+    "description": "Ured: dokumenti, obveze, klijenti — lokalni AI asistent.",
+    "start_url": "/", "scope": "/", "display": "standalone",
+    "background_color": _PWA_THEME, "theme_color": _PWA_THEME, "lang": "hr", "dir": "ltr",
+    "icons": [
+        {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": "/static/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ],
+}, ensure_ascii=False)
+
+# Minimalan SW: cache-first za /static/, network-first za navigacije uz offline
+# fallback. NIKAD ne kešira authed HTML (freshness/privatnost).
+_PWA_SW_JS = """
+const CACHE = 'atlas-v1';
+const SHELL = ['/static/icons/icon-192.png', '/static/icons/favicon.svg',
+               '/manifest.webmanifest', '/offline.html'];
+self.addEventListener('install', function (e) {
+  e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); })
+    .then(function () { return self.skipWaiting(); }));
+});
+self.addEventListener('activate', function (e) {
+  e.waitUntil(caches.keys().then(function (ks) {
+    return Promise.all(ks.filter(function (k) { return k !== CACHE; })
+      .map(function (k) { return caches.delete(k); }));
+  }).then(function () { return self.clients.claim(); }));
+});
+self.addEventListener('fetch', function (e) {
+  var req = e.request;
+  if (req.method !== 'GET') { return; }
+  var url = new URL(req.url);
+  if (url.pathname.indexOf('/static/') === 0) {
+    e.respondWith(caches.match(req).then(function (r) {
+      return r || fetch(req).then(function (res) {
+        var copy = res.clone();
+        caches.open(CACHE).then(function (c) { c.put(req, copy); });
+        return res;
+      });
+    }));
+    return;
+  }
+  if (req.mode === 'navigate') {
+    e.respondWith(fetch(req).catch(function () { return caches.match('/offline.html'); }));
+  }
+});
+"""
+
+_PWA_OFFLINE_HTML = """<!DOCTYPE html>
+<html lang="hr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS — nema veze</title>
+<style>body{font-family:system-ui,sans-serif;background:#4f46e5;color:#fff;
+display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;text-align:center}
+div{max-width:22rem;padding:2rem}</style></head>
+<body><div><h1>ATLAS</h1><p>Nema veze sa serverom. Provjeri je li glavno računalo
+upaljeno i na mreži, pa osvježi stranicu.</p></div></body></html>"""
+
 
 class ChatCompletionsBody(BaseModel):
     messages: list[dict]
@@ -1348,6 +1408,22 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from atlas.web.templates_devices import devices_page
         return devices_page()
+
+    # --- PWA: omota web UI da se instalira kao aplikacija (bez novih ekrana) ---
+    @app.get("/manifest.webmanifest")
+    def pwa_manifest():
+        return Response(content=_PWA_MANIFEST, media_type="application/manifest+json",
+                        headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/sw.js")
+    def pwa_service_worker():
+        # SW na rootu -> scope '/'; no-cache jer se SW mora osvježiti odmah
+        return Response(content=_PWA_SW_JS, media_type="application/javascript",
+                        headers={"Cache-Control": "no-cache"})
+
+    @app.get("/offline.html", response_class=HTMLResponse)
+    def pwa_offline():
+        return _PWA_OFFLINE_HTML
 
     @app.get("/postavi-agent", response_class=HTMLResponse)
     def ui_postavi_agent(request: Request):
