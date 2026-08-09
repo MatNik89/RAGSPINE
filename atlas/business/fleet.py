@@ -144,6 +144,65 @@ def next_command(spine, device_id: int) -> dict | None:
             return {"id": row["id"], "action": row["action"], "program_key": row["program_key"]}
 
 
+_ROLE_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
+
+
+def _worker_matches(worker_username: str, name: str) -> bool:
+    """Labavo poklapanje imena radnika (podnosi hrvatsku deklinaciju: 'Ane'->
+    'ana'): jedno je prefiks drugog ili dijele prve 3 slova."""
+    import os
+    a, b = worker_username.lower(), name.lower()
+    if a == b or a.startswith(b) or b.startswith(a):
+        return True
+    # deklinacija (Ana/Ane/Ani): dijele sve osim zadnjeg slova
+    cp = len(os.path.commonprefix([a, b]))
+    return cp >= 2 and cp >= min(len(a), len(b)) - 1
+
+
+def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str) -> dict:
+    """Chat 'kod <ime> otvori <program>': nađi radnikovu stanicu + program iz
+    allowliste i enqueue run_program. Admin+ (dnevno pokretanje). Vrati
+    {ok, message, command_id?}."""
+    from atlas.business import devices as devices_mod
+
+    if _ROLE_RANK.get(actor_role, -1) < _ROLE_RANK["admin"]:
+        return {"ok": False, "message": "Za pokretanje programa na radnoj stanici potrebna je admin uloga."}
+
+    workers = [d for d in devices_mod.list_devices(spine)
+               if d.get("worker_username") and _worker_matches(d["worker_username"], worker_name)
+               and d.get("host")]
+    if len(workers) != 1:
+        which = "nijedan" if not workers else "više"
+        return {"ok": False, "message": f"Ne mogu jednoznačno odrediti stanicu za {worker_name!r} ({which})."}
+
+    pq = _norm_key(program_query)
+    progs = [p for p in list_programs(spine)
+             if pq == p["key"] or pq in p["key"] or pq in _norm_key(p["label"])]
+    if len(progs) != 1:
+        return {"ok": False, "message": f"Program {program_query!r} nije jednoznačno na allowlisti."}
+
+    cid = enqueue(spine, workers[0]["id"], "run_program", program_key=progs[0]["key"])
+    return {"ok": True, "command_id": cid,
+            "message": f"Pokrećem {progs[0]['label']} na {workers[0]['name']}."}
+
+
+_FLOTA_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)
+
+
+def flota_handle(spine, cfg, query: str, llm=None, actor=None) -> str:
+    """Chat lane: 'kod <ime> otvori <program>'. Actor-threaded (admin-gate)."""
+    role = getattr(actor, "role", None)
+    m = _FLOTA_RE.search(query)
+    if not m:
+        return "Reci: kod <ime radnika> otvori <program>."
+    return open_on_worker(spine, m.group(1).strip(), m.group(2).strip(),
+                          actor_role=role or "viewer")["message"]
+
+
+from atlas.rag import pipeline  # noqa: E402 (lazy: izbjegni import-order coupling)
+pipeline.LANE_HANDLERS["flota"] = flota_handle
+
+
 def complete(spine, cmd_id: int, device_id: int, result) -> bool:
     """Zatvori naredbu SAMO ako je 'in_progress' i pripada uređaju — spriječi da
     agent preskoči izvršenje (pending->done) ili prepiše već završen rezultat.
