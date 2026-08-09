@@ -17,6 +17,7 @@ LANES = (
     "learn",
     "knjizenje",
     "arhitektura",
+    "flota",
     "no_retrieval",
     "reject",
     "chat",
@@ -94,6 +95,9 @@ RULES: list[tuple[re.Pattern, str]] = [
     _rule(r"\bgraf\b", "graph"),
     _rule(r"odnos (klijenta|dobavljaca)", "graph"),
     _rule(r"mreza (klijenata|veza)", "graph"),
+
+    # --- flota: pokreni program na radnikovoj stanici ---
+    _rule(r"kod\s+\S+\s+otvori\s+\S", "flota"),
 
     # --- no_retrieval: small talk, no lookup needed ---
     _rule(r"^(pozdrav|bok|hvala|dobro jutro|dobar dan)!?\??$", "no_retrieval"),

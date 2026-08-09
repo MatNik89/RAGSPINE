@@ -139,7 +139,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # smije se ni čitati ni PISATI u keš (inače bi posluženo drugome — cache je
     # keyed po tekstu+org, ne po vidljivosti).
     skip_cache = (has_history or resolved_client is not None
-                  or lane == "arhitektura" or visible is not None)
+                  or lane in ("arhitektura", "flota") or visible is not None)
 
     if not skip_cache:
         cached_answer = cache.get(spine, query, org_id=org_id)
@@ -159,7 +159,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
 
     handler = LANE_HANDLERS.get(lane)
     if handler is not None:
-        if lane in ("arhitektura", "learn"):
+        if lane in ("arhitektura", "learn", "flota"):
             # side-effect lane mora znati TKO pita (role-gate u handleru:
             # arhitektura=admin, learn=member+)
             res = handler(spine, cfg, query, llm, actor=actor)

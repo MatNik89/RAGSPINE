@@ -29,6 +29,7 @@ from atlas.business import nldate
 from atlas.business import notes
 from atlas.business import doc_registry, obveze
 from atlas.business import onboarding
+from atlas.business import fleet
 from atlas.business import peer_compare
 from atlas.business import power as power_mod
 from atlas.business import sop as sop_mod
@@ -92,6 +93,22 @@ class PowerConfigBody(BaseModel):
 
 class ArmBody(BaseModel):
     armed: bool
+
+
+class AgentResultBody(BaseModel):
+    id: int
+    ok: bool = True
+    detail: str = ""
+
+
+class NaredbaBody(BaseModel):
+    action: str
+    program_key: str | None = None
+
+
+class ProgramBody(BaseModel):
+    key: str
+    label: str = ""
 
 
 _AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
@@ -1079,6 +1096,87 @@ def create_app(spine, cfg) -> FastAPI:
         spine.audit(actor.username, "napajanje_arm", "", "1" if body.armed else "0")
         return {"armed": body.armed}
 
+    # --- Radnička flota: agent protokol + izdavanje tokena + naredbe ---
+    def _require_device(request: Request) -> int:
+        """Auth radničkog agenta preko device-tokena (odlazna veza, bez JWT-a)."""
+        did = fleet.verify_token(spine, request.headers.get("Authorization", ""))
+        if did is None:
+            raise HTTPException(401, "nevažeći token uređaja")
+        return did
+
+    @app.get("/agent/poll")
+    def agent_poll(request: Request):
+        did = _require_device(request)
+        cmd = fleet.next_command(spine, did)
+        if cmd is None:
+            return Response(status_code=204)
+        return cmd
+
+    @app.post("/agent/result")
+    def agent_result(body: AgentResultBody, request: Request):
+        did = _require_device(request)
+        # Zatvori SAMO vlastitu naredbu koja je 'in_progress' — inače agent bi
+        # mogao preskočiti izvršenje ili prepisati već završen rezultat.
+        if not fleet.complete(spine, body.id, did, {"ok": body.ok, "detail": body.detail}):
+            raise HTTPException(404, "naredba nije aktivna za ovaj uređaj")
+        spine.audit("agent", "agent_result", f"device:{did}",
+                    f"cmd:{body.id}:{'ok' if body.ok else 'fail'}")
+        return {"ok": True}
+
+    @app.post("/uredjaji/{device_id}/token")
+    def uredjaj_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)  # izdavanje tokena = strojno, owner-only
+        try:
+            token = fleet.issue_token(spine, device_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        spine.audit(actor.username, "device_token_issue", f"device:{device_id}")
+        return {"token": token}
+
+    @app.delete("/uredjaji/{device_id}/token")
+    def uredjaj_token_revoke(device_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        fleet.revoke_token(spine, device_id)
+        spine.audit(actor.username, "device_token_revoke", f"device:{device_id}")
+        return {"ok": True}
+
+    @app.post("/uredjaji/{device_id}/naredba")
+    def uredjaj_naredba(device_id: int, body: NaredbaBody,
+                        actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # dnevno pokretanje/gašenje = admin+ (uz audit)
+        from atlas.business import devices as devices_mod
+        if device_id not in {d["id"] for d in devices_mod.list_devices(spine)}:
+            raise HTTPException(404, "nepoznat uređaj")
+        try:
+            cid = fleet.enqueue(spine, device_id, body.action, body.program_key)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        spine.audit(actor.username, "agent_naredba", f"device:{device_id}",
+                    f"{body.action}:{body.program_key or ''}")
+        return {"id": cid}
+
+    @app.get("/fleet/programi")
+    def fleet_programi_list(actor: Actor = Depends(require_actor_web)):
+        _require_admin(actor)  # čitanje allowliste admin+
+        return fleet.list_programs(spine)
+
+    @app.post("/fleet/programi")
+    def fleet_programi_add(body: ProgramBody, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)  # definiranje ŠTO smije ikad raditi = sigurnosna politika
+        try:
+            key = fleet.add_program(spine, body.key, body.label, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        spine.audit(actor.username, "fleet_program_add", key)
+        return {"key": key}
+
+    @app.delete("/fleet/programi/{key}")
+    def fleet_programi_remove(key: str, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        fleet.remove_program(spine, key)
+        spine.audit(actor.username, "fleet_program_remove", key)
+        return {"ok": True}
+
     @app.post("/v1/chat/completions")
     def chat_completions(body: ChatCompletionsBody, actor: Actor = Depends(require_actor)):
         _chat_gate(actor)
@@ -1250,6 +1348,16 @@ def create_app(spine, cfg) -> FastAPI:
             return RedirectResponse("/login", status_code=303)
         from atlas.web.templates_devices import devices_page
         return devices_page()
+
+    @app.get("/postavi-agent", response_class=HTMLResponse)
+    def ui_postavi_agent(request: Request):
+        try:
+            actor = require_actor_web(request)
+        except HTTPException:
+            return RedirectResponse("/login", status_code=303)
+        _require_owner(actor)  # izdavanje agenta = strojno, owner-only
+        from atlas.web.templates_ui import postavi_agent_page
+        return postavi_agent_page()
 
     @app.get("/ui/napajanje", response_class=HTMLResponse)
     def ui_napajanje(request: Request):
