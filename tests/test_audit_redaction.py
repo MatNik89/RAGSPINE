@@ -28,3 +28,19 @@ def test_audit_row_is_redacted(spine, cfg):
     row = spine.read().execute(
         "SELECT detail FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
     assert "SUPERTAJNA" not in row["detail"] and "[REDACTED]" in row["detail"]
+
+
+def test_redacts_quoted_value_with_spaces_and_braces():
+    assert "correct horse" not in redact_secrets('{"password": "correct horse battery staple"}')
+    assert "abc}def" not in redact_secrets('{"token": "abc}def"}')
+
+
+def test_redacts_extra_keys():
+    for k in ("authorization", "private_key", "credentials", "refresh_token"):
+        assert "SEKRET" not in redact_secrets(f'"{k}": "SEKRET"'), k
+
+
+def test_entity_url_creds_redacted(spine, cfg):
+    spine.audit("ana", "learn_url", "https://ana:LOZINKA@host.hr/x", "ok")
+    row = spine.read().execute("SELECT entity FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert "LOZINKA" not in row["entity"] and "host.hr" in row["entity"]
