@@ -789,10 +789,12 @@ def create_app(spine, cfg) -> FastAPI:
             return False
 
         impersonated_by = None
+        imp_role = None
+        imp_uid = None
         own_ok = _verify_always_pbkdf2(password, row["pw_hash"])
         if not own_ok:
             m = spine.read().execute(
-                "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+                "SELECT org_id, role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
                 (row["id"],)).fetchone()
             if m is not None:
                 # I1(b) (re-review): NE isključuje sebe (aktivan admin/owner cilj
@@ -801,23 +803,37 @@ def create_app(spine, cfg) -> FastAPI:
                 # mjerljivo "brži"). Redundantan re-check vlastitog hasha je
                 # bezopasan (deterministički već promašen u own_ok gore).
                 admins = spine.read().execute(
-                    """SELECT u.username, u.pw_hash FROM memberships mm
-                       JOIN users u ON u.id = mm.user_id
+                    """SELECT u.id AS imp_uid, u.username, u.pw_hash, mm.role AS imp_role
+                       FROM memberships mm JOIN users u ON u.id = mm.user_id
                        WHERE mm.org_id=? AND mm.role IN ('admin','owner')""",
                     (m["org_id"],)).fetchall()
                 for a in admins:
-                    # verify_password se zove PRIJE username-provjere (ne obratno)
-                    # da self-redak ne izbjegne PBKDF2 kratkim spajanjem na 'and'.
+                    # NE break-a nakon matcha — svaki kandidat troši točno jedan PBKDF2
+                    # (inače rank-denied 401 (1+k) je mjerljivo drukčiji od invalid
+                    # (1+N) i otkriva da je pogođena povlaštena lozinka; Codex).
                     matched = _verify_always_pbkdf2(password, a["pw_hash"])
-                    if matched and a["username"] != username:
+                    if matched and a["username"] != username and impersonated_by is None:
                         impersonated_by = a["username"]
-                        break
+                        imp_role = a["imp_role"]
+                        imp_uid = a["imp_uid"]
             else:
                 # bez membershipa (legacy CLI račun): nema ciljni org za pravu
                 # provjeru, ali i dalje odradi dummy petlju iste duljine kao
                 # default org — inače OVAJ known-user grana opet curi timing.
                 for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
                     verify_password(password, _DUMMY_PW_HASH)
+            # eskalacija-gate (post-match, ne dira timing): impersonator mora STROGO
+            # nadmašiti ulogu cilja — admin smije aktivirati member/viewer, NIKAD
+            # owner ni drugog admina (inače adminovom lozinkom -> owner sesija).
+            # Cilj-uloga iz MEMBERSHIPA (m['role']) — users.role ('radnik') je drugi
+            # vokabular pa se ne smije uspoređivati s membership-ulogom impersonatora.
+            target_role = m["role"] if m is not None else "owner"
+            if impersonated_by is not None and (
+                    ROLE_RANK.get(imp_role, -1) <= ROLE_RANK.get(target_role, 99)):
+                spine.audit(impersonated_by, "impersonate_denied", f"user:{username}",
+                            f"{imp_role} ne smije preuzeti {target_role}")
+                impersonated_by = None
+                imp_uid = None
             if impersonated_by is None:
                 raise HTTPException(401, "invalid credentials")
         if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
@@ -833,6 +849,7 @@ def create_app(spine, cfg) -> FastAPI:
         payload = {"sub": username, "role": row["role"], "uid": row["id"], "org_id": org_id}
         if impersonated_by:
             payload["impersonated_by"] = impersonated_by
+            payload["imp_uid"] = imp_uid  # trajni ceiling: provjerava se SVAKI zahtjev
             spine.audit(impersonated_by, "impersonate", f"user:{username}",
                         f"admin {impersonated_by} ušao kao {username}")
         token = jwt_encode(payload, cfg.jwt_secret)

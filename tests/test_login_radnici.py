@@ -394,3 +394,79 @@ def test_pbkdf2_work_identical_across_pending_active_member_active_admin_unknown
     assert n_pending == n_active_member == n_active_admin == n_unknown, (
         n_pending, n_active_member, n_active_admin, n_unknown)
     assert n_pending >= 2  # vlastita provjera + barem jedan admin-fallback pokusaj
+
+
+# ---------- Eskalacija-gate: impersonator mora STROGO nadmašiti cilj ----------
+
+def _seed(spine, username, role, pw="tajna1"):
+    from atlas.business import tenancy
+    add_user(spine, username, pw, "radnik")
+    uid = spine.read().execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()["id"]
+    tenancy.add_member(spine, tenancy.default_org_id(spine), uid, role)
+    return uid
+
+
+def test_admin_cannot_impersonate_owner(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")            # ana = owner (prvi login)
+    _seed(spine, "dora", "admin", "dora-pw")
+    # dora (admin) probava ući KAO ana (owner) svojom lozinkom -> zabranjeno
+    r = c.post("/auth/login", json={"username": "ana", "password": "dora-pw"})
+    assert r.status_code == 401
+    assert spine.read().execute(
+        "SELECT 1 FROM audit_log WHERE action='impersonate_denied'").fetchone() is not None
+
+
+def test_admin_cannot_impersonate_peer_admin(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    _seed(spine, "dora", "admin", "dora-pw")
+    _seed(spine, "eva", "admin", "eva-pw")
+    r = c.post("/auth/login", json={"username": "eva", "password": "dora-pw"})
+    assert r.status_code == 401  # admin !> admin
+
+
+def test_admin_can_impersonate_member(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    _seed(spine, "dora", "admin", "dora-pw")
+    _seed(spine, "boris", "member", "boris-pw")
+    r = c.post("/auth/login", json={"username": "boris", "password": "dora-pw"})
+    assert r.status_code == 200  # admin > member
+    assert jwt_decode(r.json()["token"], cfg.jwt_secret)["impersonated_by"] == "dora"
+
+
+def test_owner_can_impersonate_admin(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")            # ana owner, lozinka sifra-ane
+    _seed(spine, "dora", "admin", "dora-pw")
+    # ana (owner) ulazi kao dora (admin) svojom lozinkom -> owner > admin OK
+    r = c.post("/auth/login", json={"username": "dora", "password": "sifra-ane"})
+    assert r.status_code == 200
+    assert jwt_decode(r.json()["token"], cfg.jwt_secret)["impersonated_by"] == "ana"
+
+
+def test_impersonation_ceiling_enforced_after_promotion(spine, cfg):
+    # Codex HIGH: admin impersonira membera, pa se cilj promovira u admina ->
+    # spremljeni token NE smije naslijediti višu ulogu (provjera svaki zahtjev)
+    from atlas.business import tenancy
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    _seed(spine, "dora", "admin", "dora-pw")
+    boris_uid = _seed(spine, "boris", "member", "boris-pw")
+    tok = c.post("/auth/login", json={"username": "boris", "password": "dora-pw"}).json()["token"]
+    assert c.get("/org", headers=_h(tok)).status_code == 200  # dok je member -> radi
+    # promoviraj borisa u admina -> dora (admin) više ne nadmašuje -> token pada
+    tenancy.add_member(spine, tenancy.default_org_id(spine), boris_uid, "admin")
+    assert c.get("/org", headers=_h(tok)).status_code == 403
+
+
+def test_impersonation_ceiling_denies_if_impersonator_demoted(spine, cfg):
+    from atlas.business import tenancy
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    dora_uid = _seed(spine, "dora", "admin", "dora-pw")
+    _seed(spine, "boris", "member", "boris-pw")
+    tok = c.post("/auth/login", json={"username": "boris", "password": "dora-pw"}).json()["token"]
+    tenancy.add_member(spine, tenancy.default_org_id(spine), dora_uid, "member")  # demote dora
+    assert c.get("/org", headers=_h(tok)).status_code == 403
