@@ -123,3 +123,21 @@ def test_imap_connector_type_registered():
     t = connectors.get_type("mail_imap")
     assert t is not None and t.category == "mail"
     assert {f.key for f in t.fields} >= {"host", "email", "password"}
+
+
+def test_failed_message_goes_to_deadletter(spine, cfg):
+    # FETCH pukne na uid 2 -> dead-letter obavijest, ne tihi nestanak
+    cid = _mk_connector(spine, cfg)
+    mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FailFetchIMAP)
+    row = spine.read().execute(
+        "SELECT body FROM notifications WHERE kind='mail_deadletter'").fetchone()
+    assert row is not None and "nije obrađen" in row["body"]
+
+
+def test_deadletter_dedupes(spine, cfg):
+    cid = _mk_connector(spine, cfg)
+    mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FailFetchIMAP)
+    mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FailFetchIMAP)
+    n = spine.read().execute(
+        "SELECT COUNT(*) AS n FROM notifications WHERE kind='mail_deadletter'").fetchone()["n"]
+    assert n == 1  # ista greška u 7 dana -> jednom

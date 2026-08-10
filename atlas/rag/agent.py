@@ -112,17 +112,35 @@ def _accumulate_sources(sources: list, name: str, tool_result: dict) -> None:
         sources.append({"n": len(sources) + 1, "title": hit.get("naslov"), "doc_id": hit.get("doc_id")})
 
 
+def _skills_catalog_text(spine, actor) -> str:
+    """Katalog aktivnih vještina (samo ime+opis) za system-prompt — progresivno
+    otkrivanje: pune korake agent povlači alatom ucitaj_vjestinu kad zatrebaju."""
+    from atlas.knowledge import skills as skills_mod
+    rows = skills_mod.list_skills(spine, actor.org_id, status="active")
+    rows = skills_mod.readable(rows, actor)  # vidljivost: private/team ne cure drugima (Codex)
+    if not rows:
+        return ""
+    # cap duljine: tuđe ime/opis ide u prompt -> omeđi injection/kontekst (Codex)
+    lines = "\n".join(f"- {(s['name'] or '')[:60]}: {(s['description'] or '')[:200]}"
+                      for s in rows if s.get("name"))
+    if not lines:
+        return ""
+    return ("\n\nDostupne vještine (procedure ureda) — pozovi alat "
+            "ucitaj_vjestinu(ime) da učitaš pune korake kad su relevantne:\n" + lines)
+
+
 def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
     # pokaži SAMO alate koje uloga smije — model tako ne predloži zabranjeni alat
     # pa lažno ne tvrdi da ga je izvršio (iskrenost umj. tihog pada; OpenWorker obrazac)
     tools = [{"name": t.name, "description": t.description, "schema": t.schema}
               for t in agent_tools.TOOLS.values() if agent_tools.allowed(actor, t)]
+    system = SYSTEM_PROMPT + _skills_catalog_text(spine, actor)  # katalog vještina (progresivno)
     messages = [{"role": "user", "content": query}]
     sources: list = []
     last_text = ""
 
     for _ in range(max_steps):
-        result = llm.complete(messages, system=SYSTEM_PROMPT, tools=tools)
+        result = llm.complete(messages, system=system, tools=tools)
         last_text = result.text
 
         if not result.tool_calls:
