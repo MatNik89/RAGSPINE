@@ -108,6 +108,10 @@ CREATE TABLE IF NOT EXISTS fleet_programs(key TEXT PRIMARY KEY, label TEXT, adde
 CREATE TABLE IF NOT EXISTS agent_commands(id INTEGER PRIMARY KEY, device_id INTEGER,
   action TEXT, program_key TEXT, status TEXT DEFAULT 'pending', result TEXT,
   created_at TEXT DEFAULT (datetime('now')), done_at TEXT);
+CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY, secret_hash TEXT,
+  device_name TEXT, status TEXT DEFAULT 'pending', device_id INTEGER,
+  token_enc TEXT, signkey_enc TEXT, source TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS hash_chain(id INTEGER PRIMARY KEY, event TEXT, prev_hash TEXT,
   hash TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY, question TEXT, answer TEXT,
@@ -273,6 +277,7 @@ class Spine:
                 "last_access": "TEXT DEFAULT (datetime('now'))",
                 "access_count": "INTEGER DEFAULT 0",
             })
+            _ensure_columns(c, "agent_enrollments", {"source": "TEXT DEFAULT ''"})
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             _ensure_columns(c, "devices", {
