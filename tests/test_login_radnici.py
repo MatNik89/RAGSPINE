@@ -394,3 +394,53 @@ def test_pbkdf2_work_identical_across_pending_active_member_active_admin_unknown
     assert n_pending == n_active_member == n_active_admin == n_unknown, (
         n_pending, n_active_member, n_active_admin, n_unknown)
     assert n_pending >= 2  # vlastita provjera + barem jedan admin-fallback pokusaj
+
+
+# ---------- Eskalacija-gate: impersonator mora STROGO nadmašiti cilj ----------
+
+def _seed(spine, username, role, pw="tajna1"):
+    from atlas.business import tenancy
+    add_user(spine, username, pw, "radnik")
+    uid = spine.read().execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()["id"]
+    tenancy.add_member(spine, tenancy.default_org_id(spine), uid, role)
+    return uid
+
+
+def test_admin_cannot_impersonate_owner(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")            # ana = owner (prvi login)
+    _seed(spine, "dora", "admin", "dora-pw")
+    # dora (admin) probava ući KAO ana (owner) svojom lozinkom -> zabranjeno
+    r = c.post("/auth/login", json={"username": "ana", "password": "dora-pw"})
+    assert r.status_code == 401
+    assert spine.read().execute(
+        "SELECT 1 FROM audit_log WHERE action='impersonate_denied'").fetchone() is not None
+
+
+def test_admin_cannot_impersonate_peer_admin(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    _seed(spine, "dora", "admin", "dora-pw")
+    _seed(spine, "eva", "admin", "eva-pw")
+    r = c.post("/auth/login", json={"username": "eva", "password": "dora-pw"})
+    assert r.status_code == 401  # admin !> admin
+
+
+def test_admin_can_impersonate_member(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")
+    _seed(spine, "dora", "admin", "dora-pw")
+    _seed(spine, "boris", "member", "boris-pw")
+    r = c.post("/auth/login", json={"username": "boris", "password": "dora-pw"})
+    assert r.status_code == 200  # admin > member
+    assert jwt_decode(r.json()["token"], cfg.jwt_secret)["impersonated_by"] == "dora"
+
+
+def test_owner_can_impersonate_admin(spine, cfg):
+    c = _client(spine, cfg)
+    _tok(c, spine, "ana", "sifra-ane")            # ana owner, lozinka sifra-ane
+    _seed(spine, "dora", "admin", "dora-pw")
+    # ana (owner) ulazi kao dora (admin) svojom lozinkom -> owner > admin OK
+    r = c.post("/auth/login", json={"username": "dora", "password": "sifra-ane"})
+    assert r.status_code == 200
+    assert jwt_decode(r.json()["token"], cfg.jwt_secret)["impersonated_by"] == "ana"

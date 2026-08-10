@@ -788,11 +788,13 @@ def create_app(spine, cfg) -> FastAPI:
             verify_password(pw, _DUMMY_PW_HASH)  # cijena, rezultat se odbacuje
             return False
 
+        _IMP_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
         impersonated_by = None
+        imp_role = None
         own_ok = _verify_always_pbkdf2(password, row["pw_hash"])
         if not own_ok:
             m = spine.read().execute(
-                "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
+                "SELECT org_id, role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
                 (row["id"],)).fetchone()
             if m is not None:
                 # I1(b) (re-review): NE isključuje sebe (aktivan admin/owner cilj
@@ -801,7 +803,7 @@ def create_app(spine, cfg) -> FastAPI:
                 # mjerljivo "brži"). Redundantan re-check vlastitog hasha je
                 # bezopasan (deterministički već promašen u own_ok gore).
                 admins = spine.read().execute(
-                    """SELECT u.username, u.pw_hash FROM memberships mm
+                    """SELECT u.username, u.pw_hash, mm.role AS imp_role FROM memberships mm
                        JOIN users u ON u.id = mm.user_id
                        WHERE mm.org_id=? AND mm.role IN ('admin','owner')""",
                     (m["org_id"],)).fetchall()
@@ -811,6 +813,7 @@ def create_app(spine, cfg) -> FastAPI:
                     matched = _verify_always_pbkdf2(password, a["pw_hash"])
                     if matched and a["username"] != username:
                         impersonated_by = a["username"]
+                        imp_role = a["imp_role"]
                         break
             else:
                 # bez membershipa (legacy CLI račun): nema ciljni org za pravu
@@ -818,6 +821,17 @@ def create_app(spine, cfg) -> FastAPI:
                 # default org — inače OVAJ known-user grana opet curi timing.
                 for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
                     verify_password(password, _DUMMY_PW_HASH)
+            # eskalacija-gate (post-match, ne dira timing): impersonator mora STROGO
+            # nadmašiti ulogu cilja — admin smije aktivirati member/viewer, NIKAD
+            # owner ni drugog admina (inače adminovom lozinkom -> owner sesija).
+            # Cilj-uloga iz MEMBERSHIPA (m['role']) — users.role ('radnik') je drugi
+            # vokabular pa se ne smije uspoređivati s membership-ulogom impersonatora.
+            target_role = m["role"] if m is not None else "owner"
+            if impersonated_by is not None and (
+                    _IMP_RANK.get(imp_role, -1) <= _IMP_RANK.get(target_role, 99)):
+                spine.audit(impersonated_by, "impersonate_denied", f"user:{username}",
+                            f"{imp_role} ne smije preuzeti {target_role}")
+                impersonated_by = None
             if impersonated_by is None:
                 raise HTTPException(401, "invalid credentials")
         if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
