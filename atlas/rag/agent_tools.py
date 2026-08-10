@@ -234,6 +234,21 @@ def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
     return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": sto}
 
 
+def _run_ucitaj_vjestinu(spine, cfg, actor, args) -> dict:
+    """Učitaj pune KORAKE jedne vještine (procedure ureda) na zahtjev. Progresivno
+    otkrivanje nad postojećim skills-registrom: agentu je unaprijed u promptu samo
+    katalog (ime+opis), pune korake povlači tek kad zatreba. Org-scoped."""
+    from atlas.knowledge import skills as skills_mod
+    ime = (args.get("ime") or "").strip().lower()
+    aktivne = [s for s in skills_mod.list_skills(spine, actor.org_id, status="active")]
+    match = next((s for s in aktivne if (s["name"] or "").strip().lower() == ime), None)
+    if match is None:
+        return {"greska": f"nepoznata vještina: {args.get('ime')!r}",
+                "dostupne": [s["name"] for s in aktivne]}
+    return {"ime": match["name"], "koraci": match["steps"],
+            "validacija": match.get("validation") or ""}
+
+
 def _run_povezanost(spine, cfg, actor, args) -> dict:
     """Graf povezanosti: entiteti iz upita -> povezani dokumenti -> sažetak. Read-only,
     vidljivost klijenata se poštuje (skriveni dokumenti se ne uključuju). Alat sam
@@ -453,6 +468,13 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object", "properties": {"upit": {"type": "string"}},
                 "required": ["upit"]},
         readonly=True, min_role="viewer", run=_run_povezanost,
+    ),
+    "ucitaj_vjestinu": Tool(
+        name="ucitaj_vjestinu",
+        description="Učitaj pune upute imenovane vještine (procedure ureda) kad je relevantna.",
+        schema={"type": "object", "properties": {"ime": {"type": "string"}},
+                "required": ["ime"]},
+        readonly=True, min_role="viewer", run=_run_ucitaj_vjestinu,
     ),
 }
 
