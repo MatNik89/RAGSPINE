@@ -204,6 +204,25 @@ def _run_pokreni_program(spine, cfg, actor, args) -> dict:
     return res
 
 
+def _run_porezni_rokovi(spine, cfg, actor, args) -> dict:
+    from atlas.business import kalendar
+    dana = int(args.get("dana", 14))
+    return {"rokovi": [dict(r) for r in kalendar.upcoming(spine, days=dana)]}
+
+
+def _run_kompletnost_klijenta(spine, cfg, actor, args) -> dict:
+    from atlas.business import checklist
+    row = _resolve_visible(spine, actor, args["klijent"])
+    return checklist.score_client(spine, row["id"])
+
+
+def _run_posalji_poruku_klijentu(spine, cfg, actor, args) -> dict:
+    from atlas.web import messaging
+    row = _resolve_visible(spine, actor, args["klijent"])
+    return messaging.send_to_client(spine, cfg, row["id"], args["naslov"], args["tekst"],
+                                    dry_run=False)
+
+
 def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
     from atlas.business import excel_export
     sto, period = args.get("sto"), args.get("period")
@@ -329,6 +348,28 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"radnik": {"type": "string"}, "program": {"type": "string"}},
                 "required": ["radnik", "program"]},
         readonly=False, min_role="admin", run=_run_pokreni_program,
+    ),
+    "porezni_rokovi": Tool(
+        name="porezni_rokovi",
+        description="Nadolazeći porezni rokovi (PDV, JOPPD...) u sljedećih N dana.",
+        schema={"type": "object", "properties": {"dana": {"type": "integer"}}, "required": []},
+        readonly=True, min_role="viewer", run=_run_porezni_rokovi,
+    ),
+    "kompletnost_klijenta": Tool(
+        name="kompletnost_klijenta",
+        description="Koliko je dosje klijenta kompletan (koji podaci/dokumenti fale).",
+        schema={"type": "object", "properties": {"klijent": {"type": "string"}},
+                "required": ["klijent"]},
+        readonly=True, min_role="viewer", run=_run_kompletnost_klijenta,
+    ),
+    "posalji_poruku_klijentu": Tool(
+        name="posalji_poruku_klijentu",
+        description="Pošalji poruku (mail/kanal) klijentu — samo uz njegov pristanak.",
+        schema={"type": "object",
+                "properties": {"klijent": {"type": "string"}, "naslov": {"type": "string"},
+                               "tekst": {"type": "string"}},
+                "required": ["klijent", "naslov", "tekst"]},
+        readonly=False, min_role="member", run=_run_posalji_poruku_klijentu,
     ),
     "izvezi_excel": Tool(
         name="izvezi_excel",

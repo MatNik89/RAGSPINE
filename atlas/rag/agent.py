@@ -53,6 +53,8 @@ def summarize_action(name: str, args: dict) -> str:
         return f"Naučit ću s web-stranice: {args.get('url', '')}."
     if name == "pokreni_program":
         return f"Pokrenut ću {args.get('program', '')} na stanici radnika {args.get('radnik', '')}."
+    if name == "posalji_poruku_klijentu":
+        return f"Poslat ću poruku klijentu {args.get('klijent', '')}: \"{args.get('naslov', '')}\"."
     return f"Izvršit ću akciju {name} s argumentima {args}."
 
 
