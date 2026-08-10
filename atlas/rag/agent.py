@@ -113,8 +113,10 @@ def _accumulate_sources(sources: list, name: str, tool_result: dict) -> None:
 
 
 def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
+    # pokaži SAMO alate koje uloga smije — model tako ne predloži zabranjeni alat
+    # pa lažno ne tvrdi da ga je izvršio (iskrenost umj. tihog pada; OpenWorker obrazac)
     tools = [{"name": t.name, "description": t.description, "schema": t.schema}
-              for t in agent_tools.TOOLS.values()]
+              for t in agent_tools.TOOLS.values() if agent_tools.allowed(actor, t)]
     messages = [{"role": "user", "content": query}]
     sources: list = []
     last_text = ""
