@@ -81,6 +81,10 @@ class PendingTokenBody(BaseModel):
     token: str
 
 
+class UredPravilaBody(BaseModel):
+    pravila: str = ""
+
+
 class ScheduledTaskBody(BaseModel):
     title: str = ""
     action_key: str
@@ -1211,6 +1215,22 @@ def create_app(spine, cfg) -> FastAPI:
             scheme = request.headers.get("x-forwarded-proto") or scheme
         if getattr(cfg, "https_only", False) and scheme != "https":
             raise HTTPException(400, "upis agenta samo preko https")
+
+    # --- Pravila ureda (owner tipka; uvijek u agent promptu) ---
+    # NAPOMENA: ured_pravila su u config_overrides (module=agent) koji je — kao SVE
+    # ostale postavke (model/napajanje/fleet) — instalacijski-globalne, ne po org.
+    # ATLAS je jedan ured; multi-tenant org-scoping config_overrides je pre-postojeći
+    # širi zahvat. _require_owner je isti gate kao napajanje/enrollment/scheduler.
+    @app.get("/ured-pravila")
+    def ured_pravila_get(actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)  # pravila su konfiguracija ureda -> owner (Codex)
+        return {"pravila": agent.get_ured_pravila(spine)}
+
+    @app.post("/ured-pravila")
+    def ured_pravila_set(body: UredPravilaBody, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        agent.set_ured_pravila(spine, body.pravila, user=actor.username)
+        return {"ok": True}
 
     # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
     @app.get("/zakazano")
