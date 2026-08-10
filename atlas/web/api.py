@@ -2443,10 +2443,14 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, "nedozvoljen kanal")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
+        from atlas.business import secretbox
+        # target nosi lozinku -> šifriraj u bazi (backup ne curi kredencijal);
+        # shema je već provjerena na plaintextu gore
+        stored_target = secretbox.encrypt(body.target, cfg) if body.target else body.target
         with spine.write() as c:
             c.execute(
                 "UPDATE clients SET messaging_consent=?, messaging_channel=?, messaging_target=? WHERE id=?",
-                (body.consent, body.channel, body.target, client_id),
+                (body.consent, body.channel, stored_target, client_id),
             )
         return {"client_id": client_id, "consent": body.consent}
 
