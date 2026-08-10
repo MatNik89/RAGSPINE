@@ -15,22 +15,29 @@ import secrets
 ACTIONS = ("run_program", "shutdown", "enable_wol", "status")
 
 
-def _master_signing_key(spine) -> str:
+def _master_signing_key(spine, cfg) -> str:
     """Per-instalacija MASTER ključ (tajna, ne izlazi iz servera). Atomičan
     get-or-create (INSERT OR IGNORE pa re-read) — dvije paralelne prve izdaje
     ne mogu dati različite ključeve (Codex nalaz)."""
+    from atlas.business import secretbox
     with spine.write() as c:
+        # master ključ se sprema ŠIFRIRAN (secretbox, ključ iz jwt_secreta u datoteci,
+        # ne u bazi) — ukradeni DB backup ne otkriva ključ za potpis naredbi (Codex nalaz)
         c.execute("INSERT OR IGNORE INTO config_overrides(module,key,value,updated_at) "
                   "VALUES('fleet','signing_key',?,datetime('now'))",
-                  (secrets.token_urlsafe(32),))
-    return spine.get_override("fleet", "signing_key", "")
+                  (secretbox.encrypt(secrets.token_urlsafe(32), cfg),))
+    raw = spine.get_override("fleet", "signing_key", "")
+    val = secretbox.decrypt(raw, cfg)  # fallback vraća stari plaintext zapis kakav jest
+    if raw and not raw.startswith("enc:"):  # migracija: stari plaintext -> šifriraj u mjestu
+        spine.set_override("fleet", "signing_key", secretbox.encrypt(val, cfg))
+    return val
 
 
-def device_sign_key(spine, device_id: int) -> str:
+def device_sign_key(spine, device_id: int, cfg) -> str:
     """PER-UREĐAJ ključ = HMAC(master, device_id). Kompromitacija jednog uređaja
     ne daje mogućnost potpisa za DRUGI (master nikad ne napušta server); opoziv
     je vezan uz uređaj (Codex nalaz: dijeljeni simetrični ključ = fleet-wide forge)."""
-    return hmac.new(_master_signing_key(spine).encode(), str(device_id).encode(),
+    return hmac.new(_master_signing_key(spine, cfg).encode(), str(device_id).encode(),
                     hashlib.sha256).hexdigest()
 
 
@@ -41,8 +48,8 @@ def _canon(device_id: int, cmd: dict) -> bytes:
                       sort_keys=True, separators=(",", ":")).encode()
 
 
-def sign_command(spine, device_id: int, cmd: dict) -> str:
-    return hmac.new(device_sign_key(spine, device_id).encode(),
+def sign_command(spine, device_id: int, cmd: dict, cfg) -> str:
+    return hmac.new(device_sign_key(spine, device_id, cfg).encode(),
                     _canon(device_id, cmd), hashlib.sha256).hexdigest()
 
 
@@ -138,7 +145,7 @@ def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user
     name = (device_name or row["device_name"] or "Radna stanica").strip()
     dev = devices.add_device(spine, "radna-stanica", name, user=user)
     token = issue_token(spine, dev["id"])
-    signk = device_sign_key(spine, dev["id"])
+    signk = device_sign_key(spine, dev["id"], cfg)
     with spine.write() as c:
         c.execute("UPDATE agent_enrollments SET status='approved', device_id=?, "
                   "token_enc=?, signkey_enc=? WHERE id=? AND status='approving'",

@@ -29,7 +29,7 @@ def test_enroll_flow_business(spine, cfg):
     creds = fleet.poll_enrollment(spine, cfg, eid, secret)
     assert creds["status"] == "approved" and creds["device_id"] == did
     assert fleet.verify_token(spine, creds["token"]) == did  # token radi
-    assert creds["sign_key"] == fleet.device_sign_key(spine, did)  # ispravan sign_key
+    assert creds["sign_key"] == fleet.device_sign_key(spine, did, cfg)  # ispravan sign_key
     # jednokratno: drugi poll više ne daje kredencijale
     with pytest.raises(ValueError):
         fleet.poll_enrollment(spine, cfg, eid, secret)
