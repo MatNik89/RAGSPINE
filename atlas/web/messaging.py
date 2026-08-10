@@ -4,6 +4,7 @@
 # ops/digest.py: nikad ne logirati str(e) ni apprise URL (mogu sadržavati
 # kredencijale), samo type(e).__name__.
 import logging
+import socket
 
 from atlas.business import expiry
 from atlas.core import optional, security
@@ -23,6 +24,46 @@ ALLOWED_TARGET_SCHEMES = {
 def _target_scheme_ok(target: str) -> bool:
     scheme = target.split("://", 1)[0].strip().lower() if "://" in target else ""
     return scheme in ALLOWED_TARGET_SCHEMES
+
+
+def _mail_host_ok(target: str) -> bool:
+    """Za mailto/mailtos: efektivni SMTP host ne smije biti interni/loopback.
+    apprise dopušta 'mailto://user:pass@host?smtp=<drugi-host>' — bez ovoga bi
+    autenticirani korisnik preusmjerio slanje na 169.254/127.0.0.1/LAN (SSRF;
+    Codex nalaz). Ostale sheme imaju fiksni provider-host pa ne trebaju ovo."""
+    import urllib.parse
+
+    from atlas.core.net import _is_blocked_addr
+
+    scheme = target.split("://", 1)[0].strip().lower()
+    if scheme not in ("mailto", "mailtos"):
+        return True
+    p = urllib.parse.urlparse(target)
+    # apprise 'smtp=' nadjačava host. Parser differential (Codex): ključ je
+    # case-insensitive, a apprise uzima ZADNJI — pa skupljamo SVE 'smtp' vrijednosti
+    # (bilo koje velike/male) i ODBIJAMO na duplikat ili ako BILO KOJA (uklj. netloc)
+    # razrješava na interni host. ';' se tretira kao razdvajač uz '&'.
+    smtp_vals = []
+    for k, vals in urllib.parse.parse_qs(p.query, separator="&").items():
+        if k.strip().lower() == "smtp":
+            smtp_vals.extend(vals)
+    for k, vals in urllib.parse.parse_qs(p.query, separator=";").items():
+        if k.strip().lower() == "smtp":
+            smtp_vals.extend(vals)
+    smtp_vals = [s.strip() for s in smtp_vals if s.strip()]
+    if len(set(smtp_vals)) > 1:
+        return False  # višeznačan smtp= -> ne riskiraj (apprise last-wins)
+    hosts = [h for h in (smtp_vals or []) + [p.hostname or ""] if h]
+    if not hosts:
+        return False  # nema odredišta -> ne šalji
+    for host in hosts:
+        try:
+            addrs = socket.getaddrinfo(host, None)
+        except OSError:
+            return False
+        if any(_is_blocked_addr(sa[4][0]) for sa in addrs):
+            return False
+    return True
 
 
 def render_message(subject: str, body: str) -> str:
@@ -55,8 +96,8 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
         return {"status": status, "client_id": client_id}
 
     if not _target_scheme_ok(target):
-        # SSRF guard: an arbitrary http(s)/json target would let apprise make
-        # its own outbound connection to any host, bypassing cfg.egress_allow.
+        # SSRF guard: proizvoljna shema (http/json) natjerala bi apprise na izlaz
+        # prema bilo kojem hostu (zaobilazi egress). Shema je jeftina, bez mreže.
         status = "skipped_bad_target"
         logger.warning("messaging target rejected: disallowed scheme (client %s)", client_id)
         _log(spine, client_id, channel, status, subject, body)
@@ -64,6 +105,13 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
 
     if dry_run:
         status = "dry_run"
+        _log(spine, client_id, channel, status, subject, body)
+        return {"status": status, "client_id": client_id}
+
+    if not _mail_host_ok(target):  # tek pred stvarno slanje (razrješava host -> mreža)
+        # mailto sa smtp=interni-host / loopback = SSRF (Codex fold)
+        status = "skipped_bad_target"
+        logger.warning("messaging target rejected: internal SMTP host (client %s)", client_id)
         _log(spine, client_id, channel, status, subject, body)
         return {"status": status, "client_id": client_id}
 

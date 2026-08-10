@@ -234,9 +234,35 @@ def test_send_to_client_bad_target_scheme_skipped(spine, cfg):
 
 
 def test_send_to_client_mailto_target_passes_scheme_check(spine, cfg):
-    cid = _client(spine, "Mailto slanje", "83", consent=1, target="mailto://a@b.com")
+    # IP host (javni) -> getaddrinfo bez DNS-a, prolazi i shema i host-provjera
+    cid = _client(spine, "Mailto slanje", "83", consent=1, target="mailto://a:b@8.8.8.8")
     result = messaging.send_to_client(spine, cfg, cid, "Podsjetnik", "tekst")
-    assert result["status"] == "dry_run"  # still dry_run by default, but not blocked by scheme gate
+    assert result["status"] == "dry_run"  # dry_run default, nije blokiran
+
+
+def test_send_to_client_mailto_internal_host_ssrf_blocked(spine, cfg):
+    # mailto na loopback -> SSRF, mora se odbiti prije slanja (Codex fold)
+    cid = _client(spine, "SSRF", "84", consent=1, target="mailto://a:b@127.0.0.1")
+    result = messaging.send_to_client(spine, cfg, cid, "P", "t", dry_run=False)
+    assert result["status"] == "skipped_bad_target"
+
+
+def test_send_to_client_mailto_smtp_param_ssrf_blocked(spine, cfg):
+    # smtp= override na interni host -> odbij (apprise bi inače spojio tamo)
+    cid = _client(spine, "SSRF2", "85", consent=1,
+                  target="mailto://a:b@8.8.8.8?smtp=169.254.169.254")
+    result = messaging.send_to_client(spine, cfg, cid, "P", "t", dry_run=False)
+    assert result["status"] == "skipped_bad_target"
+
+
+def test_mail_host_ok_parser_differentials():
+    # Codex: case-insensitive ključ + duplikat + ';' razdvajač ne smiju zaobići
+    ok = messaging._mail_host_ok
+    assert ok("mailto://a:b@8.8.8.8") is True
+    assert ok("mailto://a:b@8.8.8.8?SMTP=127.0.0.1") is False        # velika slova
+    assert ok("mailto://a:b@8.8.8.8?smtp=8.8.4.4&smtp=127.0.0.1") is False  # duplikat
+    assert ok("mailto://a:b@8.8.8.8?smtp=127.0.0.1;x=1") is False    # ';' razdvajač
+    assert ok("mailto://a:b@127.0.0.1") is False                     # netloc loopback
 
 
 def test_api_messaging_log(spine, cfg):

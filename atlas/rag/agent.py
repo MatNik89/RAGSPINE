@@ -25,6 +25,47 @@ dok korisnik ne potvrdi. Poštuj ovlasti radnika: ako alat javi da radnja nije
 dopuštena ili klijent ne postoji, prenesi to korisniku umjesto nagađanja."""
 
 
+PENDING_TTL_MIN = 10
+
+
+def stash_pending(spine, actor, pending: dict) -> str:
+    """Spremi predloženi WRITE kao jednokratni vlasnički token (LLM izlaz je
+    nepovjerljiv: ništa se ne izvrši dok korisnik ne potvrdi). Vrati token."""
+    import secrets
+    token = secrets.token_urlsafe(24)
+    with spine.write() as c:
+        c.execute("INSERT INTO agent_pending(token,user_id,org_id,tool,args_json) "
+                  "VALUES(?,?,?,?,?)",
+                  (token, actor.user_id, actor.org_id, pending["tool"],
+                   json.dumps(pending["args"], ensure_ascii=False)))
+    return token
+
+
+def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MIN) -> dict:
+    """Atomično potroši vlasnički, ne-istekli pending token i IZVRŠI alat. Ovlasti
+    se PONOVO provjere u run_tool sad (ne na vrijeme prijedloga). Dijeljeno između
+    web /chat/potvrdi i Telegram inline potvrde. Vrati {tool, result}. Diže
+    ValueError ('nepostoji'/domenska greška iz run_tool)."""
+    with spine.write() as c:
+        row = c.execute(
+            "SELECT tool, args_json FROM agent_pending "
+            "WHERE token=? AND user_id=? AND org_id=? AND created_at > datetime('now', ?)",
+            (token, actor.user_id, actor.org_id, f"-{ttl_min} minutes")).fetchone()
+        if row is None:
+            raise ValueError("prijedlog ne postoji ili je istekao")
+        c.execute("DELETE FROM agent_pending WHERE token=?", (token,))
+        tool, args_json = row["tool"], row["args_json"]
+    result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
+    spine.audit(actor.username, "agent_execute", tool, args_json)
+    return {"tool": tool, "result": result}
+
+
+def cancel_pending(spine, token: str, actor) -> None:
+    with spine.write() as c:
+        c.execute("DELETE FROM agent_pending WHERE token=? AND user_id=? AND org_id=?",
+                  (token, actor.user_id, actor.org_id))
+
+
 def summarize_action(name: str, args: dict) -> str:
     """Ljudski hrvatski sažetak predložene write akcije, za potvrdu."""
     if name == "dodaj_klijenta":

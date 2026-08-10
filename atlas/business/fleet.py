@@ -15,22 +15,33 @@ import secrets
 ACTIONS = ("run_program", "shutdown", "enable_wol", "status")
 
 
-def _master_signing_key(spine) -> str:
+def _master_signing_key(spine, cfg) -> str:
     """Per-instalacija MASTER ključ (tajna, ne izlazi iz servera). Atomičan
     get-or-create (INSERT OR IGNORE pa re-read) — dvije paralelne prve izdaje
     ne mogu dati različite ključeve (Codex nalaz)."""
+    from atlas.business import secretbox
     with spine.write() as c:
+        # master ključ se sprema ŠIFRIRAN (secretbox, ključ iz jwt_secreta u datoteci,
+        # ne u bazi) — ukradeni DB backup ne otkriva ključ za potpis naredbi (Codex nalaz)
         c.execute("INSERT OR IGNORE INTO config_overrides(module,key,value,updated_at) "
                   "VALUES('fleet','signing_key',?,datetime('now'))",
-                  (secrets.token_urlsafe(32),))
-    return spine.get_override("fleet", "signing_key", "")
+                  (secretbox.encrypt(secrets.token_urlsafe(32), cfg),))
+    raw = spine.get_override("fleet", "signing_key", "")
+    val = secretbox.decrypt(raw, cfg)  # fallback vraća stari plaintext zapis kakav jest
+    if raw.startswith("enc:") and not val:
+        # dešifriranje palo (npr. razišao se jwt_secret) -> NE potpisuj praznim ključem
+        # (inače tih fleet-lockout / lažno valjani potpisi); fail-closed (Codex nalaz)
+        raise RuntimeError("master signing_key se ne može dešifrirati (provjeri jwt_secret)")
+    if raw and not raw.startswith("enc:"):  # migracija: stari plaintext -> šifriraj u mjestu
+        spine.set_override("fleet", "signing_key", secretbox.encrypt(val, cfg))
+    return val
 
 
-def device_sign_key(spine, device_id: int) -> str:
+def device_sign_key(spine, device_id: int, cfg) -> str:
     """PER-UREĐAJ ključ = HMAC(master, device_id). Kompromitacija jednog uređaja
     ne daje mogućnost potpisa za DRUGI (master nikad ne napušta server); opoziv
     je vezan uz uređaj (Codex nalaz: dijeljeni simetrični ključ = fleet-wide forge)."""
-    return hmac.new(_master_signing_key(spine).encode(), str(device_id).encode(),
+    return hmac.new(_master_signing_key(spine, cfg).encode(), str(device_id).encode(),
                     hashlib.sha256).hexdigest()
 
 
@@ -41,8 +52,8 @@ def _canon(device_id: int, cmd: dict) -> bytes:
                       sort_keys=True, separators=(",", ":")).encode()
 
 
-def sign_command(spine, device_id: int, cmd: dict) -> str:
-    return hmac.new(device_sign_key(spine, device_id).encode(),
+def sign_command(spine, device_id: int, cmd: dict, cfg) -> str:
+    return hmac.new(device_sign_key(spine, device_id, cfg).encode(),
                     _canon(device_id, cmd), hashlib.sha256).hexdigest()
 
 
@@ -138,7 +149,7 @@ def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user
     name = (device_name or row["device_name"] or "Radna stanica").strip()
     dev = devices.add_device(spine, "radna-stanica", name, user=user)
     token = issue_token(spine, dev["id"])
-    signk = device_sign_key(spine, dev["id"])
+    signk = device_sign_key(spine, dev["id"], cfg)
     with spine.write() as c:
         c.execute("UPDATE agent_enrollments SET status='approved', device_id=?, "
                   "token_enc=?, signkey_enc=? WHERE id=? AND status='approving'",
@@ -346,6 +357,40 @@ def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str)
     cid = enqueue(spine, workers[0]["id"], "run_program", program_key=progs[0]["key"])
     return {"ok": True, "command_id": cid,
             "message": f"Pokrećem {progs[0]['label']} na {workers[0]['name']}."}
+
+
+def device_activity(spine, device_id: int, limit: int = 30) -> list[dict]:
+    """Nedavna aktivnost jednog uređaja (naredbe: akcija/status/rezultat/vrijeme).
+    Za 'uživo' prikaz vlasnik samo poll-a ovaj endpoint (ponytail: bez wss-a —
+    long-poll/poll pokriva potrebu; upgrade path = SSE/wss ako zatreba niža
+    latencija). Read-only."""
+    rows = spine.read().execute(
+        "SELECT id, action, program_key, status, result, created_at, done_at "
+        "FROM agent_commands WHERE device_id=? ORDER BY id DESC LIMIT ?",
+        (device_id, max(1, min(int(limit), 200)))).fetchall()
+    return [dict(r) for r in rows]
+
+
+def wake_worker(spine, worker_name: str, actor_role: str, sender=None) -> dict:
+    """Probudi radnikovu stanicu (Wake-on-LAN). Admin+ (kao pokretanje programa).
+    Jednoznačno razriješi radnika s MAC-om, pošalji magic paket. `sender`
+    injektabilan za testove."""
+    from atlas.business import devices as devices_mod
+    from atlas.core import wol
+
+    if _ROLE_RANK.get(actor_role, -1) < _ROLE_RANK["admin"]:
+        return {"ok": False, "message": "Za buđenje stanice potrebna je admin uloga."}
+    workers = [d for d in devices_mod.list_devices(spine)
+               if d.get("worker_username") and _worker_matches(d["worker_username"], worker_name)
+               and d.get("mac")]
+    if len(workers) != 1:
+        which = "nijedna (ili nema MAC)" if not workers else "više njih"
+        return {"ok": False, "message": f"Ne mogu jednoznačno odrediti stanicu za {worker_name!r} ({which})."}
+    woken = wol.wake_fleet(workers, sender=sender)
+    if not woken:
+        return {"ok": False, "message": f"Neispravan MAC za {workers[0]['name']}."}
+    spine.audit("agent", "wake_worker", f"device:{workers[0]['id']}", workers[0]["name"])
+    return {"ok": True, "message": f"Šaljem signal za buđenje: {workers[0]['name']}."}
 
 
 _FLOTA_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)

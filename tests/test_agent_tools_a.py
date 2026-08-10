@@ -54,7 +54,8 @@ def test_posalji_poruku_consent_gated(spine, cfg):
     # s pristankom -> prolazi scheme (dry_run bi bio, ali tool šalje stvarno; bez apprise = failed/sent)
     with spine.write() as c:
         c.execute("UPDATE clients SET messaging_consent=1, messaging_channel='mail', "
-                  "messaging_target=? WHERE id=?", (secretbox.encrypt("mailto://a@b.com", cfg), cid))
+                  "messaging_target=? WHERE id=?",
+                  (secretbox.encrypt("mailto://a:b@8.8.8.8", cfg), cid))  # javni IP host (bez DNS-a)
     out2 = agent_tools.run_tool(spine, cfg, _actor(spine, "member"), "posalji_poruku_klijentu",
                                 {"klijent": "Pekara", "naslov": "Bok", "tekst": "Test"})
     assert out2["status"] in ("sent", "failed")  # ovisi o apprise; scheme prošao
