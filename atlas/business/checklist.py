@@ -39,12 +39,14 @@ def score_client(spine, client_id: int) -> dict:
     else:
         missing.append("izvod/dokument")
 
-    return {"score": score, "missing": missing, "client": row["name"]}
+    return {"client_id": client_id, "score": score, "missing": missing, "client": row["name"]}
 
 
-def worst_first(spine) -> list[dict]:
+def worst_first(spine, visible=None) -> list[dict]:
     ids = [r["id"] for r in spine.read().execute(
         "SELECT id FROM clients WHERE active=1").fetchall()]
+    if visible is not None:  # restringiran radnik ne vidi tuđe klijente
+        ids = [i for i in ids if i in visible]
     scored = [score_client(spine, cid) for cid in ids]
     scored.sort(key=lambda r: r["score"])
     return scored

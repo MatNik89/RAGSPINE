@@ -1276,9 +1276,10 @@ def create_app(spine, cfg) -> FastAPI:
         return [dataclasses.asdict(c) for c in watchlist.check_all(spine, cfg)]
 
     @app.get("/watchlist/sources")
-    def watchlist_list_sources(user: str = Depends(require_user_web)):
+    def watchlist_list_sources(actor: Actor = Depends(require_actor_web)):
         rows = spine.read().execute("SELECT * FROM watch_sources").fetchall()
-        return [dict(r) for r in rows]
+        # klijentski-vezan izvor ne curi restringiranom radniku (zakon/RSS = NULL ostaje)
+        return _visible_rows(actor, [dict(r) for r in rows])
 
     @app.post("/watchlist/sources")
     def watchlist_add_source(body: WatchSourceBody, user: str = Depends(require_user_web)):
@@ -2246,8 +2247,9 @@ def create_app(spine, cfg) -> FastAPI:
         return result
 
     @app.get("/checklist")
-    def checklist_worst(user: str = Depends(require_user_web)):
-        return checklist.worst_first(spine)
+    def checklist_worst(actor: Actor = Depends(require_actor_web)):
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        return checklist.worst_first(spine, visible=vis)
 
     @app.get("/notes")
     def notes_search(client_id: int | None = None, q: str | None = None,
@@ -2480,8 +2482,9 @@ def create_app(spine, cfg) -> FastAPI:
         return {"client_id": client_id, "pausal_eur": body.pausal_eur}
 
     @app.get("/dashboard")
-    def dashboard_stats(user: str = Depends(require_user_web)):
-        return dashboard.stats(spine)
+    def dashboard_stats(actor: Actor = Depends(require_actor_web)):
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        return dashboard.stats(spine, visible=vis)
 
     @app.get("/models/recommend")
     def models_recommend(user: str = Depends(require_user_web)):
@@ -2493,9 +2496,10 @@ def create_app(spine, cfg) -> FastAPI:
                          media_type="text/plain")
 
     @app.get("/monthly")
-    def monthly_overview(period: str | None = None, user: str = Depends(require_user_web)):
+    def monthly_overview(period: str | None = None, actor: Actor = Depends(require_actor_web)):
         period = period or date.today().strftime("%Y-%m")
-        ov = monthly.overview(spine, period)
+        vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+        ov = monthly.overview(spine, period, visible=vis)
         return {**ov, "text": monthly.format_overview(ov)}
 
     @app.post("/knjizenje")
@@ -2675,12 +2679,20 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, str(e)) from e
         return {"id": sop_id, "status": "rejected"}
 
+    def _guard_sop(actor: Actor, sop_id: int) -> None:
+        # SOP vezan uz klijenta ne smije se otkriti restringiranom radniku
+        r = spine.read().execute("SELECT client_id FROM sop_pages WHERE id=?", (sop_id,)).fetchone()
+        if r is not None and r["client_id"] is not None:
+            _guard_client(actor, r["client_id"])
+
     @app.get("/sop/pending")
-    def sop_pending(user: str = Depends(require_user_web)):
-        return {"items": sop_mod.list_pending(spine), "summary": sop_mod.editorial_summary(spine)}
+    def sop_pending(actor: Actor = Depends(require_actor_web)):
+        return {"items": _visible_rows(actor, sop_mod.list_pending(spine)),
+                "summary": sop_mod.editorial_summary(spine)}
 
     @app.get("/sop/{sop_id}")
-    def sop_get(sop_id: int, user: str = Depends(require_user_web)):
+    def sop_get(sop_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_sop(actor, sop_id)
         row = sop_mod.get_sop(spine, sop_id)
         if row is None:
             raise HTTPException(404, "nepoznat SOP")
@@ -2702,11 +2714,15 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": result["id"], "ocr_text_len": len(result["ocr_text"])}
 
     @app.get("/sop/{sop_id}/images")
-    def sop_image_list(sop_id: int, user: str = Depends(require_user_web)):
+    def sop_image_list(sop_id: int, actor: Actor = Depends(require_actor_web)):
+        _guard_sop(actor, sop_id)
         return sop_images.list_images(spine, sop_id)
 
     @app.get("/sop/image/{image_id}")
-    def sop_image_get(image_id: int, user: str = Depends(require_user_web)):
+    def sop_image_get(image_id: int, actor: Actor = Depends(require_actor_web)):
+        r = spine.read().execute("SELECT sop_id FROM sop_images WHERE id=?", (image_id,)).fetchone()
+        if r is not None:
+            _guard_sop(actor, r["sop_id"])  # slika naslijedi vidljivost svog SOP-a/klijenta
         result = sop_images.image_bytes(spine, cfg, image_id)
         if result is None:
             raise HTTPException(404, "slika nije pronađena")
