@@ -94,6 +94,17 @@ def _connect(host: str, email_addr: str, password: str, factory=None):
     return imap
 
 
+def _deadletter(spine, connector_id: int, uid: int, reason: str) -> None:
+    """Zapiši neuspjeli mail u obavijesti (dead-letter) — ne nestaje tiho. Dedupe
+    po (kind, body) unutar 7 dana kao ostali _notify_once pozivi."""
+    body = f"Mail (konektor {connector_id}, uid {uid}) nije obrađen: {reason}"
+    with spine.write() as c:
+        seen = c.execute("SELECT 1 FROM notifications WHERE kind='mail_deadletter' "
+                         "AND body=? AND at >= datetime('now','-7 days')", (body,)).fetchone()
+        if seen is None:
+            c.execute("INSERT INTO notifications(kind, body) VALUES('mail_deadletter', ?)", (body,))
+
+
 def fetch_new(spine, cfg, connector_id: int, org_id=None, imap_factory=None) -> dict:
     """Povuci nove mailove za konfigurirani IMAP konektor i ingestaj ih u dokumente.
     Vrati {ingested, last_uid}. Idempotentno: dvaput zaredom ne duplira (UID watermark)."""
@@ -139,6 +150,7 @@ def fetch_new(spine, cfg, connector_id: int, org_id=None, imap_factory=None) -> 
             try:
                 typ, mdata = imap.uid("FETCH", str(uid), "(RFC822)")
                 if typ != "OK" or not mdata or not mdata[0]:
+                    _deadletter(spine, connector_id, uid, f"FETCH {typ}")
                     break  # ne preskači UID trajno — stani, idući prolaz pokuša opet
                 msg = email.message_from_bytes(mdata[0][1])
                 subject = _decode(msg.get("Subject", "")) or "(bez naslova)"
@@ -154,7 +166,10 @@ def fetch_new(spine, cfg, connector_id: int, org_id=None, imap_factory=None) -> 
                             source_url=f"imap:{connector_id}:{uidv}:{uid}", org_id=org_id)
                 ingested += 1
                 watermark = uid  # tek sad je uid uspješno obrađen (neprekinuti prefiks)
-            except Exception:
+            except Exception as e:
+                # dead-letter: neispravna poruka ne nestaje tiho -> owner je vidi u
+                # obavijestima (postojeći notifications red, ne novi store)
+                _deadletter(spine, connector_id, uid, type(e).__name__)
                 break  # jedna neispravna poruka NE truje cijeli konektor; stani ovdje
     finally:
         try:
