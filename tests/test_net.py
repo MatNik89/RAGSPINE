@@ -34,3 +34,27 @@ def test_redirect_blocked(cfg):
     finally:
         server.shutdown()
         t.join(timeout=2)
+
+
+def test_resolve_pin_rejects_any_blocked_answer(monkeypatch):
+    # ime s javnim I privatnim A-zapisom -> odbij (anti DNS-rebind mix)
+    from atlas.core import net
+    monkeypatch.setattr(net.socket, "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("8.8.8.8", 443)),
+                                         (2, 1, 6, "", ("127.0.0.1", 443))])
+    with pytest.raises(EgressBlocked):
+        net._resolve_pin("evil.example", 443, check=True)
+
+
+def test_resolve_pin_returns_first_public(monkeypatch):
+    from atlas.core import net
+    monkeypatch.setattr(net.socket, "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("8.8.8.8", 443)),
+                                         (2, 1, 6, "", ("1.1.1.1", 443))])
+    assert net._resolve_pin("ok.example", 443, check=True) == "8.8.8.8"
+
+
+def test_resolve_pin_literal_blocked():
+    from atlas.core import net
+    with pytest.raises(EgressBlocked):
+        net._resolve_pin("169.254.169.254", 80, check=True)  # cloud-metadata

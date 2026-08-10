@@ -177,3 +177,22 @@ def test_max_steps_stops_infinite_loop(spine, cfg):
 
 def test_system_prompt_mentions_confirmation_rule():
     assert "potvrd" in agent.SYSTEM_PROMPT.lower()
+
+
+def test_tools_filtered_by_role(spine, cfg):
+    # viewer vidi SAMO readonly alate; write alati mu se ne nude (ne blefira uspjeh)
+    fake = FakeLLM([_result(text="ok")])
+    viewer = _actor(spine, "v", role="viewer", user_id=2)
+    agent.run_agent(spine, cfg, "pitanje", viewer, fake)
+    names = {t["name"] for t in fake.calls[0]["tools"]}
+    assert "pretrazi" in names                      # readonly -> vidljiv
+    assert "dodaj_klijenta" not in names            # write member+ -> skriven
+    assert "probudi_racunalo" not in names          # admin -> skriven
+
+
+def test_tools_include_writes_for_member(spine, cfg):
+    fake = FakeLLM([_result(text="ok")])
+    member = _actor(spine, "m", role="member", user_id=3)
+    agent.run_agent(spine, cfg, "pitanje", member, fake)
+    names = {t["name"] for t in fake.calls[0]["tools"]}
+    assert "dodaj_klijenta" in names and "pretrazi" in names
