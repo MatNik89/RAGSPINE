@@ -6,7 +6,7 @@ klijenata podijeljena na "Za predati" i "Predano". Kvačica na klijentu ga
 označi poslanim i spusti u sekciju ispod (i obratno)."""
 import html
 
-from atlas.web.templates_ui import page_shell, script_json
+from atlas.web.templates_ui import page_shell, print_button, script_json
 
 _MJ_NOM = ("Siječanj", "Veljača", "Ožujak", "Travanj", "Svibanj", "Lipanj", "Srpanj",
            "Kolovoz", "Rujan", "Listopad", "Studeni", "Prosinac")
@@ -127,7 +127,8 @@ def render_obveze(kind: str, period: str, rows: list[dict],
     default_subject = f"Podsjetnik: {kind} obveza nije predana"
     default_body = f"Poštovani, molimo dostavite dokumentaciju za {kind} ({period}) što prije."
 
-    body = f"""<h1>Obveze</h1>
+    body = f"""<div style="display:flex;justify-content:space-between;align-items:center;gap:1rem">
+  <h1>Obveze</h1>{print_button(f"Ispis — {kind_e} {_month_label(period)}")}</div>
 <div class="obveze-tabs" role="tablist" aria-label="Vrsta obveze">{tabs_html}</div>
 <div class="month-nav">
   <a class="step" href="/obveze?kind={kind_e}&period={html.escape(prev_m)}" aria-label="Prethodni mjesec">&#8249;</a>
