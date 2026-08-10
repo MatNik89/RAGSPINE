@@ -152,11 +152,13 @@ function DeviceToken(Param: string): string;  begin Result := Trim(ServerPage.Va
 function SignKey(Param: string): string;      begin Result := Trim(ServerPage.Values[2]); end;
 
 [Run]
-; --- Glavno računalo: instaliraj ATLAS servis + cert + otvori dashboard ---
+; --- Glavno računalo: instaliraj ATLAS servis (koji vrti `atlas serve`) + cert ---
 Filename: "{app}\python\python.exe"; Parameters: "-m atlas servis install"; \
   Check: IsServer; Flags: runhidden; StatusMsg: "Instaliram ATLAS servis..."
-Filename: "{app}\python\python.exe"; Parameters: "-m atlas serve --open"; \
-  Check: IsServer; Description: "Pokreni ATLAS i otvori nadzornu ploču"; \
+; otvori nadzornu ploču — `atlas open` sam izračuna ispravan URL (host/port + cert),
+; NE `serve` (to bi pokrenulo drugi server pored servisa)
+Filename: "{app}\python\python.exe"; Parameters: "-m atlas open"; \
+  Check: IsServer; Description: "Otvori ATLAS nadzornu ploču"; \
   Flags: postinstall nowait skipifsilent
 
 ; --- Radna stanica: postavi agenta prema serveru (server-first već provjeren) ---
