@@ -213,7 +213,8 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
 
         summary = summarize_action(name, args)
         return {"text": summary, "sources": sources,
-                "pending": {"tool": name, "args": args, "summary": summary}}
+                "pending": {"tool": name, "args": args, "summary": summary,
+                            "risk": agent_tools.risk(name)}}
 
     return {"text": last_text or "Nisam uspio dovršiti zahtjev unutar dopuštenog broja koraka.",
             "sources": sources, "pending": None}

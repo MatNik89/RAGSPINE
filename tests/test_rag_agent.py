@@ -109,6 +109,7 @@ def test_write_tool_builds_pending_and_stops_loop(spine, cfg):
         "tool": "dodaj_klijenta",
         "args": {"naziv": "Nova Firma", "oib": VALID_OIB},
         "summary": out["pending"]["summary"],
+        "risk": "med",  # pisanje u bazu ureda = srednji tier
     }
     assert "Nova Firma" in out["pending"]["summary"]
     assert out["text"] == out["pending"]["summary"]

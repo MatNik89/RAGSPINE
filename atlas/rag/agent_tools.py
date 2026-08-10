@@ -526,6 +526,23 @@ def validate(name: str, args: dict) -> tuple[bool, str | None]:
     return True, None
 
 
+# Vanjska nuspojava izvan ureda (poruka klijentu, pokretanje/buđenje radne
+# stanice, dohvat s weba) — najviši tier. Ostali write pišu u bazu ureda (med),
+# readonly samo čitaju (low). OpenWorker "tier consequential actions" obrazac.
+_HIGH_RISK = frozenset({"posalji_poruku_klijentu", "pokreni_program",
+                        "probudi_racunalo", "nauci_izvor"})
+
+
+def risk(name: str) -> str:
+    """Rizik alata: 'low' (čita), 'med' (piše u bazu ureda), 'high' (vanjska
+    nuspojava). Nepoznat alat -> 'high' (fail-safe: neklasificirano = najoprezniji
+    tier). Čista funkcija — UI/potvrda prikažu jačinu, high traži jaču potvrdu."""
+    tool = TOOLS.get(name)
+    if tool is None or name in _HIGH_RISK:
+        return "high"
+    return "low" if tool.readonly else "med"
+
+
 def allowed(actor, tool) -> bool:
     """min_role gate. `tool` može biti Tool ili ime alata."""
     if isinstance(tool, str):
