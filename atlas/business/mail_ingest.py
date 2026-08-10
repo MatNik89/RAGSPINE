@@ -96,7 +96,10 @@ def _connect(host: str, email_addr: str, password: str, factory=None):
 
 def _deadletter(spine, connector_id: int, uid: int, reason: str) -> None:
     """Zapiši neuspjeli mail u obavijesti (dead-letter) — ne nestaje tiho. Dedupe
-    po (kind, body) unutar 7 dana kao ostali _notify_once pozivi."""
+    po (kind, body) unutar 7 dana kao ostali _notify_once pozivi. Body sadrži SAMO
+    konektor/uid/tip-greške (NE subject/sadržaj maila) -> nema injection/XSS.
+    ponytail: notifications su org-agnostične u ATLAS-u (kao folder_connected i sve
+    ostale vrste) — multi-tenant org-scoping je pre-postojeći, širi refaktor."""
     body = f"Mail (konektor {connector_id}, uid {uid}) nije obrađen: {reason}"
     with spine.write() as c:
         seen = c.execute("SELECT 1 FROM notifications WHERE kind='mail_deadletter' "

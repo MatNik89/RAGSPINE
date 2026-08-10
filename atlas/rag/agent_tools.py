@@ -240,7 +240,9 @@ def _run_ucitaj_vjestinu(spine, cfg, actor, args) -> dict:
     katalog (ime+opis), pune korake povlači tek kad zatreba. Org-scoped."""
     from atlas.knowledge import skills as skills_mod
     ime = (args.get("ime") or "").strip().lower()
-    aktivne = [s for s in skills_mod.list_skills(spine, actor.org_id, status="active")]
+    # readable: samo vještine koje OVAJ actor smije vidjeti (private/team gate; Codex)
+    aktivne = skills_mod.readable(
+        skills_mod.list_skills(spine, actor.org_id, status="active"), actor)
     match = next((s for s in aktivne if (s["name"] or "").strip().lower() == ime), None)
     if match is None:
         return {"greska": f"nepoznata vještina: {args.get('ime')!r}",

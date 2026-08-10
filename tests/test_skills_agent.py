@@ -47,3 +47,24 @@ def test_no_skills_empty_catalog(spine, cfg):
 
 def test_tool_registered_readonly():
     assert agent_tools.TOOLS["ucitaj_vjestinu"].readonly is True
+
+
+def test_private_skill_of_other_user_hidden(spine, cfg):
+    # tuđa PRIVATE vještina ne smije procuriti u katalog ni kroz alat (Codex)
+    org = tenancy.default_org_id(spine)
+    sid = skills_mod.create_skill(spine, org, "TajnaTuđa", "tajni opis", trigger="",
+                                  steps="tajni koraci", owner_user_id=999, visibility="private")
+    skills_mod.set_status(spine, sid, "active")
+    me = _actor(spine, uid=7)  # nisam vlasnik
+    assert "TajnaTuđa" not in agent._skills_catalog_text(spine, me)
+    out = agent_tools.run_tool(spine, cfg, me, "ucitaj_vjestinu", {"ime": "tajnatuđa"})
+    assert "greska" in out  # ne učitava tuđu private vještinu
+
+
+def test_catalog_caps_field_length(spine, cfg):
+    org = tenancy.default_org_id(spine)
+    sid = skills_mod.create_skill(spine, org, "X" * 200, "D" * 500, trigger="",
+                                  steps="s", owner_user_id=1, visibility="org")
+    skills_mod.set_status(spine, sid, "active")
+    txt = agent._skills_catalog_text(spine, _actor(spine))
+    assert "X" * 61 not in txt and "D" * 201 not in txt  # omeđeno

@@ -117,9 +117,12 @@ def _skills_catalog_text(spine, actor) -> str:
     otkrivanje: pune korake agent povlači alatom ucitaj_vjestinu kad zatrebaju."""
     from atlas.knowledge import skills as skills_mod
     rows = skills_mod.list_skills(spine, actor.org_id, status="active")
+    rows = skills_mod.readable(rows, actor)  # vidljivost: private/team ne cure drugima (Codex)
     if not rows:
         return ""
-    lines = "\n".join(f"- {s['name']}: {s['description']}" for s in rows if s.get("name"))
+    # cap duljine: tuđe ime/opis ide u prompt -> omeđi injection/kontekst (Codex)
+    lines = "\n".join(f"- {(s['name'] or '')[:60]}: {(s['description'] or '')[:200]}"
+                      for s in rows if s.get("name"))
     if not lines:
         return ""
     return ("\n\nDostupne vještine (procedure ureda) — pozovi alat "
