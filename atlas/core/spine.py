@@ -112,6 +112,10 @@ CREATE TABLE IF NOT EXISTS agent_enrollments(id TEXT PRIMARY KEY, secret_hash TE
   device_name TEXT, status TEXT DEFAULT 'pending', device_id INTEGER,
   token_enc TEXT, signkey_enc TEXT, source TEXT DEFAULT '',
   created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS scheduled_tasks(id INTEGER PRIMARY KEY, org_id INTEGER,
+  title TEXT, action_key TEXT, params_json TEXT DEFAULT '{}',
+  day_of_month INTEGER, hour INTEGER DEFAULT 8, enabled INTEGER DEFAULT 1,
+  last_run_date TEXT, created_by TEXT, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS hash_chain(id INTEGER PRIMARY KEY, event TEXT, prev_hash TEXT,
   hash TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY, question TEXT, answer TEXT,

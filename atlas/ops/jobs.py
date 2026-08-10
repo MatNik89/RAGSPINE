@@ -138,9 +138,18 @@ def power_job(spine, cfg) -> None:
         logger.warning("power_job: gašenje redom izvršeno: %s", out["executed"])
 
 
+def scheduled_tasks_job(spine, cfg) -> None:
+    """Fira dospjele owner-zakazane zadatke (allowlist akcija, dedupe po danu)."""
+    from atlas.business import scheduler_tasks
+    fired = scheduler_tasks.run_due(spine, cfg)
+    if fired:
+        logger.info("scheduled_tasks_job: %d firano", len(fired))
+
+
 def register_defaults(sched) -> None:
     sched.register(Job(name="watchlist", fn=watchlist_job, interval_s=3600))
     sched.register(Job(name="imap", fn=imap_job, interval_s=300))
+    sched.register(Job(name="scheduled_tasks", fn=scheduled_tasks_job, interval_s=300))
     sched.register(Job(name="deadlines", fn=deadlines_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
