@@ -41,10 +41,18 @@ def watchlist_job(spine, cfg) -> None:
 
 
 def imap_job(spine, cfg) -> None:
-    if not cfg.imap_host:
-        return
-    result = imap_fetch.fetch_new(spine, cfg)
-    logger.info("imap_job: %s", result)
+    if cfg.imap_host:  # naslijeđeni env-konfiguriran IMAP
+        logger.info("imap_job(env): %s", imap_fetch.fetch_new(spine, cfg))
+    # konektor-bazirani IMAP (UI, per-org, tajne šifrirane) — svaki izoliran
+    from atlas.business import mail_ingest
+    rows = spine.read().execute(
+        "SELECT id, org_id FROM connectors WHERE kind='mail_imap' AND status='connected'").fetchall()
+    for r in rows:
+        try:
+            logger.info("imap_job(c%s): %s", r["id"],
+                        mail_ingest.fetch_new(spine, cfg, r["id"], org_id=r["org_id"]))
+        except Exception as e:
+            logger.warning("imap_job connector %s: %s", r["id"], type(e).__name__)
 
 
 def deadlines_job(spine, cfg) -> None:

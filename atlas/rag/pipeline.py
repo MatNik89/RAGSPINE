@@ -163,9 +163,11 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
             # side-effect lane mora znati TKO pita (role-gate u handleru:
             # arhitektura=admin, learn=member+)
             res = handler(spine, cfg, query, llm, actor=actor)
-        elif lane in ("sql", "graph"):
-            # SQL agregati + graf traversal moraju biti scopeani na vidljive
-            # klijente restringiranog radnika (inače cure brojevi/dokumenti)
+        elif lane == "graph":
+            # graf traversal scopean na vidljive klijente I na org (kg_edges globalni)
+            res = handler(spine, cfg, query, llm, visible=visible, org_id=org_id)
+        elif lane == "sql":
+            # SQL agregati scopeani na vidljive klijente restringiranog radnika
             res = handler(spine, cfg, query, llm, visible=visible)
         else:
             res = handler(spine, cfg, query, llm)

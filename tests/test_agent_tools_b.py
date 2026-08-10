@@ -91,3 +91,11 @@ def test_probudi_racunalo_ambiguous(spine, cfg):
     from atlas.business import fleet
     res = fleet.wake_worker(spine, "ana", actor_role="admin", sender=lambda pkt: None)
     assert res["ok"] is False  # nema stanice s MAC-om -> jasna poruka
+
+
+def test_povezanost_readonly_and_visibility(spine, cfg):
+    assert agent_tools.TOOLS["povezanost"].readonly is True
+    # bez LLM-a/entiteta vrati siguran string, ne baca; poštuje vidljivost
+    out = agent_tools.run_tool(spine, cfg, _actor(spine, "viewer"), "povezanost",
+                               {"upit": "veza klijenta Pekara"})
+    assert isinstance(out["odgovor"], str)

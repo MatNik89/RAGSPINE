@@ -254,6 +254,17 @@ form.stack{display:flex;flex-direction:column;gap:.5rem;max-width:520px}
 @media (prefers-reduced-motion: reduce){
   *{animation:none!important;transition:none!important}
 }
+/* ---- ispis: sakrij navigaciju/gumbe, čist crno-na-bijelo, štedi papir ---- */
+@media print{
+  .sidebar,.no-print,#toasts,.theme-toggle,.logout,.month-nav a.step{display:none!important}
+  .layout{display:block}
+  .container,.card{max-width:none;margin:0;padding:0;box-shadow:none;border:none;background:#fff;color:#000}
+  body{background:#fff;color:#000}
+  a[href]{color:#000;text-decoration:none}
+  table,.ledger{page-break-inside:auto}
+  tr,.oblig-row{page-break-inside:avoid}
+  @page{margin:1.4cm}
+}
 """
 
 _NAV = [
@@ -329,6 +340,13 @@ function toast(text, kind) {           // kind: 'ok' | 'warn' | 'bad'
 }
 window.toast = toast;
 """
+
+
+def print_button(label: str = "Ispis") -> str:
+    """Gumb za ispis (skriven u samom ispisu preko .no-print). Ispis koristi
+    @media print pravila iz CSS_TOKENS — bez zasebnih ruta/šablona (ponytail)."""
+    return (f'<button type="button" class="btn no-print" onclick="window.print()">'
+            f'\U0001F5A8 {html.escape(label)}</button>')
 
 
 def page_shell(title: str, body_html: str, active: str = "") -> str:
@@ -1496,7 +1514,8 @@ loadKarton();
 def klijent_page(client_id: int) -> str:
     body = f"""<div id="karton-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
 <div class="card">
-  <h1 id="k-name">Učitavanje…</h1>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem">
+    <h1 id="k-name">Učitavanje…</h1>{print_button("Ispis dosjea")}</div>
   <div class="meta" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.3rem">
     <span id="k-oib" style="font-family:var(--font-mono)"></span>
     <span id="k-pdv" class="chip"></span>

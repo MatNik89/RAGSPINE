@@ -234,6 +234,22 @@ def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
     return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": sto}
 
 
+def _run_povezanost(spine, cfg, actor, args) -> dict:
+    """Graf povezanosti: entiteti iz upita -> povezani dokumenti -> sažetak. Read-only,
+    vidljivost klijenata se poštuje (skriveni dokumenti se ne uključuju). Alat sam
+    gradi LLM klijenta (registar alata ne prima llm); bez LLM-a vrati listu entiteta."""
+    from atlas.business import model_settings
+    from atlas.core.llm import LLMClient
+    from atlas.rag import graphrag
+    visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+    try:
+        llm = LLMClient(model_settings.apply(spine, cfg))
+    except Exception:
+        llm = None
+    return {"odgovor": graphrag.handle(spine, cfg, args["upit"], llm, visible=visible,
+                                       org_id=actor.org_id)}
+
+
 def _run_rokovi_isteka(spine, cfg, actor, args) -> dict:
     """Nadolazeći rokovi ISTEKA (osobne, dozvole, certifikati) — filtrirano po
     vidljivosti klijenata (skriveni klijent ne curi)."""
@@ -430,6 +446,13 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object", "properties": {"radnik": {"type": "string"}},
                 "required": ["radnik"]},
         readonly=False, min_role="admin", run=_run_probudi_racunalo,
+    ),
+    "povezanost": Tool(
+        name="povezanost",
+        description="Poveznice kroz graf: kako su klijenti/dokumenti/entiteti povezani.",
+        schema={"type": "object", "properties": {"upit": {"type": "string"}},
+                "required": ["upit"]},
+        readonly=True, min_role="viewer", run=_run_povezanost,
     ),
 }
 
