@@ -66,9 +66,43 @@ def _cmd_serve(args) -> int:
             print(f"⚠ Cert/key ne postoje ({cert}, {key}) — pokrećem bez HTTPS-a.")
     if ssl_kw:
         _start_bootstrap(cert, host, port)
+    _start_mdns(port)  # objavi _atlas._tcp da radne stanice nađu server bez ručnog upisa
     uvicorn.run(create_app(spine, cfg), host=host, port=port,
                 server_header=False, **ssl_kw)
     return 0
+
+
+def _local_ip() -> str:  # pragma: no cover — mreža
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def _start_mdns(port: int) -> None:  # pragma: no cover — mreža/thread
+    import threading
+
+    import atlas
+    from atlas.core import mdns
+    stop = threading.Event()
+    threading.Thread(target=mdns.serve_responder,
+                     args=(_local_ip(), port, atlas.__version__, stop),
+                     daemon=True, name="atlas-mdns").start()
+
+
+def _cmd_discover(args) -> int:
+    """Nađi ATLAS servere na mreži (radna stanica prije upisa adrese)."""
+    import json as _json
+
+    from atlas.core import mdns
+    servers = mdns.discover_atlas(timeout=args.timeout)
+    print(_json.dumps(servers, ensure_ascii=False))
+    return 0 if servers else 1
 
 
 def _dashboard_url(spine, cfg) -> str:
@@ -422,6 +456,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _open = sub.add_parser("open")
     _open.add_argument("--print-only", action="store_true", help="samo ispiši URL, ne otvaraj")
     _open.set_defaults(func=_cmd_open)
+    _disc = sub.add_parser("discover")
+    _disc.add_argument("--timeout", type=float, default=2.0)
+    _disc.set_defaults(func=_cmd_discover)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("trust").set_defaults(func=_cmd_trust)

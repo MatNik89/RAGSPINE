@@ -46,6 +46,136 @@ def sign_command(spine, device_id: int, cmd: dict) -> str:
                     _canon(device_id, cmd), hashlib.sha256).hexdigest()
 
 
+# --- samo-prijava + odobri (agent se javi kao "na čekanju", owner odobri) ----
+
+_ENROLL_TTL_MIN = 30       # zahtjev istekne ako ga owner ne odobri
+_ENROLL_MAX_PENDING = 50   # globalni cap protiv DB-DoS-a javnim endpointom
+_ENROLL_MAX_PER_SRC = 5    # po-izvoru (IP) cap: jedan host ne puni cijeli red
+_ENROLL_WINDOW_MIN = 15    # koliko dugo ostaje otvoreno "sparivanje" nakon što owner klikne
+_EXPIRED = f"datetime('now', '-{_ENROLL_TTL_MIN} minutes')"
+
+
+def open_enrollment(spine, user: str, minutes: int = _ENROLL_WINDOW_MIN) -> str:
+    """Owner otvori prozor za sparivanje. BEZ otvorenog prozora javni /agent/enroll
+    je zatvoren (fail-closed) — neautentificirani LAN host ne može ni puniti red ni
+    provocirati DoS dok owner ne kaže 'sad dodajem računalo' (Codex nalaz)."""
+    m = max(1, min(int(minutes), 120))
+    until = spine.read().execute(
+        "SELECT datetime('now', ?) AS t", (f"+{m} minutes",)).fetchone()["t"]
+    spine.set_override("enroll", "open_until", until)
+    spine.audit(user, "agent_enroll_open", "enroll", f"{m} min")
+    return until
+
+
+def enrollment_open(spine) -> bool:
+    until = spine.get_override("enroll", "open_until", None)
+    if not until:
+        return False
+    return spine.read().execute(
+        "SELECT (datetime('now') < ?) AS ok", (until,)).fetchone()["ok"] == 1
+
+
+def enroll_request(spine, device_name: str, source: str = "") -> tuple[str, str]:
+    """Agent traži upis. Vrati (enroll_id, secret) — agent čuva secret i njime
+    kasnije preuzme kredencijale nakon što owner odobri. NIŠTA se ne izda dok
+    owner ne klikne Odobri."""
+    if not enrollment_open(spine):
+        raise ValueError("sparivanje nije otvoreno — zamolite vlasnika da otvori upis")
+    src = (source or "")[:64]
+    enroll_id = secrets.token_urlsafe(12)
+    secret = secrets.token_urlsafe(24)
+    with spine.write() as c:
+        # cleanup: makni preuzete i ISTEKLE PENDING (istek vrijedi SAMO za pending —
+        # inače bi javni endpoint obrisao approved-neuzet red i ostavio siroti
+        # uređaj/token; Codex nalaz)
+        c.execute(f"DELETE FROM agent_enrollments WHERE status='consumed' "
+                  f"OR (status='pending' AND created_at < {_EXPIRED})")
+        # per-source cap: jedan LAN host ne može sam ispuniti globalni red i tako
+        # blokirati legitimno sparivanje unutar prozora (Codex #5)
+        if src:
+            per = c.execute("SELECT COUNT(*) AS n FROM agent_enrollments "
+                            "WHERE status='pending' AND source=?", (src,)).fetchone()["n"]
+            if per >= _ENROLL_MAX_PER_SRC:
+                raise ValueError("previše zahtjeva s ovog računala — pokušajte kasnije")
+        n = c.execute("SELECT COUNT(*) AS n FROM agent_enrollments WHERE status='pending'").fetchone()["n"]
+        if n >= _ENROLL_MAX_PENDING:
+            raise ValueError("previše zahtjeva na čekanju — pokušajte kasnije")
+        c.execute("INSERT INTO agent_enrollments(id, secret_hash, device_name, status, source) "
+                  "VALUES(?,?,?,'pending',?)",
+                  (enroll_id, _digest(secret), (device_name or "Radna stanica").strip()[:80], src))
+    return enroll_id, secret
+
+
+def list_pending_enrollments(spine, limit: int = 100) -> list[dict]:
+    return [dict(r) for r in spine.read().execute(
+        f"SELECT id, device_name, created_at FROM agent_enrollments "
+        f"WHERE status='pending' AND created_at >= {_EXPIRED} "
+        f"ORDER BY created_at LIMIT ?", (limit,)).fetchall()]
+
+
+def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user: str) -> int:
+    """Owner odobri: kreira uređaj, izda token + sign_key, spremi ih ŠIFRIRANO
+    uz enrollment (agent ih preuzme jednom). Vrati device_id."""
+    from atlas.business import devices, secretbox
+    # 1) atomično preuzmi red pending -> approving. Uvjetni UPDATE + rowcount==1
+    #    znači da SAMO jedan istovremeni approve prođe (nema TOCTOU dvostrukog
+    #    izdavanja), i istekli pending se odbija ovdje (Codex nalaz).
+    with spine.write() as c:
+        row = c.execute("SELECT device_name FROM agent_enrollments WHERE id=?",
+                        (enroll_id,)).fetchone()
+        if row is None:
+            raise ValueError("nepoznat zahtjev za upis")
+        expired = c.execute(
+            f"SELECT 1 FROM agent_enrollments WHERE id=? AND status='pending' "
+            f"AND created_at < {_EXPIRED}", (enroll_id,)).fetchone()
+        if expired is not None:
+            raise ValueError("zahtjev za upis je istekao")
+        claim = c.execute("UPDATE agent_enrollments SET status='approving' "
+                          "WHERE id=? AND status='pending'", (enroll_id,))
+        if claim.rowcount != 1:
+            raise ValueError("zahtjev je već obrađen")
+    # 2) sada jedinstveni vlasnik reda -> kreiraj uređaj + kredencijale, pa finaliziraj
+    name = (device_name or row["device_name"] or "Radna stanica").strip()
+    dev = devices.add_device(spine, "radna-stanica", name, user=user)
+    token = issue_token(spine, dev["id"])
+    signk = device_sign_key(spine, dev["id"])
+    with spine.write() as c:
+        c.execute("UPDATE agent_enrollments SET status='approved', device_id=?, "
+                  "token_enc=?, signkey_enc=? WHERE id=? AND status='approving'",
+                  (dev["id"], secretbox.encrypt(token, cfg), secretbox.encrypt(signk, cfg), enroll_id))
+    spine.audit(user, "agent_enroll_approve", f"device:{dev['id']}", name)
+    return dev["id"]
+
+
+def poll_enrollment(spine, cfg, enroll_id: str, secret: str) -> dict:
+    """Agent poll: {status:'pending'} dok owner ne odobri; kad odobri vrati
+    token+sign_key JEDNOM (pa označi consumed). Kriv secret/nepoznat -> greška."""
+    from atlas.business import secretbox
+    row = spine.read().execute(
+        "SELECT secret_hash, status, device_id, token_enc, signkey_enc "
+        "FROM agent_enrollments WHERE id=?", (enroll_id,)).fetchone()
+    if row is None or not secrets.compare_digest(_digest(secret or ""), row["secret_hash"] or ""):
+        raise ValueError("nevažeći zahtjev za upis")
+    if row["status"] in ("pending", "approving"):  # 'approving' = owner upravo izdaje
+        if row["status"] == "pending":
+            exp = spine.read().execute(
+                f"SELECT 1 FROM agent_enrollments WHERE id=? AND created_at < {_EXPIRED}",
+                (enroll_id,)).fetchone()
+            if exp is not None:
+                raise ValueError("zahtjev za upis je istekao")
+        return {"status": "pending"}
+    if row["status"] != "approved":
+        raise ValueError("kredencijali su već preuzeti")
+    with spine.write() as c:  # jednokratno: approved -> consumed
+        cur = c.execute("UPDATE agent_enrollments SET status='consumed' "
+                        "WHERE id=? AND status='approved'", (enroll_id,))
+        if cur.rowcount != 1:
+            raise ValueError("kredencijali su već preuzeti")
+    return {"status": "approved", "device_id": row["device_id"],
+            "token": secretbox.decrypt(row["token_enc"], cfg),
+            "sign_key": secretbox.decrypt(row["signkey_enc"], cfg)}
+
+
 def _digest(secret: str) -> str:
     # Tajna je nasumičnih 256 bita -> PBKDF2 (spor, anti-bruteforce) NIJE potreban
     # i stvara CPU-DoS amplifikaciju po pollu; SHA-256 + constant-time usporedba

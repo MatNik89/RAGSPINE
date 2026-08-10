@@ -111,6 +111,14 @@ class ProgramBody(BaseModel):
     label: str = ""
 
 
+class EnrollBody(BaseModel):
+    name: str | None = None
+
+
+class ApproveBody(BaseModel):
+    device_name: str | None = None
+
+
 class ObligationFieldBody(BaseModel):
     label: str
     type: str = "text"
@@ -1199,6 +1207,65 @@ def create_app(spine, cfg) -> FastAPI:
         spine.audit("agent", "agent_result", f"device:{did}",
                     f"cmd:{body.id}:{'ok' if body.ok else 'fail'}")
         return {"ok": True}
+
+    # --- samo-prijava agenta (bez ručnog tokena): javi se -> owner odobri -> preuzmi ---
+    def _require_tls_enroll(request: Request) -> None:
+        # enrollment nosi tajnu/kredencijale -> ne preko cleartext http-a kad je
+        # https obavezan (MITM na LAN-u bi ukrao secret; Codex nalaz). X-Forwarded-Proto
+        # vjerujemo SAMO kad je iza konfiguriranog proxyja — inače bi ga bilo tko slao
+        # da zaobiđe provjeru (Codex nalaz).
+        scheme = request.url.scheme
+        # trust_proxy uključiti SAMO kad je izravan pristup backendu izvana blokiran
+        # (proxy jedini put unutra) — inače bilo tko šalje X-Forwarded-Proto (Codex #2)
+        if getattr(cfg, "trust_proxy", False):
+            scheme = request.headers.get("x-forwarded-proto") or scheme
+        if getattr(cfg, "https_only", False) and scheme != "https":
+            raise HTTPException(400, "upis agenta samo preko https")
+
+    @app.post("/uredjaji/enrollments/open")
+    def uredjaj_enroll_open(actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)  # sparivanje otvara SAMO vlasnik (fail-closed po defaultu)
+        until = fleet.open_enrollment(spine, actor.username)
+        return {"open_until": until}
+
+    @app.post("/agent/enroll")
+    def agent_enroll(body: EnrollBody, request: Request):
+        _require_tls_enroll(request)
+        ip = request.client.host if request.client else "?"
+        if not limiter.allow(f"enroll:{ip}", limit=10, window_s=60.0):
+            raise HTTPException(429, "previše zahtjeva za upis — pričekajte")
+        try:
+            enroll_id, secret = fleet.enroll_request(spine, body.name or "", source=ip)
+        except ValueError as e:
+            # zatvoreno sparivanje -> 403 (fail-closed); cap na čekanju -> 429
+            code = 403 if "sparivanje" in str(e) else 429
+            raise HTTPException(code, str(e)) from e
+        return {"enroll_id": enroll_id, "secret": secret}
+
+    @app.get("/agent/enroll/{enroll_id}")
+    def agent_enroll_poll(enroll_id: str, request: Request):
+        _require_tls_enroll(request)
+        secret = request.headers.get("X-Enroll-Secret", "")
+        try:
+            return fleet.poll_enrollment(spine, cfg, enroll_id, secret)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+    @app.get("/uredjaji/enrollments")
+    def uredjaj_enrollments(actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        return fleet.list_pending_enrollments(spine)
+
+    @app.post("/uredjaji/enrollments/{enroll_id}/approve")
+    def uredjaj_enroll_approve(enroll_id: str, body: ApproveBody,
+                               actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)
+        try:
+            device_id = fleet.approve_enrollment(spine, cfg, enroll_id, body.device_name,
+                                                 actor.username)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        return {"device_id": device_id}
 
     @app.post("/uredjaji/{device_id}/token")
     def uredjaj_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
