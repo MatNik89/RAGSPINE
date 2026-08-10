@@ -1216,6 +1216,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/zakazano")
     def zakazano_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
+        _require_owner(actor)  # zadaci nose poruke/rasporede -> samo vlasnik (Codex)
         return {"zadaci": scheduler_tasks.list_tasks(spine, actor.org_id),
                 "akcije": scheduler_tasks.action_labels()}
 

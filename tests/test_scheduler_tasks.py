@@ -99,3 +99,37 @@ def test_endpoints_owner_only(spine, cfg):
     lst = c.get("/zakazano", headers=ho).json()
     assert lst["zadaci"][0]["action_key"] == "kampanja_obveza"
     assert any(a["key"] == "kampanja_obveza" for a in lst["akcije"])
+
+
+def test_day_clamps_to_month_end(spine, cfg, monkeypatch):
+    # zadatak na 31. mora firati zadnji dan veljače (28.), ne "nikad"
+    st.create_task(spine, _org(spine), "kraj mj", "kampanja_obveza", {"kind": "PDV"}, 31, 8)
+    monkeypatch.setattr("atlas.web.messaging.send_to_filter", lambda *a, **k: {})
+    assert st.run_due(spine, cfg, now=datetime(2026, 2, 28, 9, 0))  # 28. veljače = zadnji
+    # a ne fira 27.
+    st.set_enabled(spine, st.list_tasks(spine, _org(spine))[0]["id"], _org(spine), True)
+
+
+def test_atomic_claim_prevents_double_fire(spine, cfg, monkeypatch):
+    st.create_task(spine, _org(spine), "PDV", "kampanja_obveza", {"kind": "PDV"}, None, 8)
+    calls = []
+    monkeypatch.setattr("atlas.web.messaging.send_to_filter",
+                        lambda *a, **k: calls.append(1) or {})
+    now = datetime(2026, 8, 15, 9, 0)
+    st.run_due(spine, cfg, now=now)
+    st.run_due(spine, cfg, now=now)  # isti dan, drugi poll
+    assert len(calls) == 1  # claim spriječio dvostruko
+
+
+def test_get_zakazano_owner_only(spine, cfg):
+    from fastapi.testclient import TestClient
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
+    from tests.conftest import complete_setup
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw"); complete_setup(spine)
+    add_user(spine, "m1", "pw")
+    tm = c.post("/auth/login", json={"username": "m1", "password": "pw"}).json()["token"]
+    tenancy.add_member(spine, tenancy.default_org_id(spine),
+                       spine.read().execute("SELECT id FROM users WHERE username='m1'").fetchone()["id"], "member")
+    assert c.get("/zakazano", headers={"Authorization": f"Bearer {tm}"}).status_code == 403
