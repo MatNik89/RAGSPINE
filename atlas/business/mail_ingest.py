@@ -1,7 +1,15 @@
 """Ingest ulazne e-pošte (IMAP) u dokumente da je AI može čitati/pretraživati.
 stdlib (imaplib+email) — bez novih ovisnosti. Povlači SAMO nove poruke (UID >
-last_uid iz imap_state), dedup po UID-u, veže na klijenta po e-mailu pošiljatelja
-ako se poklopi. `imap_factory` injektabilan za testove (bez mreže)."""
+last_uid, vezano uz UIDVALIDITY), dedup po UID-u, veže na klijenta po e-mailu
+pošiljatelja ako je JEDNOZNAČNO (From je lažljiv — vidi _client_for_sender).
+`imap_factory` injektabilan za testove (bez mreže).
+
+REZIDUAL (dokumentirano, follow-up): (a) sadržaj maila je NEPOVJERLJIV ulaz — završi
+u RAG-u i može doći do LLM-a kao tool-result (prompt-injection). Ublaženo: agent
+NE izvršava write bez potvrde (propose->confirm) + composer označava izvor kao
+podatak; puna izolacija (untrust/quarantine + delimitirani tool-result) je veći
+zahvat. (b) DNS-rebind TOCTOU na _guard_host (razriješi jednom, IMAP4_SSL opet) —
+ublaženo hostname-verifikacijom TLS-a; pinning IP-a je upgrade path."""
 import email
 import imaplib
 from email.header import decode_header, make_header
@@ -45,11 +53,18 @@ def _sender_email(msg) -> str:
 
 
 def _client_for_sender(spine, sender: str, org_id=None):
+    # From je LAŽLJIV (nema autentikacije) — vežemo na klijenta samo kao POMOĆ, i to
+    # scopeano na org i JEDNOZNAČNO (>1 poklapanja = ne veži, ide u opći inbox).
     if not sender:
         return None
-    row = spine.read().execute(
-        "SELECT id FROM clients WHERE lower(email)=?", (sender,)).fetchone()
-    return row["id"] if row else None
+    if org_id is None:
+        rows = spine.read().execute(
+            "SELECT id FROM clients WHERE lower(email)=?", (sender,)).fetchall()
+    else:
+        rows = spine.read().execute(
+            "SELECT id FROM clients WHERE lower(email)=? AND (org_id=? OR org_id IS NULL)",
+            (sender, org_id)).fetchall()
+    return rows[0]["id"] if len(rows) == 1 else None
 
 
 def _guard_host(host: str) -> None:
@@ -68,8 +83,13 @@ def _guard_host(host: str) -> None:
 
 def _connect(host: str, email_addr: str, password: str, factory=None):
     if factory is None:  # samo za stvarne mrežne spojeve (test injektira factory)
+        import ssl
         _guard_host(host)
-    imap = (factory or imaplib.IMAP4_SSL)(host)
+        # provjeri certifikat + hostname (default konteksta) — inače LAN/DNS MITM
+        # krade lozinku sandučića (Codex HIGH: goli IMAP4_SSL nije autentificiran)
+        imap = imaplib.IMAP4_SSL(host, ssl_context=ssl.create_default_context())
+    else:
+        imap = factory(host)
     imap.login(email_addr, password)
     return imap
 
@@ -87,43 +107,64 @@ def fetch_new(spine, cfg, connector_id: int, org_id=None, imap_factory=None) -> 
     host = (conf.get("host") or "").strip()
     email_addr = (conf.get("email") or "").strip()
     folder = (conf.get("folder") or "INBOX").strip() or "INBOX"
-    mbox_key = f"{connector_id}:{email_addr}:{folder}"
-
-    row = spine.read().execute(
-        "SELECT last_uid FROM imap_state WHERE mailbox=?", (mbox_key,)).fetchone()
-    last_uid = row["last_uid"] if row else 0
 
     imap = _connect(host, email_addr, conf.get("password", ""), factory=imap_factory)
-    ingested, max_uid = 0, last_uid
+    ingested, last_uid, watermark, mbox_key = 0, 0, 0, None
     try:
         imap.select(folder)
+        # UIDVALIDITY: ako se sandučić ponovno stvori/migrira, UID-ovi se resetiraju.
+        # Vežemo watermark uz UIDVALIDITY (dio ključa) -> reset = svjež ključ, ne
+        # tiho ignoriranje nove pošte pod zastarjelim watermarkom (Codex MED).
+        uidv = ""
+        try:
+            styp, sdata = imap.status(folder, "(UIDVALIDITY)")
+            if styp == "OK" and sdata and sdata[0]:
+                import re as _re
+                m = _re.search(rb"UIDVALIDITY\s+(\d+)", sdata[0])
+                uidv = m.group(1).decode() if m else ""
+        except Exception:
+            uidv = ""
+        mbox_key = f"{connector_id}:{email_addr}:{folder}:{uidv}"
+
+        row = spine.read().execute(
+            "SELECT last_uid FROM imap_state WHERE mailbox=?", (mbox_key,)).fetchone()
+        last_uid = row["last_uid"] if row else 0
+        watermark = last_uid  # napreduje SAMO kroz neprekinuti niz uspjeha (Codex MED)
+
         typ, data = imap.uid("SEARCH", None, f"UID {last_uid + 1}:*")
         if typ != "OK":
             return {"ingested": 0, "last_uid": last_uid}
-        uids = [int(u) for u in (data[0] or b"").split() if int(u) > last_uid]
-        for uid in sorted(uids)[:_MAX_BATCH]:
-            typ, mdata = imap.uid("FETCH", str(uid), "(RFC822)")
-            if typ != "OK" or not mdata or not mdata[0]:
-                continue
-            msg = email.message_from_bytes(mdata[0][1])
-            subject = _decode(msg.get("Subject", "")) or "(bez naslova)"
-            sender = _sender_email(msg)
-            body = (_plain_body(msg) or "")[:_MAX_BODY]
-            text = f"Od: {sender}\nNaslov: {subject}\n\n{body}"
-            ingest_text(spine, text, subject[:200], doc_type="email",
-                        client_id=_client_for_sender(spine, sender, org_id),
-                        source_url=f"imap:{connector_id}:{uid}", org_id=org_id)
-            ingested += 1
-            max_uid = max(max_uid, uid)
+        uids = sorted(int(u) for u in (data[0] or b"").split() if int(u) > last_uid)
+        for uid in uids[:_MAX_BATCH]:
+            try:
+                typ, mdata = imap.uid("FETCH", str(uid), "(RFC822)")
+                if typ != "OK" or not mdata or not mdata[0]:
+                    break  # ne preskači UID trajno — stani, idući prolaz pokuša opet
+                msg = email.message_from_bytes(mdata[0][1])
+                subject = _decode(msg.get("Subject", "")) or "(bez naslova)"
+                sender = _sender_email(msg)
+                msgid = _decode(msg.get("Message-ID", ""))
+                body = (_plain_body(msg) or "")[:_MAX_BODY]
+                # UID+Message-ID u tekst -> dvije poruke istog tijela ostaju
+                # ZASEBNI dokumenti (ingest dedupira po sha teksta; Codex MED)
+                text = (f"[imap:{connector_id}:{uidv}:{uid} {msgid}]\n"
+                        f"Od: {sender}\nNaslov: {subject}\n\n{body}")
+                ingest_text(spine, text, subject[:200], doc_type="email",
+                            client_id=_client_for_sender(spine, sender, org_id),
+                            source_url=f"imap:{connector_id}:{uidv}:{uid}", org_id=org_id)
+                ingested += 1
+                watermark = uid  # tek sad je uid uspješno obrađen (neprekinuti prefiks)
+            except Exception:
+                break  # jedna neispravna poruka NE truje cijeli konektor; stani ovdje
     finally:
         try:
             imap.logout()
         except Exception:
             pass
 
-    if max_uid > last_uid:
+    if mbox_key is not None and watermark > last_uid:
         with spine.write() as c:
             c.execute("INSERT INTO imap_state(mailbox, last_uid) VALUES(?,?) "
                       "ON CONFLICT(mailbox) DO UPDATE SET last_uid=excluded.last_uid",
-                      (mbox_key, max_uid))
-    return {"ingested": ingested, "last_uid": max_uid}
+                      (mbox_key, watermark))
+    return {"ingested": ingested, "last_uid": watermark}

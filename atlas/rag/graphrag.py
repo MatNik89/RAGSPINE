@@ -11,6 +11,9 @@ from atlas.core.security import oib_valid
 from atlas.rag import budget, composer
 from atlas.rag.retrieval import Hit
 
+_MAX_ENTS = 200  # gornja granica entiteta po dokumentu (klika = _MAX_ENTS^2/2 bridova)
+
+
 def _q_tokens(s: str) -> set:
     return {w for w in re.findall(r"\w+", (s or "").lower()) if len(w) >= 3}
 
@@ -60,7 +63,9 @@ def index_doc(spine, doc_id, text: str) -> None:
     INSERT OR IGNORE keyed on the (src,dst,rel,doc_id) primary key, so re-indexing
     the same doc never duplicates rows.
     """
-    ents = extract_entities(text)
+    # cap entiteta po dokumentu: klika je O(n^2) bridova — jedan golem mail/dokument
+    # s tisućama entiteta bi ubacio milijune redova u jednu transakciju (Codex HIGH)
+    ents = extract_entities(text)[:_MAX_ENTS]
     if len(ents) < 2:
         if ents:
             with spine.write() as c:
@@ -100,11 +105,11 @@ def traverse(spine, seeds: list[int], hops: int = 2) -> set[int]:
     return reached
 
 
-def handle(spine, cfg, query: str, llm, visible=None) -> str:
+def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
     """Graph lane: entities in query -> traverse -> connected docs -> compose+LLM.
     `visible` (skup vidljivih client_id ili None) skriva dokumente klijenata koje
-    restringirani radnik ne smije vidjeti (Codex: inače graf šalje chunkove
-    skrivenih dokumenata LLM-u i vraća njihove doc_id)."""
+    restringirani radnik ne smije vidjeti. `org_id` scopea na org — kg_edges su
+    globalni pa bi traversal inače dosegao dokumente DRUGE organizacije (Codex HIGH)."""
     conn = spine.read()
     ents = extract_entities(query)
     seeds = []
@@ -129,6 +134,17 @@ def handle(spine, cfg, query: str, llm, visible=None) -> str:
     }
     if not doc_ids:
         return "Nema povezanih dokumenata."
+
+    # org-scope: kg_edges su globalni preko orgova -> zadrži samo dokumente ove
+    # organizacije (ili dijeljene org_id IS NULL) prije bilo čega (Codex HIGH)
+    if org_id is not None:
+        dph = ",".join("?" * len(doc_ids))
+        doc_ids = {
+            r["id"] for r in conn.execute(
+                f"SELECT id FROM documents WHERE id IN ({dph}) "
+                f"AND (org_id=? OR org_id IS NULL)", (*doc_ids, org_id)).fetchall()}
+        if not doc_ids:
+            return "Nema povezanih dokumenata."
 
     # restringiran radnik: zadrži samo uredske (client_id IS NULL) i vidljive dok.
     if visible is not None:

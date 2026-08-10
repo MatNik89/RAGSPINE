@@ -6,8 +6,10 @@ class EgressBlocked(Exception):
 
 
 def _is_blocked_addr(addr: str) -> bool:
+    # blokiraj SVE ne-globalne raspone (uklj. CGNAT 100.64/10, koji nije "private"
+    # ali nije usmjeriv na internet) — is_global je najuža ispravna provjera za egress
     ip = ipaddress.ip_address(addr)
-    return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+    return (not ip.is_global) or ip.is_reserved
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

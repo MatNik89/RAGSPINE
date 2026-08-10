@@ -25,6 +25,7 @@ class FakeIMAP:
                       2: _raw("nepoznat@x.com", "Račun", "Tijelo računa.")}
     def login(self, u, p): return ("OK", [b""])
     def select(self, folder): return ("OK", [b"2"])
+    def status(self, folder, what): return ("OK", [b'"INBOX" (UIDVALIDITY 42)'])
     def uid(self, cmd, *args):
         if cmd == "SEARCH":
             rng = args[-1]  # "UID N:*"
@@ -71,6 +72,35 @@ def test_fetch_is_idempotent(spine, cfg):
     assert out2["ingested"] == 0
     n = spine.read().execute("SELECT COUNT(*) AS n FROM documents").fetchone()["n"]
     assert n == 2  # bez duplikata
+
+
+class FailFetchIMAP(FakeIMAP):
+    """FETCH pukne na UID 2 -> watermark ne smije preskočiti (contiguous prefix)."""
+    def uid(self, cmd, *args):
+        if cmd == "FETCH" and int(args[0]) == 2:
+            return ("NO", [b"fail"])
+        return super().uid(cmd, *args)
+
+
+def test_watermark_contiguous_on_fetch_failure(spine, cfg):
+    cid = _mk_connector(spine, cfg)
+    out = mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FailFetchIMAP)
+    assert out["last_uid"] == 1  # stao na 1, UID 2 nije trajno preskočen
+    # idući prolaz (bez greške) pokupi UID 2
+    out2 = mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FakeIMAP)
+    assert out2["ingested"] == 1 and out2["last_uid"] == 2
+
+
+def test_spoofed_from_ambiguous_not_linked(spine, cfg):
+    # dva klijenta s istim e-mailom -> lažljivi From ne veže jednoznačno -> NULL
+    with spine.write() as c:
+        c.execute("INSERT INTO clients(name, email) VALUES('A','ana@klijent.hr')")
+        c.execute("INSERT INTO clients(name, email) VALUES('B','ana@klijent.hr')")
+    cid = _mk_connector(spine, cfg)
+    mail_ingest.fetch_new(spine, cfg, cid, imap_factory=FakeIMAP)
+    d = spine.read().execute(
+        "SELECT client_id FROM documents WHERE title='Ponuda'").fetchone()
+    assert d["client_id"] is None
 
 
 def test_wrong_connector_kind_rejected(spine, cfg):

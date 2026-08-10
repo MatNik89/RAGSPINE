@@ -246,7 +246,8 @@ def _run_povezanost(spine, cfg, actor, args) -> dict:
         llm = LLMClient(model_settings.apply(spine, cfg))
     except Exception:
         llm = None
-    return {"odgovor": graphrag.handle(spine, cfg, args["upit"], llm, visible=visible)}
+    return {"odgovor": graphrag.handle(spine, cfg, args["upit"], llm, visible=visible,
+                                       org_id=actor.org_id)}
 
 
 def _run_rokovi_isteka(spine, cfg, actor, args) -> dict:
