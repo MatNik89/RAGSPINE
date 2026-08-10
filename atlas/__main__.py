@@ -71,6 +71,34 @@ def _cmd_serve(args) -> int:
     return 0
 
 
+def _dashboard_url(spine, cfg) -> str:
+    """URL ATLAS nadzorne ploče iz net-overridea + cert SAN. Installer ga otvara
+    nakon instalacije servisa (umjesto da nagađa port/host)."""
+    from atlas.ops import certs
+    host, port, cert, key = _net_overrides(spine, cfg)
+    scheme = "https" if (cert and key and Path(cert).exists()) else "http"
+    display = host if host not in ("0.0.0.0", "", "127.0.0.1") else "localhost"
+    if scheme == "https" and cert and Path(cert).exists():
+        display = certs.verified_display_host(cert, certs.friendly_names(), display)
+    return f"{scheme}://{display}:{port}"
+
+
+def _cmd_open(args) -> int:
+    """Otvori (ili ispiši) ATLAS nadzornu ploču u pregledniku."""
+    from atlas.config import get_config
+    from atlas.core.spine import init_spine
+    cfg = get_config()
+    url = _dashboard_url(init_spine(cfg.db_path), cfg)
+    print(url)
+    if not args.print_only:
+        import webbrowser
+        try:
+            webbrowser.open(url)
+        except Exception:
+            pass
+    return 0
+
+
 def _cmd_ingest(args) -> int:
     if not args.imap:
         return _stub(args)
@@ -391,6 +419,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("serve").set_defaults(func=_cmd_serve)
+    _open = sub.add_parser("open")
+    _open.add_argument("--print-only", action="store_true", help="samo ispiši URL, ne otvaraj")
+    _open.set_defaults(func=_cmd_open)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
     sub.add_parser("health").set_defaults(func=_cmd_health)
     sub.add_parser("trust").set_defaults(func=_cmd_trust)

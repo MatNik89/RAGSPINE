@@ -13,12 +13,16 @@ Installer to koristi za "server prvi" provjeru + monitoring. `__version__` u
 `atlas/__init__.py` usklađen s `pyproject.toml` (test to čuva).
 
 ## Build installera (na Windowsu — Pi ne kompajlira Inno)
-1. Sastavi payload:
-   - `windows/payload/python/` — embedded Python (ili venv) s instaliranim `atlas`
-     (`pip install .` ili wheel).
-   - `windows/payload/atlas/` — izvorni paket (ili preskoči ako je u venvu).
-2. Instaliraj **Inno Setup 6**, otvori `windows/atlas-setup.iss`, **Compile**.
-3. Izlaz: `atlas-setup.exe`.
+Jedna naredba (treba Python 3.11+ i Inno Setup 6 / `ISCC.exe` u PATH-u):
+```powershell
+powershell -ExecutionPolicy Bypass -File windows\build.ps1
+```
+Skripta: gradi `atlas` wheel → sastavi embedded Python + pip + `atlas[full]` u
+`windows\payload\python` → `ISCC windows\atlas-setup.iss`. Izlaz:
+`windows\Output\atlas-setup.exe`.
+
+Post-install server otvara nadzornu ploču kroz `atlas open` (sam izračuna URL iz
+host/port + cert SAN — ne nagađa port).
 
 ## Kod klijenta
 ### Glavno računalo (server) — PRVO
