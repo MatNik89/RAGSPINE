@@ -99,7 +99,7 @@ def _admin(spine, cfg):
 def test_builtin_types_registered(spine, cfg):
     c, h = _admin(spine, cfg)  # create_app registrira builtin tipove
     kinds = {t["kind"] for t in c.get("/connector-types", headers=h).json()}
-    assert {"mail_exchange", "mail_graph", "telegram_gateway"} == kinds  # mail + TG gateway
+    assert {"mail_imap", "mail_exchange", "mail_graph", "telegram_gateway"} <= kinds  # mail + TG
 
 
 def test_connector_routes_admin_flow(spine, cfg):

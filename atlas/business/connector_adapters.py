@@ -87,11 +87,37 @@ def _test_telegram_gateway(cfg):
         return "error", _safe_err(e)
 
 
+def _test_imap(cfg):
+    import imaplib
+    host = (cfg.get("host") or "").strip()
+    email_addr = (cfg.get("email") or "").strip()
+    if "@" not in email_addr or not host:
+        return "error", "host i e-mail su obavezni"
+    try:
+        from atlas.core.net import _is_blocked_addr
+        import socket
+        if any(_is_blocked_addr(sa[4][0]) for sa in socket.getaddrinfo(host, None)):
+            return "error", "host je interni/loopback — odbijeno"
+        imap = imaplib.IMAP4_SSL(host)
+        imap.login(email_addr, cfg.get("password", ""))
+        imap.logout()
+        return "connected", "prijava uspješna"
+    except Exception as e:
+        return "error", _safe_err(e)
+
+
 def register_builtin() -> None:
     register(ConnectorType(
         kind="telegram_gateway", label="Telegram (pristup ATLAS-u preko bota)", category="kanal",
         fields=[Field("bot_token", "Bot token (od @BotFather)", type="password", secret=True)],
         test=_test_telegram_gateway))
+    register(ConnectorType(
+        kind="mail_imap", label="E-pošta — IMAP (standardni server)", category="mail",
+        fields=[Field("host", "IMAP server (npr. imap.gmail.com)"),
+                Field("email", "E-mail adresa"),
+                Field("password", "Lozinka / app-lozinka", type="password", secret=True),
+                Field("folder", "Mapa (default INBOX)", required=False)],
+        test=_test_imap))
     register(ConnectorType(
         kind="mail_exchange", label="E-pošta — Exchange (server)", category="mail",
         fields=[Field("server", "Server (opcijski, autodiscover)", required=False),
