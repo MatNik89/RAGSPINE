@@ -48,6 +48,18 @@ def test_token_revoke_owner(spine, cfg):
     assert fleet.verify_token(spine, tok) is None
 
 
+def test_device_activity_owner_only(spine, cfg):
+    c, ho = _owner(spine, cfg)
+    did = _dev(spine)
+    fleet.enqueue(spine, did, "status")
+    ha = _role(spine, cfg, c, "admin2", "admin")
+    assert c.get(f"/uredjaji/{did}/aktivnost", headers=ha).status_code == 403  # admin ne smije
+    r = c.get(f"/uredjaji/{did}/aktivnost", headers=ho)
+    assert r.status_code == 200
+    acts = r.json()["aktivnost"]
+    assert acts and acts[0]["action"] == "status"
+
+
 # --- agent poll/result (device token) --------------------------------------
 
 def test_poll_requires_valid_token(spine, cfg):

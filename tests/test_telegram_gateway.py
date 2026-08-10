@@ -4,8 +4,10 @@ from atlas.web.deps import add_user
 
 
 class FakeTG:
-    def __init__(self): self.sent = []
-    def send_message(self, chat_id, text): self.sent.append((chat_id, text))
+    def __init__(self): self.sent = []; self.answered = []
+    def send_message(self, chat_id, text, reply_markup=None):
+        self.sent.append((chat_id, text)); self.markup = reply_markup
+    def answer_callback(self, callback_id, text=""): self.answered.append((callback_id, text))
 
 
 def _seed_user(spine, name="ana"):
@@ -73,6 +75,68 @@ def test_handle_paired_runs_pipeline(spine, cfg):
                      answer_fn=answer_fn, tg=ft)
     assert got["q"] == "koliko je PDV" and got["actor"] == "ana"
     assert ft.sent[-1] == (111, "PDV je 25%")
+
+
+def test_pending_reply_attaches_keyboard(spine, cfg):
+    uid, org = _seed_user(spine)
+    tg._consume_pairing(spine, tg.create_pairing_token(spine, uid, org), 111, "ana")
+    ft = FakeTG()
+    tg.handle_update(spine, cfg,
+                     {"message": {"chat": {"id": 111, "type": "private"}, "from": {"id": 111},
+                                  "text": "dodaj klijenta"}},
+                     answer_fn=lambda q, a: {"answer": "Dodat ću.", "pending_token": "TKN"}, tg=ft)
+    assert ft.markup["inline_keyboard"][0][0]["callback_data"] == "ok:TKN"
+
+
+def test_callback_confirms_and_executes(spine, cfg):
+    from atlas.business import tenancy
+    from atlas.rag import agent
+    uid, org = _seed_user(spine)
+    tg._consume_pairing(spine, tg.create_pairing_token(spine, uid, org), 111, "ana")
+    actor = tenancy.actor_for(spine, org, uid)
+    actor.username = "ana"
+    token = agent.stash_pending(spine, actor, {"tool": "dodaj_klijenta", "args": {"naziv": "NoviTG"}})
+    ft = FakeTG()
+    tg.handle_update(spine, cfg,
+                     {"callback_query": {"id": "cb1", "data": f"ok:{token}",
+                                         "from": {"id": 111},
+                                         "message": {"chat": {"id": 111, "type": "private"}}}}, tg=ft,
+                     answer_fn=None)
+    assert ft.answered and "Izvršeno" in ft.answered[-1][1]
+    row = spine.read().execute("SELECT 1 FROM clients WHERE name='NoviTG'").fetchone()
+    assert row is not None  # write stvarno izvršen
+
+
+def test_callback_cancel_removes_pending(spine, cfg):
+    from atlas.business import tenancy
+    from atlas.rag import agent
+    uid, org = _seed_user(spine)
+    tg._consume_pairing(spine, tg.create_pairing_token(spine, uid, org), 111, "ana")
+    actor = tenancy.actor_for(spine, org, uid); actor.username = "ana"
+    token = agent.stash_pending(spine, actor, {"tool": "dodaj_klijenta", "args": {"naziv": "X"}})
+    ft = FakeTG()
+    tg.handle_update(spine, cfg,
+                     {"callback_query": {"id": "cb2", "data": f"no:{token}", "from": {"id": 111},
+                                         "message": {"chat": {"id": 111, "type": "private"}}}},
+                     tg=ft, answer_fn=None)
+    left = spine.read().execute("SELECT 1 FROM agent_pending WHERE token=?", (token,)).fetchone()
+    assert left is None  # odustao -> token maknut
+
+
+def test_callback_from_unpaired_chat_ignored(spine, cfg):
+    from atlas.business import tenancy
+    from atlas.rag import agent
+    uid, org = _seed_user(spine)  # ana uparena na 111
+    tg._consume_pairing(spine, tg.create_pairing_token(spine, uid, org), 111, "ana")
+    actor = tenancy.actor_for(spine, org, uid); actor.username = "ana"
+    token = agent.stash_pending(spine, actor, {"tool": "dodaj_klijenta", "args": {"naziv": "Y"}})
+    ft = FakeTG()
+    # klik dolazi iz NEUPARENOG chata 777 -> ne smije izvršiti tuđi token
+    tg.handle_update(spine, cfg,
+                     {"callback_query": {"id": "cb3", "data": f"ok:{token}", "from": {"id": 777},
+                                         "message": {"chat": {"id": 777, "type": "private"}}}},
+                     tg=ft, answer_fn=None)
+    assert spine.read().execute("SELECT 1 FROM clients WHERE name='Y'").fetchone() is None
 
 
 def test_offset_persistence(spine):

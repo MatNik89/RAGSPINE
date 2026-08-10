@@ -355,6 +355,18 @@ def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str)
             "message": f"Pokrećem {progs[0]['label']} na {workers[0]['name']}."}
 
 
+def device_activity(spine, device_id: int, limit: int = 30) -> list[dict]:
+    """Nedavna aktivnost jednog uređaja (naredbe: akcija/status/rezultat/vrijeme).
+    Za 'uživo' prikaz vlasnik samo poll-a ovaj endpoint (ponytail: bez wss-a —
+    long-poll/poll pokriva potrebu; upgrade path = SSE/wss ako zatreba niža
+    latencija). Read-only."""
+    rows = spine.read().execute(
+        "SELECT id, action, program_key, status, result, created_at, done_at "
+        "FROM agent_commands WHERE device_id=? ORDER BY id DESC LIMIT ?",
+        (device_id, max(1, min(int(limit), 200)))).fetchall()
+    return [dict(r) for r in rows]
+
+
 def wake_worker(spine, worker_name: str, actor_role: str, sender=None) -> dict:
     """Probudi radnikovu stanicu (Wake-on-LAN). Admin+ (kao pokretanje programa).
     Jednoznačno razriješi radnika s MAC-om, pošalji magic paket. `sender`

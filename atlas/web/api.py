@@ -1102,42 +1102,24 @@ def create_app(spine, cfg) -> FastAPI:
                "sources": res["sources"], "cached": False}
         pending = res.get("pending")
         if pending:
-            token = secrets.token_urlsafe(24)
-            with spine.write() as c:
-                c.execute("INSERT INTO agent_pending(token,user_id,org_id,tool,args_json) "
-                          "VALUES(?,?,?,?,?)",
-                          (token, actor.user_id, actor.org_id, pending["tool"],
-                           json.dumps(pending["args"], ensure_ascii=False)))
+            token = agent.stash_pending(spine, actor, pending)
             out["pending"] = {"token": token, "summary": pending["summary"]}
         return out
 
     @app.post("/chat/potvrdi")
     def chat_potvrdi(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
-        # Atomično potroši vlasnički, ne-istekli token (jedan writer serijalizira
-        # SELECT+DELETE — dvostruko klikanje ne izvrši dvaput). Ovlasti se PONOVO
-        # provjere u run_tool sad, ne na vrijeme prijedloga.
-        with spine.write() as c:
-            row = c.execute(
-                "SELECT tool, args_json FROM agent_pending "
-                "WHERE token=? AND user_id=? AND org_id=? "
-                "AND created_at > datetime('now', ?)",
-                (body.token, actor.user_id, actor.org_id, f"-{_PENDING_TTL_MIN} minutes")).fetchone()
-            if row is None:
-                raise HTTPException(404, "prijedlog ne postoji ili je istekao")
-            c.execute("DELETE FROM agent_pending WHERE token=?", (body.token,))
-            tool, args_json = row["tool"], row["args_json"]
+        # dvostruko klikanje ne izvrši dvaput (atomični consume u confirm_pending);
+        # ovlasti se ponovo provjere u run_tool sad, ne na vrijeme prijedloga.
         try:
-            result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
+            out = agent.confirm_pending(spine, cfg, body.token, actor, _PENDING_TTL_MIN)
         except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-        spine.audit(actor.username, "agent_execute", tool, args_json)
-        return {"ok": True, "tool": tool, "result": result}
+            msg = str(e)
+            raise HTTPException(404 if "ne postoji" in msg else 400, msg) from e
+        return {"ok": True, **out}
 
     @app.post("/chat/odustani")
     def chat_odustani(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
-        with spine.write() as c:
-            c.execute("DELETE FROM agent_pending WHERE token=? AND user_id=? AND org_id=?",
-                      (body.token, actor.user_id, actor.org_id))
+        agent.cancel_pending(spine, body.token, actor)
         return {"ok": True}
 
     # --- Napajanje (UPS/NUT + gašenje redom) — sve admin-only ---
@@ -1266,6 +1248,11 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         return {"device_id": device_id}
+
+    @app.get("/uredjaji/{device_id}/aktivnost")
+    def uredjaj_aktivnost(device_id: int, actor: Actor = Depends(require_actor_web)):
+        _require_owner(actor)  # nadzor flote = vlasnik; UI poll-a za "uživo" prikaz
+        return {"aktivnost": fleet.device_activity(spine, device_id)}
 
     @app.post("/uredjaji/{device_id}/token")
     def uredjaj_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
@@ -2852,7 +2839,11 @@ def create_app(spine, cfg) -> FastAPI:
         except (LLMUnavailable, LLMError):
             return _answer(query, actor)
         from atlas.business import telegram_gateway as _tgw
-        return {"answer": _tgw.format_agent_reply(res), "sources": res.get("sources", [])}
+        out = {"answer": _tgw.format_agent_reply(res), "sources": res.get("sources", [])}
+        pending = res.get("pending")
+        if pending:  # write se potvrđuje inline tipkama na Telegramu (vlasnički token)
+            out["pending_token"] = agent.stash_pending(spine, actor, pending)
+        return out
 
     def _maybe_start_telegram():
         """Ako je telegram_gateway konektor uključen, pokreni poll-thread. Bez

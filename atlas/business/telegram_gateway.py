@@ -36,9 +36,17 @@ class TelegramClient:
                        timeout=timeout + 5)
         return r.get("result", []) if r.get("ok") else []
 
-    def send_message(self, chat_id: int, text: str) -> None:
-        for part in split_message(text):
-            self._call("sendMessage", {"chat_id": chat_id, "text": part}, timeout=15)
+    def send_message(self, chat_id: int, text: str, reply_markup: dict | None = None) -> None:
+        parts = split_message(text)
+        for i, part in enumerate(parts):
+            payload = {"chat_id": chat_id, "text": part}
+            if reply_markup and i == len(parts) - 1:  # tipke samo uz zadnji dio
+                payload["reply_markup"] = json.dumps(reply_markup)
+            self._call("sendMessage", payload, timeout=15)
+
+    def answer_callback(self, callback_id: str, text: str = "") -> None:
+        self._call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text},
+                   timeout=10)
 
 
 def split_message(text: str, limit: int = _MAX) -> list[str]:
@@ -112,14 +120,64 @@ def _consume_pairing(spine, token: str, chat_id: int, username: str) -> bool:
 
 def format_agent_reply(res: dict) -> str:
     """Tekst za Telegram iz rezultata agenta. WRITE prijedlog (pending) se NE
-    izvršava preko Telegrama — bounce na potvrdu u aplikaciji (nema tihog
-    write-a s telefona bez potvrde)."""
+    izvršava tiho — traži izričitu potvrdu (inline tipke, vidi _confirm_keyboard)."""
     text = res.get("text") or res.get("answer") or ""
     pending = res.get("pending")
     if pending:
-        text = (pending.get("summary", text) +
-                "\n\n⚠ Za POTVRDU i izvršenje otvori ATLAS chat u aplikaciji.")
+        text = pending.get("summary", text) + "\n\n⚠ Potvrdi izvršenje:"
     return text or "(prazan odgovor)"
+
+
+def _confirm_keyboard(token: str) -> dict:
+    """Inline tipke Potvrdi/Odustani. callback_data nosi token (≤64 B); vlasništvo
+    tokena se PONOVO provjeri pri potvrdi (confirm_pending scope-a po korisniku)."""
+    return {"inline_keyboard": [[
+        {"text": "✓ Potvrdi", "callback_data": f"ok:{token}"},
+        {"text": "✕ Odustani", "callback_data": f"no:{token}"},
+    ]]}
+
+
+def _handle_callback(spine, cfg, cbq: dict, tg: "TelegramClient") -> None:
+    """Obradi klik na inline tipku (potvrda/odustajanje agentskog write-a). Radi
+    SAMO iz uparenog privatnog chata; izvršenje ide kroz confirm_pending koji
+    ponovo provjeri ovlasti + vlasništvo tokena."""
+    from atlas.rag import agent
+
+    cb_id = cbq.get("id")
+    data = cbq.get("data")
+    msg = cbq.get("message") if isinstance(cbq.get("message"), dict) else {}
+    chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
+    frm = cbq.get("from") if isinstance(cbq.get("from"), dict) else {}
+    chat_id = chat.get("id")
+    if not isinstance(cb_id, str) or not isinstance(data, str) or not isinstance(chat_id, int):
+        return
+    # samo privatni chat i klik od vlasnika chata (kao kod poruka)
+    if chat.get("type") != "private" or frm.get("id") != chat_id:
+        return
+    link = _link_for(spine, chat_id)
+    if link is None:
+        return
+    actor = _resolve_actor(spine, link)
+    if actor is None:
+        tg.answer_callback(cb_id, "Račun nije aktivan.")
+        return
+    action, _, token = data.partition(":")
+    if not token:
+        tg.answer_callback(cb_id, "")
+        return
+    try:
+        if action == "ok":
+            agent.confirm_pending(spine, cfg, token, actor)
+            tg.answer_callback(cb_id, "✓ Izvršeno")
+            tg.send_message(chat_id, "✓ Radnja izvršena.")
+        else:
+            agent.cancel_pending(spine, token, actor)
+            tg.answer_callback(cb_id, "Odustao")
+            tg.send_message(chat_id, "Odustao od radnje.")
+    except ValueError as e:
+        tg.answer_callback(cb_id, str(e))
+    except Exception as e:
+        tg.answer_callback(cb_id, f"Greška: {type(e).__name__}")
 
 
 def _resolve_actor(spine, link):
@@ -137,9 +195,16 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
     je (query, actor) -> dict s 'answer'. Sve greške izolirane (bot ne pada)."""
     if not isinstance(update, dict):
         return
+    cbq = update.get("callback_query")
+    if isinstance(cbq, dict):  # klik na inline tipku (potvrdi/odustani)
+        try:
+            _handle_callback(spine, cfg, cbq, tg)
+        except Exception:
+            pass  # bot ne pada na jednom updateu
+        return
     msg = update.get("message")
     if not isinstance(msg, dict):
-        return  # ignoriraj edited/callback/channel_post itd.
+        return  # ignoriraj edited/channel_post itd.
     chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
     frm = msg.get("from") if isinstance(msg.get("from"), dict) else {}
     chat_id = chat.get("id")
@@ -180,7 +245,9 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
         return
     try:
         res = answer_fn(text, actor)
-        tg.send_message(chat_id, res.get("answer") or "(prazan odgovor)")
+        token = res.get("pending_token")
+        markup = _confirm_keyboard(token) if token else None
+        tg.send_message(chat_id, res.get("answer") or "(prazan odgovor)", reply_markup=markup)
     except Exception as e:
         tg.send_message(chat_id, f"Greška: {type(e).__name__}")
 
