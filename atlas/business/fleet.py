@@ -348,6 +348,28 @@ def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str)
             "message": f"Pokrećem {progs[0]['label']} na {workers[0]['name']}."}
 
 
+def wake_worker(spine, worker_name: str, actor_role: str, sender=None) -> dict:
+    """Probudi radnikovu stanicu (Wake-on-LAN). Admin+ (kao pokretanje programa).
+    Jednoznačno razriješi radnika s MAC-om, pošalji magic paket. `sender`
+    injektabilan za testove."""
+    from atlas.business import devices as devices_mod
+    from atlas.core import wol
+
+    if _ROLE_RANK.get(actor_role, -1) < _ROLE_RANK["admin"]:
+        return {"ok": False, "message": "Za buđenje stanice potrebna je admin uloga."}
+    workers = [d for d in devices_mod.list_devices(spine)
+               if d.get("worker_username") and _worker_matches(d["worker_username"], worker_name)
+               and d.get("mac")]
+    if len(workers) != 1:
+        which = "nijedna (ili nema MAC)" if not workers else "više njih"
+        return {"ok": False, "message": f"Ne mogu jednoznačno odrediti stanicu za {worker_name!r} ({which})."}
+    woken = wol.wake_fleet(workers, sender=sender)
+    if not woken:
+        return {"ok": False, "message": f"Neispravan MAC za {workers[0]['name']}."}
+    spine.audit("agent", "wake_worker", f"device:{workers[0]['id']}", workers[0]["name"])
+    return {"ok": True, "message": f"Šaljem signal za buđenje: {workers[0]['name']}."}
+
+
 _FLOTA_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)
 
 

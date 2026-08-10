@@ -234,6 +234,37 @@ def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
     return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": sto}
 
 
+def _run_rokovi_isteka(spine, cfg, actor, args) -> dict:
+    """Nadolazeći rokovi ISTEKA (osobne, dozvole, certifikati) — filtrirano po
+    vidljivosti klijenata (skriveni klijent ne curi)."""
+    dana = int(args.get("dana", 60))
+    visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
+    rows = [dict(r) for r in expiry.expiring(spine, days=dana)]
+    if visible is not None:  # None = vidi sve; inače filtriraj
+        rows = [r for r in rows if r["client_id"] in visible]
+    return {"rokovi": rows}
+
+
+def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
+    """Dokumenti u dosjeu klijenta (naziv, vrsta, valjanost) — AI vidi što ured
+    ima. Vidljivost klijenta se provjerava kroz _resolve_visible."""
+    row = _resolve_visible(spine, actor, args["klijent"])
+    docs = spine.read().execute(
+        "SELECT id, title, doc_type, valid_from, valid_until, stale "
+        "FROM documents WHERE client_id=? ORDER BY doc_type, valid_until", (row["id"],)).fetchall()
+    return {"klijent": row["name"], "dokumenti": [dict(d) for d in docs]}
+
+
+def _run_probudi_racunalo(spine, cfg, actor, args) -> dict:
+    """Probudi radnikovu radnu stanicu preko mreže (Wake-on-LAN). Admin+, pandan
+    alatu pokreni_program."""
+    from atlas.business import fleet
+    res = fleet.wake_worker(spine, args["radnik"], actor_role=actor.role)
+    if not res.get("ok"):
+        raise ValueError(res["message"])
+    return res
+
+
 # --- registar ---------------------------------------------------------
 
 TOOLS: dict[str, Tool] = {
@@ -379,6 +410,26 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"sto": {"type": "string"}, "period": {"type": "string"}},
                 "required": []},
         readonly=True, min_role="viewer", run=_run_izvezi_excel,
+    ),
+    "rokovi_isteka": Tool(
+        name="rokovi_isteka",
+        description="Nadolazeći rokovi isteka (osobne iskaznice, dozvole, certifikati) u N dana.",
+        schema={"type": "object", "properties": {"dana": {"type": "integer"}}, "required": []},
+        readonly=True, min_role="viewer", run=_run_rokovi_isteka,
+    ),
+    "dokumenti_klijenta": Tool(
+        name="dokumenti_klijenta",
+        description="Popis dokumenata koje ured ima u dosjeu klijenta (naziv, vrsta, valjanost).",
+        schema={"type": "object", "properties": {"klijent": {"type": "string"}},
+                "required": ["klijent"]},
+        readonly=True, min_role="viewer", run=_run_dokumenti_klijenta,
+    ),
+    "probudi_racunalo": Tool(
+        name="probudi_racunalo",
+        description="Probudi radnikovu radnu stanicu preko mreže (Wake-on-LAN).",
+        schema={"type": "object", "properties": {"radnik": {"type": "string"}},
+                "required": ["radnik"]},
+        readonly=False, min_role="admin", run=_run_probudi_racunalo,
     ),
 }
 
