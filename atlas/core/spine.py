@@ -329,9 +329,10 @@ class Spine:
                 (module, key, str(value), source_url))
 
     def audit(self, user, action, entity="", detail=""):
+        from atlas.core.security import redact_secrets
         with self.write() as c:
             c.execute("INSERT INTO audit_log(user,action,entity,detail) VALUES(?,?,?,?)",
-                      (user, action, entity, detail))
+                      (user, action, entity, redact_secrets(detail or "")))
 
     def close(self):
         c = getattr(self._local, "conn", None)

@@ -98,6 +98,27 @@ def redact_pii(text: str) -> str:
     return text
 
 
+_SECRET_KEYS = ("token", "secret", "password", "lozinka", "api_key", "apikey",
+                "sign_key", "signkey", "access_token", "bot_token", "client_secret")
+# vrijednost ključa koji zvuči kao tajna, u JSON-u ili "key=value"/"key": "value"
+_SECRET_KV_RE = re.compile(
+    r'("?(?:' + "|".join(_SECRET_KEYS) + r')"?\s*[:=]\s*)("?)([^"\s,}&]+)(\2)',
+    re.IGNORECASE)
+# lozinka u URL-u: scheme://user:PASS@host
+_URL_CRED_RE = re.compile(r"(://[^/\s:@]+:)([^/\s@]+)(@)")
+
+
+def redact_secrets(text: str) -> str:
+    """Zamagli tajne prije upisa u audit/log (token/secret/password/sign_key... i
+    lozinku u URL-u). Obrambeno: `agent_execute` logira proizvoljne args alata —
+    budući alat s tajnim poljem ne smije procuriti u plaintext audit."""
+    if not text:
+        return text
+    text = _SECRET_KV_RE.sub(lambda m: m.group(1) + m.group(2) + "[REDACTED]" + m.group(4), text)
+    text = _URL_CRED_RE.sub(r"\1[REDACTED]\3", text)
+    return text
+
+
 def chain_append(spine, event: str) -> str:
     # BEGIN IMMEDIATE takes the SQLite write lock up front, so the
     # read-last-hash + insert is atomic across processes (not just
