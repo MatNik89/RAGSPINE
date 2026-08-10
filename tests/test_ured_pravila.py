@@ -42,4 +42,6 @@ def test_endpoint_owner_only(spine, cfg):
     assert c.post("/ured-pravila", headers={"Authorization": f"Bearer {tm}"},
                   json={"pravila": "x"}).status_code == 403
     assert c.post("/ured-pravila", headers=ho, json={"pravila": "Budi kratak."}).status_code == 200
-    assert "Budi kratak" in c.get("/ured-pravila", headers=ho).json()["pravila"]
+    r = c.get("/ured-pravila", headers=ho); assert r.status_code == 200 and "Budi kratak" in r.json()["pravila"]
+    # member ne smije čitati (owner-konfiguracija)
+    assert c.get("/ured-pravila", headers={"Authorization": f"Bearer {tm}"}).status_code == 403
