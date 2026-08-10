@@ -70,6 +70,17 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
     if actor is None:
         raise HTTPException(403, "niste član organizacije")
     actor.username = payload["sub"]
+    # Impersonacija: ceiling se provjerava SVAKI zahtjev (ne samo pri loginu) —
+    # inače kasnija promocija cilja diže spremljeni token iznad impersonatora
+    # (Codex HIGH). Impersonator mora i dalje postojati i STROGO nadmašivati cilj.
+    imp_uid = payload.get("imp_uid")
+    if imp_uid is not None:
+        from atlas.business.acl import ROLE_RANK
+        imp = spine.read().execute(
+            "SELECT role FROM memberships WHERE user_id=? AND org_id=?",
+            (imp_uid, org_id)).fetchone()
+        if imp is None or ROLE_RANK.get(imp["role"], -1) <= ROLE_RANK.get(actor.role, 99):
+            raise HTTPException(403, "impersonacija više nije dopuštena — prijavite se ponovno")
     return actor
 
 

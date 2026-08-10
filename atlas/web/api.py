@@ -788,9 +788,9 @@ def create_app(spine, cfg) -> FastAPI:
             verify_password(pw, _DUMMY_PW_HASH)  # cijena, rezultat se odbacuje
             return False
 
-        _IMP_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
         impersonated_by = None
         imp_role = None
+        imp_uid = None
         own_ok = _verify_always_pbkdf2(password, row["pw_hash"])
         if not own_ok:
             m = spine.read().execute(
@@ -803,18 +803,19 @@ def create_app(spine, cfg) -> FastAPI:
                 # mjerljivo "brži"). Redundantan re-check vlastitog hasha je
                 # bezopasan (deterministički već promašen u own_ok gore).
                 admins = spine.read().execute(
-                    """SELECT u.username, u.pw_hash, mm.role AS imp_role FROM memberships mm
-                       JOIN users u ON u.id = mm.user_id
+                    """SELECT u.id AS imp_uid, u.username, u.pw_hash, mm.role AS imp_role
+                       FROM memberships mm JOIN users u ON u.id = mm.user_id
                        WHERE mm.org_id=? AND mm.role IN ('admin','owner')""",
                     (m["org_id"],)).fetchall()
                 for a in admins:
-                    # verify_password se zove PRIJE username-provjere (ne obratno)
-                    # da self-redak ne izbjegne PBKDF2 kratkim spajanjem na 'and'.
+                    # NE break-a nakon matcha — svaki kandidat troši točno jedan PBKDF2
+                    # (inače rank-denied 401 (1+k) je mjerljivo drukčiji od invalid
+                    # (1+N) i otkriva da je pogođena povlaštena lozinka; Codex).
                     matched = _verify_always_pbkdf2(password, a["pw_hash"])
-                    if matched and a["username"] != username:
+                    if matched and a["username"] != username and impersonated_by is None:
                         impersonated_by = a["username"]
                         imp_role = a["imp_role"]
-                        break
+                        imp_uid = a["imp_uid"]
             else:
                 # bez membershipa (legacy CLI račun): nema ciljni org za pravu
                 # provjeru, ali i dalje odradi dummy petlju iste duljine kao
@@ -828,10 +829,11 @@ def create_app(spine, cfg) -> FastAPI:
             # vokabular pa se ne smije uspoređivati s membership-ulogom impersonatora.
             target_role = m["role"] if m is not None else "owner"
             if impersonated_by is not None and (
-                    _IMP_RANK.get(imp_role, -1) <= _IMP_RANK.get(target_role, 99)):
+                    ROLE_RANK.get(imp_role, -1) <= ROLE_RANK.get(target_role, 99)):
                 spine.audit(impersonated_by, "impersonate_denied", f"user:{username}",
                             f"{imp_role} ne smije preuzeti {target_role}")
                 impersonated_by = None
+                imp_uid = None
             if impersonated_by is None:
                 raise HTTPException(401, "invalid credentials")
         if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
@@ -847,6 +849,7 @@ def create_app(spine, cfg) -> FastAPI:
         payload = {"sub": username, "role": row["role"], "uid": row["id"], "org_id": org_id}
         if impersonated_by:
             payload["impersonated_by"] = impersonated_by
+            payload["imp_uid"] = imp_uid  # trajni ceiling: provjerava se SVAKI zahtjev
             spine.audit(impersonated_by, "impersonate", f"user:{username}",
                         f"admin {impersonated_by} ušao kao {username}")
         token = jwt_encode(payload, cfg.jwt_secret)
