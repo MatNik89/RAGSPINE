@@ -42,15 +42,19 @@ def _log(spine, client_id: int, channel: str, status: str, subject: str, body: s
 
 
 def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run: bool = True) -> dict:
+    from atlas.business import secretbox
     row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     channel = row["messaging_channel"] if row else ""
+    # target sadrži lozinku (mailto://user:pass@host) — u bazi je šifriran; dešifriraj
+    # tek ovdje za korištenje. secretbox podnosi stare plaintext zapise (fallback).
+    target = secretbox.decrypt(row["messaging_target"], cfg) if row else ""
 
-    if row is None or not row["messaging_consent"] or not row["messaging_target"]:
+    if row is None or not row["messaging_consent"] or not target:
         status = "skipped_no_consent"
         _log(spine, client_id, channel, status, subject, body)
         return {"status": status, "client_id": client_id}
 
-    if not _target_scheme_ok(row["messaging_target"]):
+    if not _target_scheme_ok(target):
         # SSRF guard: an arbitrary http(s)/json target would let apprise make
         # its own outbound connection to any host, bypassing cfg.egress_allow.
         status = "skipped_bad_target"
@@ -69,7 +73,7 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
     else:
         try:
             app = apprise_mod.Apprise()
-            app.add(row["messaging_target"].strip())
+            app.add(target.strip())
             ok = app.notify(title=subject, body=render_message(subject, body))
             status = "sent" if ok else "failed"
         except Exception as e:
