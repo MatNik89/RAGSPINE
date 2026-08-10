@@ -81,6 +81,14 @@ class PendingTokenBody(BaseModel):
     token: str
 
 
+class ScheduledTaskBody(BaseModel):
+    title: str = ""
+    action_key: str
+    params: dict = {}
+    day_of_month: int | None = None
+    hour: int = 8
+
+
 class PowerConfigBody(BaseModel):
     # 'armed' NAMJERNO izostavljen — naoružavanje ide samo kroz /napajanje/arm
     # (jedno mjesto, auditirano). Inače bi config-POST tiho naoružao gašenje.
@@ -1203,6 +1211,44 @@ def create_app(spine, cfg) -> FastAPI:
             scheme = request.headers.get("x-forwarded-proto") or scheme
         if getattr(cfg, "https_only", False) and scheme != "https":
             raise HTTPException(400, "upis agenta samo preko https")
+
+    # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
+    @app.get("/zakazano")
+    def zakazano_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import scheduler_tasks
+        return {"zadaci": scheduler_tasks.list_tasks(spine, actor.org_id),
+                "akcije": scheduler_tasks.action_labels()}
+
+    @app.post("/zakazano")
+    def zakazano_create(body: ScheduledTaskBody, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import scheduler_tasks
+        _require_owner(actor)
+        try:
+            tid = scheduler_tasks.create_task(spine, actor.org_id, body.title, body.action_key,
+                                              body.params, body.day_of_month, body.hour,
+                                              user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        spine.audit(actor.username, "scheduled_create", f"task:{tid}:{body.action_key}")
+        return {"id": tid}
+
+    @app.post("/zakazano/{task_id}/toggle")
+    def zakazano_toggle(task_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import scheduler_tasks
+        _require_owner(actor)
+        rows = scheduler_tasks.list_tasks(spine, actor.org_id)
+        cur = next((t for t in rows if t["id"] == task_id), None)
+        if cur is None:
+            raise HTTPException(404, "nepoznat zadatak")
+        scheduler_tasks.set_enabled(spine, task_id, actor.org_id, not cur["enabled"])
+        return {"enabled": not cur["enabled"]}
+
+    @app.delete("/zakazano/{task_id}")
+    def zakazano_delete(task_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import scheduler_tasks
+        _require_owner(actor)
+        scheduler_tasks.delete_task(spine, task_id, actor.org_id)
+        return {"ok": True}
 
     @app.post("/uredjaji/enrollments/open")
     def uredjaj_enroll_open(actor: Actor = Depends(require_actor_web)):

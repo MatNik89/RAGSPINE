@@ -81,5 +81,5 @@ def test_register_defaults_registers_all_jobs(spine, cfg):
     assert names == {
         "watchlist", "imap", "deadlines", "expiry", "obveze", "stale", "health",
         "digest", "reminders_dump", "memory_decay", "memory_distill", "rokovi", "folders_sync", "backup",
-        "power",
+        "power", "scheduled_tasks",
     }
