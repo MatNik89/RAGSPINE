@@ -55,6 +55,7 @@ begin
     'ATLAS-u: Postavke → Uređaji.');
   ServerPage.Add('Adresa servera:', False);
   ServerPage.Add('Token uređaja:', False);
+  ServerPage.Add('Ključ potpisa (sign key):', False);
   ServerPage.Values[0] := 'https://192.168.1.10:8443';
 end;
 
@@ -122,6 +123,10 @@ begin
       MsgBox('Neispravan token. Kopiraj ga točno iz Postavke → Uređaji.', mbError, MB_OK);
       Result := False; Exit;
     end;
+    if Trim(ServerPage.Values[2]) = '' then begin
+      MsgBox('Upiši ključ potpisa (sign key) — bez njega agent ne provjerava potpise.', mbError, MB_OK);
+      Result := False; Exit;
+    end;
     if not ServerHealthy(Trim(ServerPage.Values[0])) then begin
       MsgBox('Ne mogu potvrditi ATLAS server na toj adresi. Provjeri je li ' +
              'GLAVNO RAČUNALO već instalirano i postavljeno, pa pokušaj ponovno.',
@@ -144,6 +149,7 @@ end;
 
 function ServerUrl(Param: string): string;   begin Result := Trim(ServerPage.Values[0]); end;
 function DeviceToken(Param: string): string;  begin Result := Trim(ServerPage.Values[1]); end;
+function SignKey(Param: string): string;      begin Result := Trim(ServerPage.Values[2]); end;
 
 [Run]
 ; --- Glavno računalo: instaliraj ATLAS servis + cert + otvori dashboard ---
@@ -156,5 +162,5 @@ Filename: "{app}\python\python.exe"; Parameters: "-m atlas serve --open"; \
 ; --- Radna stanica: postavi agenta prema serveru (server-first već provjeren) ---
 ; dontlogparameters: token NE smije završiti u installer /LOG datoteci (Codex nalaz)
 Filename: "{app}\python\python.exe"; \
-  Parameters: "-m atlas.agent.install --server ""{code:ServerUrl}"" --token ""{code:DeviceToken}"""; \
+  Parameters: "-m atlas.agent.install --server ""{code:ServerUrl}"" --token ""{code:DeviceToken}"" --sign-key ""{code:SignKey}"""; \
   Check: not IsServer; Flags: runhidden dontlogparameters; StatusMsg: "Postavljam ATLAS agenta..."

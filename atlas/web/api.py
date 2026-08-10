@@ -1186,6 +1186,7 @@ def create_app(spine, cfg) -> FastAPI:
         cmd = fleet.next_command(spine, did)
         if cmd is None:
             return Response(status_code=204)
+        cmd["sig"] = fleet.sign_command(spine, did, cmd)  # per-uređaj potpis; agent provjeri
         return cmd
 
     @app.post("/agent/result")
@@ -1207,7 +1208,9 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         spine.audit(actor.username, "device_token_issue", f"device:{device_id}")
-        return {"token": token}
+        # PER-UREĐAJ sign_key ide uz token (agent njime provjerava potpis) — master
+        # nikad ne napušta server; dostavlja se pri instalaciji, odvojeno od runtimea
+        return {"token": token, "sign_key": fleet.device_sign_key(spine, device_id)}
 
     @app.delete("/uredjaji/{device_id}/token")
     def uredjaj_token_revoke(device_id: int, actor: Actor = Depends(require_actor_web)):
