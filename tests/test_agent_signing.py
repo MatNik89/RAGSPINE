@@ -49,6 +49,16 @@ def test_per_device_keys_differ(spine, cfg):
     assert fleet.device_sign_key(spine, 1, cfg) != fleet.device_sign_key(spine, 2, cfg)
 
 
+def test_master_key_fail_closed_on_bad_decrypt(spine, cfg):
+    import pytest
+    fleet.device_sign_key(spine, 1, cfg)  # stvori šifrirani master
+    from atlas.business import secretbox
+    bad = secretbox.encrypt("x", type("C", (), {"jwt_secret": "DRUGI-SECRET"})())  # drugi ključ
+    spine.set_override("fleet", "signing_key", bad)
+    with pytest.raises(RuntimeError):  # ne potpisuj praznim ključem
+        fleet.device_sign_key(spine, 1, cfg)
+
+
 def test_master_key_encrypted_at_rest(spine, cfg):
     # ukradeni DB backup ne smije otkriti master ključ za potpis (Codex fold)
     fleet.device_sign_key(spine, 1, cfg)  # okine stvaranje

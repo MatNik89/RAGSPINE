@@ -39,15 +39,31 @@ def _mail_host_ok(target: str) -> bool:
     if scheme not in ("mailto", "mailtos"):
         return True
     p = urllib.parse.urlparse(target)
-    qs = urllib.parse.parse_qs(p.query)
-    host = (qs.get("smtp", [""])[0] or p.hostname or "").strip()
-    if not host:
+    # apprise 'smtp=' nadjačava host. Parser differential (Codex): ključ je
+    # case-insensitive, a apprise uzima ZADNJI — pa skupljamo SVE 'smtp' vrijednosti
+    # (bilo koje velike/male) i ODBIJAMO na duplikat ili ako BILO KOJA (uklj. netloc)
+    # razrješava na interni host. ';' se tretira kao razdvajač uz '&'.
+    smtp_vals = []
+    for k, vals in urllib.parse.parse_qs(p.query, separator="&").items():
+        if k.strip().lower() == "smtp":
+            smtp_vals.extend(vals)
+    for k, vals in urllib.parse.parse_qs(p.query, separator=";").items():
+        if k.strip().lower() == "smtp":
+            smtp_vals.extend(vals)
+    smtp_vals = [s.strip() for s in smtp_vals if s.strip()]
+    if len(set(smtp_vals)) > 1:
+        return False  # višeznačan smtp= -> ne riskiraj (apprise last-wins)
+    hosts = [h for h in (smtp_vals or []) + [p.hostname or ""] if h]
+    if not hosts:
         return False  # nema odredišta -> ne šalji
-    try:
-        addrs = socket.getaddrinfo(host, None)
-    except OSError:
-        return False
-    return not any(_is_blocked_addr(sa[4][0]) for sa in addrs)
+    for host in hosts:
+        try:
+            addrs = socket.getaddrinfo(host, None)
+        except OSError:
+            return False
+        if any(_is_blocked_addr(sa[4][0]) for sa in addrs):
+            return False
+    return True
 
 
 def render_message(subject: str, body: str) -> str:

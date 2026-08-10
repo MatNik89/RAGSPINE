@@ -255,6 +255,16 @@ def test_send_to_client_mailto_smtp_param_ssrf_blocked(spine, cfg):
     assert result["status"] == "skipped_bad_target"
 
 
+def test_mail_host_ok_parser_differentials():
+    # Codex: case-insensitive ključ + duplikat + ';' razdvajač ne smiju zaobići
+    ok = messaging._mail_host_ok
+    assert ok("mailto://a:b@8.8.8.8") is True
+    assert ok("mailto://a:b@8.8.8.8?SMTP=127.0.0.1") is False        # velika slova
+    assert ok("mailto://a:b@8.8.8.8?smtp=8.8.4.4&smtp=127.0.0.1") is False  # duplikat
+    assert ok("mailto://a:b@8.8.8.8?smtp=127.0.0.1;x=1") is False    # ';' razdvajač
+    assert ok("mailto://a:b@127.0.0.1") is False                     # netloc loopback
+
+
 def test_api_messaging_log(spine, cfg):
     cid = _client(spine, "Log", "70", consent=0)
     messaging.send_to_client(spine, cfg, cid, "Podsjetnik", "tekst")

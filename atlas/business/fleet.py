@@ -28,6 +28,10 @@ def _master_signing_key(spine, cfg) -> str:
                   (secretbox.encrypt(secrets.token_urlsafe(32), cfg),))
     raw = spine.get_override("fleet", "signing_key", "")
     val = secretbox.decrypt(raw, cfg)  # fallback vraća stari plaintext zapis kakav jest
+    if raw.startswith("enc:") and not val:
+        # dešifriranje palo (npr. razišao se jwt_secret) -> NE potpisuj praznim ključem
+        # (inače tih fleet-lockout / lažno valjani potpisi); fail-closed (Codex nalaz)
+        raise RuntimeError("master signing_key se ne može dešifrirati (provjeri jwt_secret)")
     if raw and not raw.startswith("enc:"):  # migracija: stari plaintext -> šifriraj u mjestu
         spine.set_override("fleet", "signing_key", secretbox.encrypt(val, cfg))
     return val
