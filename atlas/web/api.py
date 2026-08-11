@@ -467,6 +467,18 @@ class ModelSettingsBody(BaseModel):
     ollama_url: str = ""
 
 
+class FallbackProfile(BaseModel):
+    provider: str
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    ollama_url: str = ""
+
+
+class FallbacksBody(BaseModel):
+    profiles: list[FallbackProfile] = []
+
+
 class FolderBody(BaseModel):
     path: str
     role: str = "ostalo"
@@ -1108,7 +1120,7 @@ def create_app(spine, cfg) -> FastAPI:
     def _answer(query: str, actor: Actor, fresh: bool = False) -> dict:
         try:
             return pipeline.answer(spine, cfg, query, actor.username,
-                                   llm=LLMClient(model_settings.apply(spine, cfg)), fresh=fresh,
+                                   llm=model_settings.build_llm(spine, cfg), fresh=fresh,
                                    actor=actor)
         except (LLMUnavailable, LLMError):
             return {"answer": "LLM trenutno nedostupan ili je vratio grešku.", "lane": "chat",
@@ -1131,7 +1143,7 @@ def create_app(spine, cfg) -> FastAPI:
         # jednokratni vlasnički token za /chat/potvrdi.
         if actor.role not in _AGENT_ROLES or router_mod.route(body.q) != "chat":
             return _answer(body.q, actor, fresh=body.fresh)
-        llm = LLMClient(model_settings.apply(spine, cfg))
+        llm = model_settings.build_llm(spine, cfg)
         try:
             res = agent.run_agent(spine, cfg, body.q, actor, llm)
         except (LLMUnavailable, LLMError):
@@ -1942,13 +1954,28 @@ def create_app(spine, cfg) -> FastAPI:
         try:
             return model_settings.save(spine, body.provider, body.model, body.base_url,
                                        body.api_key, body.embed_model, body.ollama_url,
-                                       actor.username)
+                                       actor.username, cfg=cfg)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/model/test")
     def model_test(user: str = Depends(require_user_web)):
         return model_settings.test_connection(spine, cfg)
+
+    @app.get("/model/fallbacks")
+    def model_fallbacks_get(user: str = Depends(require_user_web)):
+        return {"fallbacks": model_settings.get_fallbacks(spine)}
+
+    @app.post("/model/fallbacks")
+    def model_fallbacks_set(body: FallbacksBody, actor: Actor = Depends(require_actor_web)):
+        # isti exfiltracijski vektor kao primarni model -> admin/owner
+        _require_admin(actor)
+        try:
+            model_settings.set_fallbacks(
+                spine, [p.model_dump() for p in body.profiles], cfg, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"ok": True, "count": len(body.profiles)}
 
     @app.get("/folders/browse")
     def folders_browse(path: str | None = None, user: str = Depends(require_user_web)):
@@ -2154,7 +2181,7 @@ def create_app(spine, cfg) -> FastAPI:
             _guard_client(actor, body.client_id)
         # LLM je fallback — bez konfiguriranog providera ekstrakcija ide regex-only
         try:
-            llm = LLMClient(model_settings.apply(spine, cfg))
+            llm = model_settings.build_llm(spine, cfg)
         except Exception:
             llm = None
         try:
@@ -2489,7 +2516,7 @@ def create_app(spine, cfg) -> FastAPI:
         if not limiter.allow(f"assist:{actor.user_id}", limit=20, window_s=60.0):
             raise HTTPException(429, "previše assist zahtjeva — uspori tipkanje")
         try:
-            llm = LLMClient(model_settings.apply(spine, cfg))
+            llm = model_settings.build_llm(spine, cfg)
         except Exception:
             llm = None
         return client_assist.assist(spine, cfg, body.model_dump(), llm=llm, actor=actor)
@@ -2699,7 +2726,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/translate")
     def translate_text(body: TranslateBody, user: str = Depends(require_user_web)):
         try:
-            text = translate_mod.translate(LLMClient(model_settings.apply(spine, cfg)), body.text, body.target)
+            text = translate_mod.translate(model_settings.build_llm(spine, cfg), body.text, body.target)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except (LLMUnavailable, LLMError) as e:
@@ -2929,7 +2956,7 @@ def create_app(spine, cfg) -> FastAPI:
             return _answer(query, actor)
         try:
             res = agent.run_agent(spine, cfg, query, actor,
-                                  LLMClient(model_settings.apply(spine, cfg)))
+                                  model_settings.build_llm(spine, cfg))
         except (LLMUnavailable, LLMError):
             return _answer(query, actor)
         from atlas.business import telegram_gateway as _tgw

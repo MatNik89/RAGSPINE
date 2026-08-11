@@ -114,7 +114,7 @@ def memory_distill_job(spine, cfg) -> None:
     from atlas.business import model_settings
     from atlas.core.llm import LLMClient
     from atlas.knowledge import memory_layers
-    llm = LLMClient(model_settings.apply(spine, cfg))
+    llm = model_settings.build_llm(spine, cfg)
     pairs = spine.read().execute(
         "SELECT DISTINCT org_id, user_id FROM mem_l0 WHERE distilled=0").fetchall()
     done = 0

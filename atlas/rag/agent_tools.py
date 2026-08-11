@@ -260,7 +260,7 @@ def _run_povezanost(spine, cfg, actor, args) -> dict:
     from atlas.rag import graphrag
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
     try:
-        llm = LLMClient(model_settings.apply(spine, cfg))
+        llm = model_settings.build_llm(spine, cfg)
     except Exception:
         llm = None
     return {"odgovor": graphrag.handle(spine, cfg, args["upit"], llm, visible=visible,
