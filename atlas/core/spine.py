@@ -105,6 +105,10 @@ CREATE TABLE IF NOT EXISTS agent_grants(id INTEGER PRIMARY KEY, org_id INTEGER,
   scope TEXT, user_id INTEGER, tool TEXT, target TEXT, max_risk TEXT,
   expire_at TEXT, created_by TEXT, revoked INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS parked_actions(id INTEGER PRIMARY KEY, org_id INTEGER,
+  source TEXT, tool TEXT, args_json TEXT, summary TEXT, risk TEXT,
+  status TEXT DEFAULT 'pending', created_by TEXT, created_at TEXT DEFAULT (datetime('now')),
+  resolved_by TEXT, resolved_at TEXT);
 CREATE TABLE IF NOT EXISTS device_tokens(device_id INTEGER PRIMARY KEY, token_hash TEXT,
   created_at TEXT DEFAULT (datetime('now')), revoked INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS fleet_programs(key TEXT PRIMARY KEY, label TEXT, added_by TEXT,

@@ -179,7 +179,17 @@ def _skills_catalog_text(spine, actor) -> str:
             "ucitaj_vjestinu(ime) da učitaš pune korake kad su relevantne:\n" + lines)
 
 
-def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
+def run_unattended(spine, cfg, query: str, actor, llm, source: str, max_steps: int = 6) -> dict:
+    """Autonomni (nenadzirani) run: agent AUTONOMNO odradi read/draft; svaku
+    write-radnju koju NE pokriva grant PARKIRA (red za odobrenje) i NASTAVLJA —
+    ne dira podatke bez odobrenja. HIGH-rizik uvijek parkiran (safety-floor).
+    Vrati {text, parkirano:[id], izvrseno:[tool]}."""
+    return run_agent(spine, cfg, query, actor, llm, max_steps=max_steps,
+                     unattended=True, source=source)
+
+
+def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
+              unattended: bool = False, source: str = "") -> dict:
     # pokaži SAMO alate koje uloga smije — model tako ne predloži zabranjeni alat
     # pa lažno ne tvrdi da ga je izvršio (iskrenost umj. tihog pada; OpenWorker obrazac)
     tools = [{"name": t.name, "description": t.description, "schema": t.schema}
@@ -194,11 +204,16 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
     # (memorija; Codex). Upit uključen jer user-tipkan OIB nije halucinacija.
     observed_oibs: set = agent_guards.observed_oibs(query)
     seen_calls: set = set()  # potpisi USPJEŠNIH readonly poziva (loop-guard)
+    parkirano: list = []     # id-evi parkiranih radnji (unattended)
+    izvrseno: list = []      # alati auto-izvršeni po grantu (unattended)
 
     def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
-        return {"text": agent_guards.append_evidence_caution(
+        out = {"text": agent_guards.append_evidence_caution(
             text, agent_guards.unverified_oibs(text, observed_oibs)),
             "sources": sources, "pending": None}
+        if unattended:
+            out["parkirano"], out["izvrseno"] = parkirano, izvrseno
+        return out
 
     for _ in range(max_steps):
         result = llm.complete(messages, system=system, tools=tools)
@@ -257,6 +272,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
             continue
 
         summary = summarize_action(name, args)
+        risk = agent_tools.risk(name)
         # perzistentni grant: "potvrdi jednom, zapamti" -> auto-izvrši (SAMO low/med;
         # high nikad, safety-floor u can_auto_approve). Inače normalni propose->confirm.
         from atlas.business import agent_grants
@@ -264,11 +280,26 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
             res = agent_tools.run_tool(spine, cfg, actor, name, args)
             spine.audit(actor.username, "agent_auto_grant", name,
                         json.dumps(args, ensure_ascii=False, default=str))
+            if unattended:  # auto-izvršeno po grantu -> nastavi run
+                izvrseno.append(name)
+                messages.append({"role": "assistant", "content": _echo(result.text, name)})
+                messages.append({"role": "user", "content":
+                                  f"{summary} — automatski odobreno (pravilo). Nastavi."})
+                continue
             return {"text": summary + " (automatski odobreno prema spremljenom pravilu).",
                     "sources": sources, "pending": None, "result": res}
+        if unattended:
+            # nema grant / high-rizik -> PARKIRAJ za odobrenje i NASTAVI (ne diraj podatke)
+            from atlas.business import parked
+            pid = parked.park(spine, actor.org_id, source or "autonomni", name, args, summary, risk)
+            parkirano.append(pid)
+            messages.append({"role": "assistant", "content": _echo(result.text, name)})
+            messages.append({"role": "user", "content":
+                              f"{summary} — stavljeno u red za odobrenje (#{pid}). "
+                              f"Nastavi s ostalim pripremama ili odgovori."})
+            continue
         return {"text": summary, "sources": sources,
-                "pending": {"tool": name, "args": args, "summary": summary,
-                            "risk": agent_tools.risk(name)}}
+                "pending": {"tool": name, "args": args, "summary": summary, "risk": risk}}
 
     return _finish(last_text) if last_text else {
         "text": "Nisam uspio dovršiti zahtjev unutar dopuštenog broja koraka.",

@@ -24,7 +24,44 @@ def _now(now: datetime | None = None) -> datetime:
     return datetime.now(_TZ) if _TZ else datetime.now()
 
 
-def _run_kampanja_obveza(spine, cfg, params: dict, org_id) -> dict:
+def _resolve_actor(spine, org_id, created_by):
+    """Actor (identitet+ovlasti+vidljivost) za autonomni run — po created_by u org-u."""
+    from atlas.business import tenancy
+    row = spine.read().execute("SELECT id FROM users WHERE username=?", (created_by or "",)).fetchone()
+    if row is None:
+        return None
+    return tenancy.actor_for(spine, org_id, row["id"])
+
+
+def _run_autonomni_pregled(spine, cfg, params: dict, org_id, created_by) -> dict:
+    """Autonomni (nenadzirani) agent-run nad zadanim promptom: agent AUTONOMNO
+    odradi read/draft; svaku write-radnju PARKIRA za odobrenje vlasnika (ne dira
+    podatke; high uvijek parkiran). 'Priprema -> potpis' obrazac (OpenWorker/MateClaw)."""
+    from atlas.business import model_settings
+    from atlas.core.llm import LLMError, LLMUnavailable
+    from atlas.rag import agent
+    prompt = (params.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("akcija autonomni_pregled traži 'prompt'")
+    actor = _resolve_actor(spine, org_id, created_by)
+    if actor is None:
+        raise ValueError("ne mogu razriješiti korisnika zadatka za autonomni run")
+    llm = model_settings.build_llm(spine, cfg)
+    try:
+        out = agent.run_unattended(spine, cfg, prompt, actor, llm,
+                                   source=f"zakazano:{created_by}")
+    except (LLMUnavailable, LLMError) as e:
+        raise ValueError(f"LLM nedostupan za autonomni run: {type(e).__name__}") from e
+    return {"parkirano": len(out.get("parkirano", [])),
+            "izvrseno": len(out.get("izvrseno", [])), "tekst": (out.get("text") or "")[:200]}
+
+
+def _validate_autonomni(params: dict) -> None:
+    if not (params.get("prompt") or "").strip():
+        raise ValueError("'prompt' je obavezan (što agent treba pripremiti)")
+
+
+def _run_kampanja_obveza(spine, cfg, params: dict, org_id, created_by=None) -> dict:
     """Pošalji podsjetnik klijentima s NEPREDANOM obvezom `kind` za TEKUĆI mjesec
     (period se računa pri firanju). Consent-gated (send_to_client preskače bez
     pristanka). NAPOMENA: clients/obligations u ATLAS-u NISU org-particionirani
@@ -50,6 +87,8 @@ def _validate_kampanja(params: dict) -> None:
 ACTIONS = {
     "kampanja_obveza": ("Kampanja podsjetnika za nepredanu obvezu",
                         _validate_kampanja, _run_kampanja_obveza),
+    "autonomni_pregled": ("Autonomni AI pregled/priprema (rezultat ide u red za odobrenje)",
+                          _validate_autonomni, _run_autonomni_pregled),
 }
 
 
@@ -141,7 +180,7 @@ def run_due(spine, cfg, now: datetime | None = None) -> list[dict]:
         try:
             if action is None:
                 raise ValueError(f"akcija uklonjena iz allowliste: {r['action_key']}")
-            res = action[2](spine, cfg, params, r["org_id"])
+            res = action[2](spine, cfg, params, r["org_id"], r["created_by"])
             detail = json.dumps(res, ensure_ascii=False, default=str)[:300]
         except Exception as e:  # dead-letter, ne ruši ostale
             status = "error"
