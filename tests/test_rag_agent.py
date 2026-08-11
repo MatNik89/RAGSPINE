@@ -197,3 +197,27 @@ def test_tools_include_writes_for_member(spine, cfg):
     agent.run_agent(spine, cfg, "pitanje", member, fake)
     names = {t["name"] for t in fake.calls[0]["tools"]}
     assert "dodaj_klijenta" in names and "pretrazi" in names
+
+
+def test_fabricated_oib_in_answer_flagged(spine, cfg):
+    # agent u završnom tekstu navede OIB koji nijedan alat nije vidio -> upozorenje
+    fake = FakeLLM([_result(text="Klijent Pekara ima OIB 10000000000.")])
+    out = agent.run_agent(spine, cfg, "koji je OIB Pekare", _actor(spine), fake)
+    assert "10000000000" in out["text"] and "provjerite" in out["text"].lower()
+
+
+def test_loop_guard_stops_repeated_readonly(spine, cfg):
+    # dva ista poziva pretrazi -> drugi put dobije 'već pozvano' umjesto ponovnog run-a
+    calls = []
+
+    class CountLLM(FakeLLM):
+        def complete(self, messages, system=None, model=None, max_tokens=1024,
+                     temperature=0.2, tools=None):
+            calls.append(1)
+            return self.script.pop(0)
+    scr = [_result(tool_calls=[_call("pretrazi", {"upit": "x"})]),
+           _result(tool_calls=[_call("pretrazi", {"upit": "x"})]),
+           _result(text="gotovo")]
+    llm = CountLLM(scr)
+    res = agent.run_agent(spine, cfg, "pitanje", _actor(spine, role="member"), llm)
+    assert res["text"] == "gotovo"  # loop-guard ga vratio na odgovor, nije zapeo

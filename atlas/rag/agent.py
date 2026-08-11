@@ -176,20 +176,38 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
               for t in agent_tools.TOOLS.values() if agent_tools.allowed(actor, t)]
     system = (SYSTEM_PROMPT + _ured_pravila_text(spine)  # pravila ureda ispred svega
               + _skills_catalog_text(spine, actor))       # katalog vještina (progresivno)
+    from atlas.rag import agent_guards
     messages = [{"role": "user", "content": query}]
     sources: list = []
     last_text = ""
+    observed = ""          # sav STVARNO viđeni sadržaj alata (evidence za OIB-guard)
+    seen_calls: set = set()  # potpisi poziva (loop-guard)
+
+    def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
+        return {"text": agent_guards.append_evidence_caution(
+            text, agent_guards.unverified_oibs(text, observed)),
+            "sources": sources, "pending": None}
 
     for _ in range(max_steps):
         result = llm.complete(messages, system=system, tools=tools)
         last_text = result.text
 
         if not result.tool_calls:
-            return {"text": result.text, "sources": sources, "pending": None}
+            return _finish(result.text)
 
         call = result.tool_calls[0]
         name, args = call.get("name"), call.get("args") or {}
         tool = agent_tools.TOOLS.get(name)
+
+        # loop-guard: isti alat+argumenti već pozvan (readonly) = bez napretka
+        lk = agent_guards.loop_key(name, args)
+        if tool is not None and tool.readonly and lk in seen_calls:
+            messages.append({"role": "assistant", "content": _echo(result.text, name)})
+            messages.append({"role": "user", "content":
+                              f"Alat {name} s istim argumentima već je pozvan — "
+                              f"rezultat se nije promijenio. Promijeni pristup ili odgovori."})
+            continue
+        seen_calls.add(lk)
 
         if tool is None:
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
@@ -206,10 +224,11 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
                 messages.append({"role": "user", "content": f"Greška pri pozivu alata {name}: {e}"})
                 continue
             _accumulate_sources(sources, name, tool_result)
+            payload = json.dumps(tool_result, ensure_ascii=False, default=str)
+            observed += "\n" + payload  # evidence (prije reza — vidjeli smo cijelo)
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
-                              f"Rezultat alata {name}: "
-                              f"{json.dumps(tool_result, ensure_ascii=False, default=str)}"})
+                              f"Rezultat alata {name}: {agent_guards.truncate_structured(payload)}"})
             continue
 
         # write alat: NE izvršavaj — samo validiraj i predloži (čeka potvrdu)
@@ -229,5 +248,6 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
                 "pending": {"tool": name, "args": args, "summary": summary,
                             "risk": agent_tools.risk(name)}}
 
-    return {"text": last_text or "Nisam uspio dovršiti zahtjev unutar dopuštenog broja koraka.",
+    return _finish(last_text) if last_text else {
+        "text": "Nisam uspio dovršiti zahtjev unutar dopuštenog broja koraka.",
             "sources": sources, "pending": None}
