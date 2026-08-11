@@ -79,6 +79,14 @@ class ChatBody(BaseModel):
 
 class PendingTokenBody(BaseModel):
     token: str
+    remember: bool = False  # "potvrdi i zapamti" -> stvori user-grant (osim high-rizika)
+
+
+class GrantBody(BaseModel):
+    tool: str
+    args: dict = {}
+    scope: str = "user"          # 'user' (svoj) ili 'org' (cijeli ured; owner)
+    days: int | None = None      # None = trajno
 
 
 class UredPravilaBody(BaseModel):
@@ -1162,7 +1170,8 @@ def create_app(spine, cfg) -> FastAPI:
         # dvostruko klikanje ne izvrši dvaput (atomični consume u confirm_pending);
         # ovlasti se ponovo provjere u run_tool sad, ne na vrijeme prijedloga.
         try:
-            out = agent.confirm_pending(spine, cfg, body.token, actor, _PENDING_TTL_MIN)
+            out = agent.confirm_pending(spine, cfg, body.token, actor, _PENDING_TTL_MIN,
+                                        remember=body.remember)
         except ValueError as e:
             msg = str(e)
             raise HTTPException(404 if "ne postoji" in msg else 400, msg) from e
@@ -1172,6 +1181,34 @@ def create_app(spine, cfg) -> FastAPI:
     def chat_odustani(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
         agent.cancel_pending(spine, body.token, actor)
         return {"ok": True}
+
+    # --- Approval-grantovi ("potvrdi jednom, zapamti"; high-rizik NIKAD auto) ---
+    @app.get("/grants")
+    def grants_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_grants
+        return {"grants": agent_grants.list_grants(spine, actor)}
+
+    @app.post("/grants")
+    def grants_create(body: GrantBody, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_grants
+        if body.scope == "org":  # pravilo za cijeli ured = owner
+            _require_owner(actor)
+        try:
+            gid = agent_grants.create_grant(spine, actor, body.tool, body.args,
+                                            scope=body.scope, days=body.days, user=actor.username)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        return {"id": gid}
+
+    @app.delete("/grants/{grant_id}")
+    def grants_revoke(grant_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_grants
+        try:
+            ok = agent_grants.revoke_grant(spine, actor, grant_id,
+                                           is_owner=(actor.role == "owner"), user=actor.username)
+        except ValueError as e:
+            raise HTTPException(403, str(e)) from e
+        return {"ok": ok}
 
     # --- Napajanje (UPS/NUT + gašenje redom) — sve admin-only ---
     @app.get("/napajanje/config")

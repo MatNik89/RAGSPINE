@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY, user TEXT, action T
   entity TEXT, detail TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS agent_pending(token TEXT PRIMARY KEY, user_id INTEGER,
   org_id INTEGER, tool TEXT, args_json TEXT, created_at TEXT DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS agent_grants(id INTEGER PRIMARY KEY, org_id INTEGER,
+  scope TEXT, user_id INTEGER, tool TEXT, target TEXT, max_risk TEXT,
+  expire_at TEXT, created_by TEXT, revoked INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS device_tokens(device_id INTEGER PRIMARY KEY, token_hash TEXT,
   created_at TEXT DEFAULT (datetime('now')), revoked INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS fleet_programs(key TEXT PRIMARY KEY, label TEXT, added_by TEXT,

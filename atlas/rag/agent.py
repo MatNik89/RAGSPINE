@@ -51,11 +51,12 @@ def stash_pending(spine, actor, pending: dict) -> str:
     return token
 
 
-def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MIN) -> dict:
+def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MIN,
+                    remember: bool = False) -> dict:
     """Atomično potroši vlasnički, ne-istekli pending token i IZVRŠI alat. Ovlasti
     se PONOVO provjere u run_tool sad (ne na vrijeme prijedloga). Dijeljeno između
-    web /chat/potvrdi i Telegram inline potvrde. Vrati {tool, result}. Diže
-    ValueError ('nepostoji'/domenska greška iz run_tool)."""
+    web /chat/potvrdi i Telegram inline potvrde. `remember` -> stvori user-grant za
+    ubuduće (high-rizik se NE pamti; safety-floor). Diže ValueError."""
     with spine.write() as c:
         row = c.execute(
             "SELECT tool, args_json FROM agent_pending "
@@ -65,9 +66,18 @@ def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MI
             raise ValueError("prijedlog ne postoji ili je istekao")
         c.execute("DELETE FROM agent_pending WHERE token=?", (token,))
         tool, args_json = row["tool"], row["args_json"]
-    result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
+    args = json.loads(args_json)
+    result = agent_tools.run_tool(spine, cfg, actor, tool, args)
     spine.audit(actor.username, "agent_execute", tool, args_json)
-    return {"tool": tool, "result": result}
+    remembered = False
+    if remember:
+        from atlas.business import agent_grants
+        try:  # high-rizik create_grant baci -> tiho preskoči (ne može se pamtiti)
+            agent_grants.create_grant(spine, actor, tool, args, scope="user", user=actor.username)
+            remembered = True
+        except ValueError:
+            remembered = False
+    return {"tool": tool, "result": result, "remembered": remembered}
 
 
 def cancel_pending(spine, token: str, actor) -> None:
@@ -247,6 +257,15 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
             continue
 
         summary = summarize_action(name, args)
+        # perzistentni grant: "potvrdi jednom, zapamti" -> auto-izvrši (SAMO low/med;
+        # high nikad, safety-floor u can_auto_approve). Inače normalni propose->confirm.
+        from atlas.business import agent_grants
+        if agent_grants.can_auto_approve(spine, actor, name, args):
+            res = agent_tools.run_tool(spine, cfg, actor, name, args)
+            spine.audit(actor.username, "agent_auto_grant", name,
+                        json.dumps(args, ensure_ascii=False, default=str))
+            return {"text": summary + " (automatski odobreno prema spremljenom pravilu).",
+                    "sources": sources, "pending": None, "result": res}
         return {"text": summary, "sources": sources,
                 "pending": {"tool": name, "args": args, "summary": summary,
                             "risk": agent_tools.risk(name)}}
