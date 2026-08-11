@@ -1,5 +1,7 @@
 """LLM provider dispatcher: OpenAI-compat + Anthropic + Ollama + OAuth fallback."""
+import email.utils
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -11,7 +13,77 @@ class LLMUnavailable(Exception):
 
 
 class LLMError(Exception):
-    pass
+    status: int | None = None          # HTTP status (429/401/…) ako je poznat
+    retry_after_ms: int | None = None  # provider-navedeni prozor (Retry-After)
+
+
+_MAX_RETRY_AFTER_MS = 2 * 60 * 60 * 1000  # 2h gornja granica (anti apsurd)
+
+
+def _parse_retry_after(val: str | None) -> int | None:
+    """Retry-After: sekunde ili HTTP-datum -> ms (clamp 1s..2h)."""
+    if not val:
+        return None
+    val = val.strip()
+    try:
+        return max(1000, min(int(float(val)) * 1000, _MAX_RETRY_AFTER_MS))
+    except ValueError:
+        pass
+    try:
+        dt = email.utils.parsedate_to_datetime(val)
+        import datetime as _d
+        delta = (dt - _d.datetime.now(dt.tzinfo)).total_seconds()
+        if delta > 0:
+            return max(1000, min(int(delta * 1000), _MAX_RETRY_AFTER_MS))
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+class ProviderHealthTracker:
+    """Parkiranje palog providera na cooldown pa ga fallback ne proba svaki upit
+    (moj lanac je inače slijepo retry-ao mrtvog). Uzastopne greške >= prag ->
+    park cooldown_ms; provider-naveden Retry-After parkira ODMAH (ne skraćuje
+    aktivni cooldown). Lijeni istek (bez threada). Process-lokalno; `clock`
+    injektabilan (ms) za testove. MateClaw ProviderHealthTracker obrazac."""
+    def __init__(self, threshold: int = 3, cooldown_ms: int = 300_000, clock=None):
+        import threading
+        self.threshold = max(1, threshold)
+        self.cooldown_ms = max(1000, cooldown_ms)
+        self._clock = clock or (lambda: time.monotonic() * 1000)
+        self._fails: dict[str, int] = {}
+        self._until: dict[str, float] = {}
+        self._lock = threading.Lock()  # FastAPI rute vrte u nitima -> zaključaj mape (Codex)
+
+    def is_in_cooldown(self, key: str) -> bool:
+        with self._lock:
+            until = self._until.get(key)
+            if until is None:
+                return False
+            if self._clock() >= until:  # istekao -> očisti, sljedeći poziv proba
+                self._until.pop(key, None)
+                self._fails.pop(key, None)
+                return False
+            return True
+
+    def record_failure(self, key: str, retry_after_ms: int | None = None) -> None:
+        with self._lock:
+            if retry_after_ms:  # provider rekao kad -> park odmah, nikad ne skraćuj
+                self._until[key] = max(self._until.get(key, 0),
+                                       self._clock() + min(retry_after_ms, _MAX_RETRY_AFTER_MS))
+                return
+            n = self._fails.get(key, 0) + 1
+            self._fails[key] = n
+            if n >= self.threshold:  # max() -> ne skrati dulji aktivni cooldown (Codex)
+                self._until[key] = max(self._until.get(key, 0), self._clock() + self.cooldown_ms)
+
+    def record_success(self, key: str) -> None:
+        with self._lock:
+            self._fails.pop(key, None)
+            self._until.pop(key, None)
+
+
+_health = ProviderHealthTracker()  # dijeljeni singleton (park preživi turnove)
 
 
 @dataclass
@@ -72,9 +144,40 @@ def _default_transport(url: str, headers: dict, body: dict) -> dict:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        raise LLMError(e.read().decode(errors="replace")) from e
+        err = LLMError(e.read().decode(errors="replace"))
+        err.status = e.code
+        try:
+            err.retry_after_ms = _parse_retry_after(e.headers.get("Retry-After"))
+        except Exception:
+            err.retry_after_ms = None
+        raise err from e
     except urllib.error.URLError as e:
         raise LLMError(str(e)) from e
+
+
+def _provider_key(cfg) -> str:
+    """Stabilan identitet providera za health-tracker: provider+endpoint+path+model
+    + KRATKI hash ključa (dva profila s razl. ključem/računom ne dijele cooldown;
+    ne stavljamo sirovi ključ u mapu; Codex)."""
+    if cfg is None:
+        return "none"
+    prov = getattr(cfg, "llm_provider", "") or ""
+    base = getattr(cfg, "llm_base_url", "") or getattr(cfg, "ollama_url", "") or ""
+    path = getattr(cfg, "llm_path", "") or ""
+    model = getattr(cfg, "llm_model", "") or ""
+    key = getattr(cfg, "llm_api_key", "") or ""
+    kh = __import__("hashlib").sha256(key.encode()).hexdigest()[:8] if key else ""
+    return f"{prov}|{base}{path}|{model}|{kh}"
+
+
+def _counts_health(e) -> bool:
+    """Broji li greška prema cooldownu. Request-specifičan 4xx (loš upit/predug/
+    nepoznat model) NIJE provider-kvar -> ne parkiraj zdravog providera (Codex).
+    Timeout/mreža (OSError, LLMUnavailable) i 429/5xx/auth broje."""
+    st = getattr(e, "status", None)
+    if isinstance(e, LLMError) and st in (400, 404, 413, 422):
+        return False
+    return True
 
 
 class FallbackLLM:
@@ -82,30 +185,49 @@ class FallbackLLM:
     sljedeći; digne zadnju grešku ako svi padnu. Sučelje isto kao LLMClient
     (supports_tools/complete) pa ga pozivatelji ne razlikuju. `last_used` pamti
     indeks providera koji je uspio (za dijagnostiku)."""
-    def __init__(self, cfgs: list, transport=None):
+    def __init__(self, cfgs: list, transport=None, health=None):
         self._clients = [LLMClient(c, transport) for c in (cfgs or [])]
+        self._keys = [_provider_key(c) for c in (cfgs or [])]
+        self._health = health or _health
         self.last_used = None
 
     def supports_tools(self) -> bool:
         return self._clients[0].supports_tools() if self._clients else True
 
+    def _try(self, i, kwargs):
+        key = self._keys[i]
+        res = self._clients[i].complete(**kwargs)
+        self._health.record_success(key)
+        self.last_used = i
+        if i > 0:  # vidljivost: upit otišao na ZAMJENSKOG providera (data-residency)
+            import logging
+            logging.getLogger(__name__).warning(
+                "LLM fallback: primarni pao/na cooldownu, poslužio provider #%d", i)
+        return res
+
     def complete(self, messages, system=None, model=None, max_tokens=1024,
                  temperature=0.2, tools=None) -> "LLMResult":
-        import logging
+        kwargs = dict(messages=messages, system=system, model=model,
+                      max_tokens=max_tokens, temperature=temperature, tools=tools)
         last_err = None
-        for i, client in enumerate(self._clients):
+        tried = False
+        for i in range(len(self._clients)):
+            if self._health.is_in_cooldown(self._keys[i]):
+                continue  # parkiran provider -> preskoči (ne troši uzalud)
+            tried = True
             try:
-                res = client.complete(messages, system=system, model=model,
-                                      max_tokens=max_tokens, temperature=temperature, tools=tools)
-                self.last_used = i
-                if i > 0:  # vidljivost: upit je otišao na ZAMJENSKOG providera (data-residency)
-                    logging.getLogger(__name__).warning(
-                        "LLM fallback: primarni pao, poslužio provider #%d", i)
-                return res
-            # uklj. OSError -> socket-timeout/URLError koji nisu omotani kao LLMError
-            # ne smiju prekinuti lanac (Codex); ostalo (bug) neka se digne
+                return self._try(i, kwargs)
             except (LLMUnavailable, LLMError, OSError) as e:
-                last_err = e  # probaj sljedeći provider u lancu
+                (_counts_health(e) and self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None)))
+                last_err = e
+        # svi parkirani -> zadnja šansa: probaj ih ignorirajući cooldown (ne visi bez LLM-a)
+        if not tried:
+            for i in range(len(self._clients)):
+                try:
+                    return self._try(i, kwargs)
+                except (LLMUnavailable, LLMError, OSError) as e:
+                    (_counts_health(e) and self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None)))
+                    last_err = e
         raise last_err or LLMUnavailable("no LLM provider in chain")
 
 
