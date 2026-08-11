@@ -120,7 +120,7 @@ def _llm_complete(spine, cfg, prompt: str):
     koji pokriva i cold-load većih modela."""
     from atlas.business import model_settings
     from atlas.core.llm import LLMClient
-    return LLMClient(model_settings.apply(spine, cfg)).complete(
+    return model_settings.build_llm(spine, cfg).complete(
         [{"role": "user", "content": prompt}], max_tokens=20)
 
 

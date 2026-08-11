@@ -77,6 +77,32 @@ def _default_transport(url: str, headers: dict, body: dict) -> dict:
         raise LLMError(str(e)) from e
 
 
+class FallbackLLM:
+    """Lanac providera: pokušava redom, na LLMUnavailable/LLMError prelazi na
+    sljedeći; digne zadnju grešku ako svi padnu. Sučelje isto kao LLMClient
+    (supports_tools/complete) pa ga pozivatelji ne razlikuju. `last_used` pamti
+    indeks providera koji je uspio (za dijagnostiku)."""
+    def __init__(self, cfgs: list, transport=None):
+        self._clients = [LLMClient(c, transport) for c in (cfgs or [])]
+        self.last_used = None
+
+    def supports_tools(self) -> bool:
+        return self._clients[0].supports_tools() if self._clients else True
+
+    def complete(self, messages, system=None, model=None, max_tokens=1024,
+                 temperature=0.2, tools=None) -> "LLMResult":
+        last_err = None
+        for i, client in enumerate(self._clients):
+            try:
+                res = client.complete(messages, system=system, model=model,
+                                      max_tokens=max_tokens, temperature=temperature, tools=tools)
+                self.last_used = i
+                return res
+            except (LLMUnavailable, LLMError) as e:
+                last_err = e  # probaj sljedeći provider u lancu
+        raise last_err or LLMUnavailable("no LLM provider in chain")
+
+
 class LLMClient:
     def __init__(self, cfg, transport=None):
         self.cfg = cfg

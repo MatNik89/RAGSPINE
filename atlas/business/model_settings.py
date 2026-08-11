@@ -117,33 +117,111 @@ def save(spine, provider: str, model: str = "", base_url: str = "", api_key: str
 
 
 def apply(spine, cfg):
-    """Vrati cfg s DB-odabirom modela nadjačanim preko env-a. Bez odabira → cfg."""
-    s = _raw(spine)
-    prov = s["provider"]
+    """Vrati cfg s DB-odabirom modela (primarni provider). Bez odabira → cfg."""
+    return _apply_profile(cfg, _raw(spine))
+
+
+def _apply_profile(cfg, s: dict):
+    """Nadjačaj cfg jednim provider-profilom (dict: provider/model/base_url/
+    api_key/embed_model/ollama_url). Immutable copy (dataclasses.replace).
+    Dijele apply() i chain() — jedan izvor logike po provideru."""
+    prov = s.get("provider")
     if not prov:
         return cfg
-    model = s["model"] or cfg.llm_model
-    base = s["base_url"]
-    embed = s["embed_model"] or cfg.embed_model
+    model = s.get("model") or cfg.llm_model
+    base = s.get("base_url") or ""
+    embed = s.get("embed_model") or cfg.embed_model
     if prov == "ollama":
         # llm_path="" — reset od eventualnog prijašnjeg openai-kompat odabira (npr.
         # Gemini); inače cfg nosi tuđi put dok se aplikacija ne restarta (review nalaz).
         return dataclasses.replace(cfg, llm_provider="ollama", llm_base_url="", llm_api_key="",
                                    llm_model=model, llm_path="",
-                                   ollama_url=(s["ollama_url"] or base or cfg.ollama_url),
+                                   ollama_url=(s.get("ollama_url") or base or cfg.ollama_url),
                                    embed_model=embed)
     if prov == "anthropic":
         b = base or cfg.anthropic_base_url
         return dataclasses.replace(cfg, llm_provider="anthropic", llm_base_url=b,
-                                   llm_api_key=s["api_key"], llm_model=model, llm_path="",
+                                   llm_api_key=s.get("api_key"), llm_model=model, llm_path="",
                                    anthropic_base_url=b, embed_model=embed)
     # openai-compat (svi ostali katalog ključevi, uklj. "custom"): put iza base_url
     # dolazi iz kataloga (B10) — zadano "/v1/chat/completions" ako ključ nije poznat.
     entry = _CATALOG_BY_KEY.get(prov, {})
     return dataclasses.replace(cfg, llm_provider="openai",
                                llm_base_url=(base or entry.get("base_url") or "https://api.openai.com"),
-                               llm_api_key=s["api_key"], llm_model=model, embed_model=embed,
+                               llm_api_key=s.get("api_key"), llm_model=model, embed_model=embed,
                                llm_path=entry.get("path") or "/v1/chat/completions")
+
+
+_FB_KEYS = ("provider", "model", "base_url", "api_key", "ollama_url")
+
+
+def get_fallbacks(spine) -> list[dict]:
+    """Za UI — bez sirovog ključa (has_api_key umjesto vrijednosti)."""
+    out = []
+    for p in _fallbacks_raw(spine):
+        out.append({"provider": p.get("provider", ""), "model": p.get("model", ""),
+                    "base_url": p.get("base_url", ""), "ollama_url": p.get("ollama_url", ""),
+                    "has_api_key": bool(p.get("api_key"))})
+    return out
+
+
+def _fallbacks_raw(spine) -> list[dict]:
+    import json
+    raw = spine.get_override("model", "fallbacks", "") or ""
+    try:
+        data = json.loads(raw) if raw else []
+        return data if isinstance(data, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def fallbacks(spine, cfg) -> list[dict]:
+    """Profili s DEŠIFRIRANIM ključem (za gradnju lanca). Nikad se ne izlaže rutom."""
+    from atlas.business import secretbox
+    out = []
+    for p in _fallbacks_raw(spine):
+        d = {k: p.get(k, "") for k in _FB_KEYS}
+        d["api_key"] = secretbox.decrypt(d.get("api_key") or "", cfg)
+        out.append(d)
+    return out
+
+
+def set_fallbacks(spine, profiles: list[dict], cfg, user: str = "?") -> None:
+    """Spremi uređeni popis fallback-providera (šifriraj ključeve). Prazna lista =
+    isključi fallback. base_url ide kroz istu SSRF-provjeru kao primarni."""
+    import json
+
+    from atlas.business import secretbox
+    clean = []
+    for p in (profiles or []):
+        prov = (p.get("provider") or "").strip()
+        if prov not in PROVIDERS:
+            raise ValueError(f"nepoznat provider u fallbacku: {prov!r}")
+        base = (p.get("base_url") or "").strip()
+        if prov != "ollama" and base:
+            _validate_remote_url(base)
+        key = (p.get("api_key") or "").strip()
+        clean.append({
+            "provider": prov, "model": (p.get("model") or "").strip(),
+            "base_url": base, "ollama_url": (p.get("ollama_url") or "").strip(),
+            "api_key": secretbox.encrypt(key, cfg) if key else "",
+        })
+    spine.set_override("model", "fallbacks", json.dumps(clean, ensure_ascii=False))
+    spine.audit(user, "model_fallbacks_save", f"count:{len(clean)}")
+
+
+def chain(spine, cfg) -> list:
+    """Uređeni lanac primijenjenih cfg-ova: [primarni] + fallbacks. Prazan primarni
+    provider -> samo cfg (kao dosad). FallbackLLM ih redom pokušava."""
+    primary = apply(spine, cfg)
+    return [primary] + [_apply_profile(cfg, fb) for fb in fallbacks(spine, cfg)]
+
+
+def build_llm(spine, cfg, transport=None):
+    """Jedinstveni ulaz za gradnju LLM-a: lanac providera s fallbackom. Ako nema
+    fallbacka, ponaša se kao jedan LLMClient (lanac duljine 1)."""
+    from atlas.core.llm import FallbackLLM
+    return FallbackLLM(chain(spine, cfg), transport=transport)
 
 
 def test_connection(spine, cfg) -> dict:
