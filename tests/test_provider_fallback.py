@@ -89,3 +89,39 @@ def test_endpoint_admin_only(spine, cfg):
     assert c.post("/model/fallbacks", headers={"Authorization": f"Bearer {tm}"}, json=body).status_code == 403
     assert c.post("/model/fallbacks", headers=ho, json=body).status_code == 200
     assert c.get("/model/fallbacks", headers=ho).json()["fallbacks"][0]["provider"] == "ollama"
+
+
+def test_masked_key_preserved_on_resave(spine, cfg):
+    # GET maskira ključ; ponovni POST bez ključa (prazan) NE smije obrisati stari
+    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://api.deepseek.com",
+                              "api_key": "TAJNI123"}], cfg)
+    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://api.deepseek.com",
+                              "api_key": ""}], cfg)  # read-edit-write, ključ maskiran
+    assert ms.fallbacks(spine, cfg)[0]["api_key"] == "TAJNI123"
+
+
+def test_fallbacks_count_capped(spine, cfg):
+    many = [{"provider": "ollama", "ollama_url": "http://127.0.0.1:11434"} for _ in range(6)]
+    with pytest.raises(ValueError):
+        ms.set_fallbacks(spine, many, cfg)
+
+
+def test_primary_key_encrypted_at_rest_with_cfg(spine, cfg):
+    ms.save(spine, "anthropic", model="claude", api_key="PRIMARN0", cfg=cfg)
+    raw = spine.get_override("model", "api_key", "")
+    assert "PRIMARN0" not in raw and raw.startswith("enc:")  # šifriran u bazi
+    assert ms.apply(spine, cfg).llm_api_key == "PRIMARN0"     # apply dešifrira
+
+
+def test_primary_key_plaintext_backcompat_without_cfg(spine, cfg):
+    ms.save(spine, "anthropic", model="claude", api_key="STAR1")  # bez cfg = plaintext
+    assert ms.apply(spine, cfg).llm_api_key == "STAR1"  # apply svejedno radi (fallback)
+
+
+def test_fallback_logs_and_survives_oserror(monkeypatch):
+    class OSErrClient:
+        def supports_tools(self): return True
+        def complete(self, *a, **k): raise OSError("timeout")
+    f = FallbackLLM([None, None])
+    f._clients = [OSErrClient(), _FakeClient(fail=False, tag="drugi")]
+    assert f.complete([]).text == "drugi"  # OSError na primarnom -> ide na sljedeći

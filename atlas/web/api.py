@@ -1954,7 +1954,7 @@ def create_app(spine, cfg) -> FastAPI:
         try:
             return model_settings.save(spine, body.provider, body.model, body.base_url,
                                        body.api_key, body.embed_model, body.ollama_url,
-                                       actor.username)
+                                       actor.username, cfg=cfg)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 

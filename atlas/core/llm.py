@@ -91,14 +91,20 @@ class FallbackLLM:
 
     def complete(self, messages, system=None, model=None, max_tokens=1024,
                  temperature=0.2, tools=None) -> "LLMResult":
+        import logging
         last_err = None
         for i, client in enumerate(self._clients):
             try:
                 res = client.complete(messages, system=system, model=model,
                                       max_tokens=max_tokens, temperature=temperature, tools=tools)
                 self.last_used = i
+                if i > 0:  # vidljivost: upit je otišao na ZAMJENSKOG providera (data-residency)
+                    logging.getLogger(__name__).warning(
+                        "LLM fallback: primarni pao, poslužio provider #%d", i)
                 return res
-            except (LLMUnavailable, LLMError) as e:
+            # uklj. OSError -> socket-timeout/URLError koji nisu omotani kao LLMError
+            # ne smiju prekinuti lanac (Codex); ostalo (bug) neka se digne
+            except (LLMUnavailable, LLMError, OSError) as e:
                 last_err = e  # probaj sljedeći provider u lancu
         raise last_err or LLMUnavailable("no LLM provider in chain")
 
