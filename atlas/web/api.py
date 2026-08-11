@@ -1132,7 +1132,8 @@ def create_app(spine, cfg) -> FastAPI:
         pending = res.get("pending")
         if pending:
             token = agent.stash_pending(spine, actor, pending)
-            out["pending"] = {"token": token, "summary": pending["summary"]}
+            out["pending"] = {"token": token, "summary": pending["summary"],
+                              "risk": pending.get("risk", "med")}
         return out
 
     @app.post("/chat/potvrdi")
