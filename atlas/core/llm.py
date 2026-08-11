@@ -47,35 +47,40 @@ class ProviderHealthTracker:
     aktivni cooldown). Lijeni istek (bez threada). Process-lokalno; `clock`
     injektabilan (ms) za testove. MateClaw ProviderHealthTracker obrazac."""
     def __init__(self, threshold: int = 3, cooldown_ms: int = 300_000, clock=None):
+        import threading
         self.threshold = max(1, threshold)
         self.cooldown_ms = max(1000, cooldown_ms)
         self._clock = clock or (lambda: time.monotonic() * 1000)
         self._fails: dict[str, int] = {}
         self._until: dict[str, float] = {}
+        self._lock = threading.Lock()  # FastAPI rute vrte u nitima -> zaključaj mape (Codex)
 
     def is_in_cooldown(self, key: str) -> bool:
-        until = self._until.get(key)
-        if until is None:
-            return False
-        if self._clock() >= until:  # istekao -> očisti, sljedeći poziv proba
-            self._until.pop(key, None)
-            self._fails.pop(key, None)
-            return False
-        return True
+        with self._lock:
+            until = self._until.get(key)
+            if until is None:
+                return False
+            if self._clock() >= until:  # istekao -> očisti, sljedeći poziv proba
+                self._until.pop(key, None)
+                self._fails.pop(key, None)
+                return False
+            return True
 
     def record_failure(self, key: str, retry_after_ms: int | None = None) -> None:
-        if retry_after_ms:  # provider rekao kad -> park odmah, nikad ne skraćuj
-            self._until[key] = max(self._until.get(key, 0),
-                                   self._clock() + min(retry_after_ms, _MAX_RETRY_AFTER_MS))
-            return
-        n = self._fails.get(key, 0) + 1
-        self._fails[key] = n
-        if n >= self.threshold:
-            self._until[key] = self._clock() + self.cooldown_ms
+        with self._lock:
+            if retry_after_ms:  # provider rekao kad -> park odmah, nikad ne skraćuj
+                self._until[key] = max(self._until.get(key, 0),
+                                       self._clock() + min(retry_after_ms, _MAX_RETRY_AFTER_MS))
+                return
+            n = self._fails.get(key, 0) + 1
+            self._fails[key] = n
+            if n >= self.threshold:  # max() -> ne skrati dulji aktivni cooldown (Codex)
+                self._until[key] = max(self._until.get(key, 0), self._clock() + self.cooldown_ms)
 
     def record_success(self, key: str) -> None:
-        self._fails.pop(key, None)
-        self._until.pop(key, None)
+        with self._lock:
+            self._fails.pop(key, None)
+            self._until.pop(key, None)
 
 
 _health = ProviderHealthTracker()  # dijeljeni singleton (park preživi turnove)
@@ -151,13 +156,28 @@ def _default_transport(url: str, headers: dict, body: dict) -> dict:
 
 
 def _provider_key(cfg) -> str:
-    """Stabilan identitet providera za health-tracker (provider+endpoint+model)."""
+    """Stabilan identitet providera za health-tracker: provider+endpoint+path+model
+    + KRATKI hash ključa (dva profila s razl. ključem/računom ne dijele cooldown;
+    ne stavljamo sirovi ključ u mapu; Codex)."""
     if cfg is None:
         return "none"
     prov = getattr(cfg, "llm_provider", "") or ""
     base = getattr(cfg, "llm_base_url", "") or getattr(cfg, "ollama_url", "") or ""
+    path = getattr(cfg, "llm_path", "") or ""
     model = getattr(cfg, "llm_model", "") or ""
-    return f"{prov}|{base}|{model}"
+    key = getattr(cfg, "llm_api_key", "") or ""
+    kh = __import__("hashlib").sha256(key.encode()).hexdigest()[:8] if key else ""
+    return f"{prov}|{base}{path}|{model}|{kh}"
+
+
+def _counts_health(e) -> bool:
+    """Broji li greška prema cooldownu. Request-specifičan 4xx (loš upit/predug/
+    nepoznat model) NIJE provider-kvar -> ne parkiraj zdravog providera (Codex).
+    Timeout/mreža (OSError, LLMUnavailable) i 429/5xx/auth broje."""
+    st = getattr(e, "status", None)
+    if isinstance(e, LLMError) and st in (400, 404, 413, 422):
+        return False
+    return True
 
 
 class FallbackLLM:
@@ -198,7 +218,7 @@ class FallbackLLM:
             try:
                 return self._try(i, kwargs)
             except (LLMUnavailable, LLMError, OSError) as e:
-                self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None))
+                (_counts_health(e) and self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None)))
                 last_err = e
         # svi parkirani -> zadnja šansa: probaj ih ignorirajući cooldown (ne visi bez LLM-a)
         if not tried:
@@ -206,7 +226,7 @@ class FallbackLLM:
                 try:
                     return self._try(i, kwargs)
                 except (LLMUnavailable, LLMError, OSError) as e:
-                    self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None))
+                    (_counts_health(e) and self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None)))
                     last_err = e
         raise last_err or LLMUnavailable("no LLM provider in chain")
 

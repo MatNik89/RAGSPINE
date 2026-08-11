@@ -193,3 +193,36 @@ def test_parse_retry_after_seconds_and_clamp():
     assert _parse_retry_after("0") == 1000            # clamp donji
     assert _parse_retry_after(None) is None
     assert _parse_retry_after("smeće") is None
+
+
+def test_client_error_400_does_not_park_provider():
+    # request-specifičan 400 (loš upit) NE smije parkirati zdravog primarnog (Codex)
+    from atlas.core.llm import _counts_health
+    e400 = LLMError("bad request"); e400.status = 400
+    assert _counts_health(e400) is False
+    e429 = LLMError("rate"); e429.status = 429
+    assert _counts_health(e429) is True
+    assert _counts_health(LLMUnavailable("x")) is True
+    assert _counts_health(OSError("timeout")) is True
+
+
+def test_fallback_400_on_primary_still_fails_over_but_no_park():
+    h = ProviderHealthTracker(threshold=1, cooldown_ms=10_000, clock=lambda: 0)
+    f = FallbackLLM([None, None], health=h)
+    f._keys = ["p0", "p1"]
+
+    class _C400:
+        def supports_tools(self): return True
+        def complete(self, **k):
+            e = LLMError("bad"); e.status = 400; raise e
+    f._clients = [_C400(), _FakeClient(fail=False, tag="ok")]
+    assert f.complete([]).text == "ok"
+    assert h.is_in_cooldown("p0") is False  # 400 nije parkirao primarnog
+
+
+def test_provider_key_differs_by_apikey():
+    import types
+    from atlas.core.llm import _provider_key
+    a = types.SimpleNamespace(llm_provider="openai", llm_base_url="u", llm_path="", llm_model="m", llm_api_key="k1", ollama_url="")
+    b = types.SimpleNamespace(llm_provider="openai", llm_base_url="u", llm_path="", llm_model="m", llm_api_key="k2", ollama_url="")
+    assert _provider_key(a) != _provider_key(b) and "k1" not in _provider_key(a)
