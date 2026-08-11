@@ -49,7 +49,7 @@ def test_set_and_get_fallbacks_masks_key(spine, cfg):
     ms.set_fallbacks(spine, [
         {"provider": "ollama", "model": "llama3", "ollama_url": "http://127.0.0.1:11434"},
         {"provider": "deepseek", "model": "deepseek-chat",
-         "base_url": "https://api.deepseek.com", "api_key": "TAJNI123"},
+         "base_url": "https://8.8.8.8", "api_key": "TAJNI123"},
     ], cfg)
     ui = ms.get_fallbacks(spine)
     assert [p["provider"] for p in ui] == ["ollama", "deepseek"]
@@ -57,7 +57,7 @@ def test_set_and_get_fallbacks_masks_key(spine, cfg):
 
 
 def test_fallbacks_key_encrypted_at_rest(spine, cfg):
-    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://api.deepseek.com",
+    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://8.8.8.8",
                               "api_key": "TAJNI123"}], cfg)
     raw = spine.get_override("model", "fallbacks", "")
     assert "TAJNI123" not in raw  # šifriran u bazi
@@ -99,9 +99,9 @@ def test_endpoint_admin_only(spine, cfg):
 
 def test_masked_key_preserved_on_resave(spine, cfg):
     # GET maskira ključ; ponovni POST bez ključa (prazan) NE smije obrisati stari
-    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://api.deepseek.com",
+    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://8.8.8.8",
                               "api_key": "TAJNI123"}], cfg)
-    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://api.deepseek.com",
+    ms.set_fallbacks(spine, [{"provider": "deepseek", "base_url": "https://8.8.8.8",
                               "api_key": ""}], cfg)  # read-edit-write, ključ maskiran
     assert ms.fallbacks(spine, cfg)[0]["api_key"] == "TAJNI123"
 
