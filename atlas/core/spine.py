@@ -290,6 +290,8 @@ class Spine:
                 "access_count": "INTEGER DEFAULT 0",
             })
             _ensure_columns(c, "agent_enrollments", {"source": "TEXT DEFAULT ''"})
+            _ensure_columns(c, "mem_l1", {"recall_count": "INTEGER DEFAULT 0",
+                                          "last_recalled_at": "TEXT"})
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             _ensure_columns(c, "devices", {
