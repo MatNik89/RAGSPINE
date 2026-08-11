@@ -15,11 +15,22 @@ def park(spine, org_id, source: str, tool: str, args: dict, summary: str, risk: 
 
 
 def list_pending(spine, org_id, limit: int = 100) -> list[dict]:
+    # vraća i ARGUMENTE (parsirane) da vlasnik VIDI što će se izvršiti prije
+    # odobrenja — npr. tijelo poruke klijentu koje je AI sastavio (Codex: inače
+    # slijepo odobrenje model-kontroliranog sadržaja)
     rows = spine.read().execute(
-        "SELECT id, source, tool, summary, risk, created_at FROM parked_actions "
+        "SELECT id, source, tool, summary, risk, args_json, created_at FROM parked_actions "
         "WHERE org_id=? AND status='pending' ORDER BY id DESC LIMIT ?",
         (org_id, limit)).fetchall()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["args"] = json.loads(d.pop("args_json") or "{}")
+        except (ValueError, TypeError):
+            d["args"] = {}
+        out.append(d)
+    return out
 
 
 def approve(spine, cfg, park_id: int, actor) -> dict:
@@ -39,8 +50,8 @@ def approve(spine, cfg, park_id: int, actor) -> dict:
         tool, args_json = row["tool"], row["args_json"]
     try:
         result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
-    except ValueError:
-        with spine.write() as c:  # neuspjeh -> vrati na pending da se može opet
+    except Exception:  # BILO KOJI neuspjeh -> vrati na pending (ne ostane 'approving'; Codex)
+        with spine.write() as c:
             c.execute("UPDATE parked_actions SET status='pending' WHERE id=?", (park_id,))
         raise
     with spine.write() as c:

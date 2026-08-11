@@ -106,3 +106,39 @@ def test_autonomni_action_registered():
     from atlas.business import scheduler_tasks as st
     assert "autonomni_pregled" in st.ACTIONS
     assert any(a["key"] == "autonomni_pregled" for a in st.action_labels())
+
+
+def test_unattended_denies_izvezi_excel(spine, cfg):
+    a = _actor(spine)
+    llm = FakeLLM([_r(calls=[{"name": "izvezi_excel", "args": {"sto": "klijenti"}}]),
+                  _r(text="gotovo")])
+    out = agent.run_unattended(spine, cfg, "izvezi", a, llm, source="t")
+    assert out["parkirano"] == [] and out["izvrseno"] == []  # nije izvršeno ni parkirano
+
+
+def test_unattended_forces_pretrazi_no_web(spine, cfg):
+    a = _actor(spine)
+    seen = {}
+    import atlas.rag.agent_tools as at
+    orig = at.run_tool
+    def spy(spine_, cfg_, actor_, name, args):
+        if name == "pretrazi":
+            seen["web"] = args.get("web")
+            return {"lokalno": []}
+        return orig(spine_, cfg_, actor_, name, args)
+    at.run_tool = spy
+    try:
+        llm = FakeLLM([_r(calls=[{"name": "pretrazi", "args": {"upit": "x", "web": True}}]),
+                      _r(text="ok")])
+        agent.run_unattended(spine, cfg, "traži", a, llm, source="t")
+    finally:
+        at.run_tool = orig
+    assert seen.get("web") is False  # web egress ugašen u autonomiji
+
+
+def test_parked_list_exposes_args(spine, cfg):
+    a = _actor(spine, role="owner", username="g")
+    parked.park(spine, a.org_id, "t", "posalji_poruku_klijentu",
+                {"klijent": "X", "naslov": "N", "tekst": "TAJNO-TIJELO"}, "Poslat ću", "high")
+    pend = parked.list_pending(spine, a.org_id)
+    assert pend[0]["args"]["tekst"] == "TAJNO-TIJELO"  # vlasnik vidi sadržaj prije odobrenja

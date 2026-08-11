@@ -30,7 +30,10 @@ def _resolve_actor(spine, org_id, created_by):
     row = spine.read().execute("SELECT id FROM users WHERE username=?", (created_by or "",)).fetchone()
     if row is None:
         return None
-    return tenancy.actor_for(spine, org_id, row["id"])
+    actor = tenancy.actor_for(spine, org_id, row["id"])
+    if actor is not None:  # atribucija: audit/autor mora nositi ime, ne prazno (Codex)
+        actor.username = created_by
+    return actor
 
 
 def _run_autonomni_pregled(spine, cfg, params: dict, org_id, created_by) -> dict:

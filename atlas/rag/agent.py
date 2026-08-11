@@ -179,6 +179,11 @@ def _skills_catalog_text(spine, actor) -> str:
             "ucitaj_vjestinu(ime) da učitaš pune korake kad su relevantne:\n" + lines)
 
 
+# readonly alati s vanjskim/file-efektom — ne izvršavaju se u autonomnom (unattended)
+# radu (izvezi_excel piše datoteke; nauci_izvor je ionako write/high)
+_UNATTENDED_DENY_READONLY = frozenset({"izvezi_excel"})
+
+
 def run_unattended(spine, cfg, query: str, actor, llm, source: str, max_steps: int = 6) -> dict:
     """Autonomni (nenadzirani) run: agent AUTONOMNO odradi read/draft; svaku
     write-radnju koju NE pokriva grant PARKIRA (red za odobrenje) i NASTAVLJA —
@@ -244,6 +249,16 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             continue
 
         if tool.readonly:
+            if unattended:
+                # autonomni run: readonly s vanjskim/file-efektom NE smije auto (injection
+                # kroz pročitani dokument mogao bi izvesti podatke/pisati datoteke; Codex)
+                if name in _UNATTENDED_DENY_READONLY:
+                    messages.append({"role": "assistant", "content": _echo(result.text, name)})
+                    messages.append({"role": "user", "content":
+                                      f"Alat {name} nije dostupan u autonomnom radu. Nastavi bez njega."})
+                    continue
+                if name == "pretrazi":
+                    args = {**args, "web": False}  # bez egress-a van LAN-a u autonomiji
             try:
                 tool_result = agent_tools.run_tool(spine, cfg, actor, name, args)
             except ValueError as e:
