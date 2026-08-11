@@ -561,7 +561,13 @@ _HIGH_RISK = frozenset({"posalji_poruku_klijentu", "pokreni_program",
 def risk(name: str) -> str:
     """Rizik alata: 'low' (čita), 'med' (piše u bazu ureda), 'high' (vanjska
     nuspojava). Nepoznat alat -> 'high' (fail-safe: neklasificirano = najoprezniji
-    tier). Čista funkcija — UI/potvrda prikažu jačinu, high traži jaču potvrdu."""
+    tier). Čista funkcija — UI/potvrda prikažu jačinu, high traži jaču potvrdu.
+
+    SAVJETODAVNO (Codex): ovo je LABEL za prikaz, ne gate — write alati ionako idu
+    kroz propose->confirm. Neki readonly alati imaju uzgredne efekte koje ovaj
+    label NE hvata: `pretrazi` (web=True/auto) šalje upit van LAN-a, `popis_obveza`/
+    `izvezi_excel` okidaju ensure_period (materijalizacija obveza). To su
+    pre-postojeća ponašanja; egress-uz-potvrdu je zaseban širi zahvat."""
     tool = TOOLS.get(name)
     if tool is None or name in _HIGH_RISK:
         return "high"

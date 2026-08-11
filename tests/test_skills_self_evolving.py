@@ -81,3 +81,53 @@ def test_draft_skill_not_in_active_catalog(spine, cfg):
         "args": {"ime": "Nacrt", "koraci": "1. x"}})
     agent.confirm_pending(spine, cfg, token, a)
     assert skills_mod.list_skills(spine, a.org_id, status="active") == []
+
+
+def test_skills_create_endpoint_denies_viewer(spine, cfg):
+    from fastapi.testclient import TestClient
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
+    from tests.conftest import complete_setup
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw"); complete_setup(spine)
+    add_user(spine, "v", "pw")
+    tv = c.post("/auth/login", json={"username": "v", "password": "pw"}).json()["token"]
+    tenancy.add_member(spine, tenancy.default_org_id(spine),
+                       spine.read().execute("SELECT id FROM users WHERE username='v'").fetchone()["id"], "viewer")
+    r = c.post("/skills", headers={"Authorization": f"Bearer {tv}"},
+               json={"name": "X", "steps": "1", "visibility": "org"})
+    assert r.status_code == 403  # viewer ne smije autorirati vještinu
+
+
+def test_activate_shared_skill_requires_admin(spine, cfg):
+    # member kreira org-vidljivu vještinu, ali je NE smije sam aktivirati (u prompt svih)
+    from fastapi.testclient import TestClient
+    from atlas.web.api import create_app
+    from atlas.web.deps import add_user
+    from tests.conftest import complete_setup
+    c = TestClient(create_app(spine, cfg))
+    add_user(spine, "gazda", "pw"); complete_setup(spine)
+    add_user(spine, "m", "pw")
+    tm = c.post("/auth/login", json={"username": "m", "password": "pw"}).json()["token"]
+    hm = {"Authorization": f"Bearer {tm}"}
+    tenancy.add_member(spine, tenancy.default_org_id(spine),
+                       spine.read().execute("SELECT id FROM users WHERE username='m'").fetchone()["id"], "member")
+    sid = c.post("/skills", headers=hm, json={"name": "Org vj", "steps": "1", "visibility": "org"}).json()["id"]
+    r = c.post(f"/skills/{sid}/status", headers=hm, json={"status": "active"})
+    assert r.status_code == 403
+
+
+def test_create_skill_caps_fields_and_count(spine, cfg):
+    from atlas.business import tenancy as tn
+    org = tn.default_org_id(spine)
+    sid = skills_mod.create_skill(spine, org, "N" * 500, description="D" * 900,
+                                  steps="S" * 20000, owner_user_id=1)
+    s = skills_mod.get_skill(spine, sid)
+    assert len(s["name"]) <= 120 and len(s["description"]) <= 300 and len(s["steps"]) <= 8000
+
+
+def test_confirm_summary_shows_steps(spine, cfg):
+    a = _actor(spine)
+    out = agent.summarize_action("predlozi_vjestinu",
+                                 {"ime": "PDV", "opis": "rutina", "koraci": "1. povuci\n2. označi"})
+    assert "povuci" in out and "rutina" in out  # sadržaj vidljiv u potvrdi

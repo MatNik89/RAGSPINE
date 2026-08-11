@@ -107,9 +107,13 @@ def summarize_action(name: str, args: dict) -> str:
     if name == "posalji_poruku_klijentu":
         return f"Poslat ću poruku klijentu {args.get('klijent', '')}: \"{args.get('naslov', '')}\"."
     if name == "predlozi_vjestinu":
-        n = len([s for s in (args.get("koraci") or "").splitlines() if s.strip()])
-        return (f"Spremit ću novu vještinu (nacrt) {args.get('ime', '')!r} "
-                f"({n} korak(a)); ured je kasnije aktivira.")
+        # prikaži STVARNI sadržaj (opis+koraci) da potvrda ne bude slijepa —
+        # sadržaj je nepovjerljiv (može doći iz injektiranog dokumenta); Codex
+        opis = (args.get("opis") or "").strip()[:200]
+        koraci = (args.get("koraci") or "").strip()[:600]
+        d = f"\nOpis: {opis}" if opis else ""
+        return (f"Spremit ću novu vještinu (nacrt) {args.get('ime', '')!r}; ured je "
+                f"kasnije aktivira.{d}\nKoraci:\n{koraci}")
     return f"Izvršit ću akciju {name} s argumentima {args}."
 
 

@@ -1066,6 +1066,10 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/skills")
     def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
+        # vještina = procedura ureda; viewer (samo-čitač) je ne smije autorirati
+        # (inače kroz aktivaciju ide u prompt višeg ranga = stored injection; Codex)
+        if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
+            raise HTTPException(403, "za kreiranje vještine potrebna je barem member uloga")
         if body.visibility not in VISIBILITIES:
             raise HTTPException(400, "nepoznata vidljivost")
         try:
@@ -1089,7 +1093,12 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/skills/{skill_id}/status")
     def skills_status(skill_id: int, body: SkillStatusBody,
                       actor: Actor = Depends(require_actor_web)):
-        _skill_or_404(skill_id, actor, "manage")
+        s = _skill_or_404(skill_id, actor, "manage")
+        # aktivacija NE-private vještine ulazi u agent-prompt SVIH u orgu -> admin+
+        # (private aktivna vještina vidljiva je samo vlasniku; Codex stored-injection)
+        if body.status == "active" and (s["visibility"] or "org") != "private" \
+                and ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
+            raise HTTPException(403, "aktivaciju dijeljene vještine odobrava admin/owner")
         try:
             skills_mod.set_status(spine, skill_id, body.status, user=actor.username)
         except ValueError as e:
