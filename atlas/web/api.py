@@ -1182,6 +1182,28 @@ def create_app(spine, cfg) -> FastAPI:
         agent.cancel_pending(spine, body.token, actor)
         return {"ok": True}
 
+    # --- Parkirane radnje (autonomni run pripremi, vlasnik odobri) ---
+    @app.get("/parkirano")
+    def parkirano_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import parked
+        _require_owner(actor)  # red za odobrenje = vlasnik ureda
+        return {"radnje": parked.list_pending(spine, actor.org_id)}
+
+    @app.post("/parkirano/{park_id}/odobri")
+    def parkirano_approve(park_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import parked
+        _require_owner(actor)
+        try:
+            return parked.approve(spine, cfg, park_id, actor)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+
+    @app.post("/parkirano/{park_id}/odbaci")
+    def parkirano_reject(park_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import parked
+        _require_owner(actor)
+        return {"ok": parked.reject(spine, park_id, actor)}
+
     # --- Approval-grantovi ("potvrdi jednom, zapamti"; high-rizik NIKAD auto) ---
     @app.get("/grants")
     def grants_list(actor: Actor = Depends(require_actor_web)):
