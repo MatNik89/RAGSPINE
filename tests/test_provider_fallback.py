@@ -3,7 +3,7 @@ na sljedeći. Ključevi šifrirani; endpoint admin-only."""
 import pytest
 
 from atlas.business import model_settings as ms
-from atlas.core.llm import FallbackLLM, LLMError, LLMResult, LLMUnavailable
+from atlas.core.llm import FallbackLLM, LLMError, LLMResult, LLMUnavailable, ProviderHealthTracker
 
 
 class _FakeClient:
@@ -22,6 +22,8 @@ class _FakeClient:
 def test_fallback_uses_second_when_first_fails():
     f = FallbackLLM([None, None])
     f._clients = [_FakeClient(fail=True), _FakeClient(fail=False, tag="drugi")]
+    f._keys = [f"p{i}" for i in range(len(f._clients))]
+    f._health = ProviderHealthTracker()
     res = f.complete([{"role": "user", "content": "x"}])
     assert res.text == "drugi" and f.last_used == 1
 
@@ -29,12 +31,16 @@ def test_fallback_uses_second_when_first_fails():
 def test_fallback_first_wins_when_ok():
     f = FallbackLLM([None, None])
     f._clients = [_FakeClient(fail=False, tag="prvi"), _FakeClient(fail=False, tag="drugi")]
+    f._keys = [f"p{i}" for i in range(len(f._clients))]
+    f._health = ProviderHealthTracker()
     assert f.complete([]).text == "prvi" and f.last_used == 0
 
 
 def test_fallback_all_fail_raises_last():
     f = FallbackLLM([None])
     f._clients = [_FakeClient(fail=True), _FakeClient(fail=True)]
+    f._keys = [f"p{i}" for i in range(len(f._clients))]
+    f._health = ProviderHealthTracker()
     with pytest.raises(LLMUnavailable):
         f.complete([])
 
@@ -124,4 +130,66 @@ def test_fallback_logs_and_survives_oserror(monkeypatch):
         def complete(self, *a, **k): raise OSError("timeout")
     f = FallbackLLM([None, None])
     f._clients = [OSErrClient(), _FakeClient(fail=False, tag="drugi")]
+    f._keys = [f"p{i}" for i in range(len(f._clients))]
+    f._health = ProviderHealthTracker()
     assert f.complete([]).text == "drugi"  # OSError na primarnom -> ide na sljedeći
+
+
+# ---------- Provider health-cooldown (MateClaw obrazac) ----------
+
+def test_tracker_parks_after_threshold_and_expires():
+    t = [0]
+    h = ProviderHealthTracker(threshold=3, cooldown_ms=1000, clock=lambda: t[0])
+    for _ in range(2):
+        h.record_failure("p")
+    assert h.is_in_cooldown("p") is False        # 2 < prag 3
+    h.record_failure("p")
+    assert h.is_in_cooldown("p") is True          # 3. -> parkiran
+    t[0] = 999
+    assert h.is_in_cooldown("p") is True
+    t[0] = 1000
+    assert h.is_in_cooldown("p") is False          # istekao -> očišćen
+
+
+def test_tracker_retry_after_parks_immediately_and_never_shortens():
+    t = [0]
+    h = ProviderHealthTracker(threshold=3, cooldown_ms=1000, clock=lambda: t[0])
+    h.record_failure("p", retry_after_ms=5000)     # provider rekao 5s -> odmah park
+    assert h.is_in_cooldown("p") is True
+    h.record_failure("p", retry_after_ms=1000)     # kraći ne smije skratiti
+    t[0] = 1500
+    assert h.is_in_cooldown("p") is True            # još u 5s prozoru
+
+
+def test_tracker_success_clears():
+    h = ProviderHealthTracker(threshold=1, cooldown_ms=1000, clock=lambda: 0)
+    h.record_failure("p")
+    assert h.is_in_cooldown("p") is True
+    h.record_success("p")
+    assert h.is_in_cooldown("p") is False
+
+
+def test_fallback_skips_cooled_primary():
+    h = ProviderHealthTracker(threshold=1, cooldown_ms=10_000, clock=lambda: 0)
+    h.record_failure("p0")                          # primarni parkiran
+    f = FallbackLLM([None, None], health=h)
+    f._keys = ["p0", "p1"]
+    f._clients = [_FakeClient(fail=True), _FakeClient(fail=False, tag="drugi")]
+    assert f.complete([]).text == "drugi" and f.last_used == 1  # primarni preskočen
+
+
+def test_fallback_all_cooled_last_resort_still_tries():
+    h = ProviderHealthTracker(threshold=1, cooldown_ms=10_000, clock=lambda: 0)
+    h.record_failure("p0"); h.record_failure("p1")   # oba parkirana
+    f = FallbackLLM([None, None], health=h)
+    f._keys = ["p0", "p1"]
+    f._clients = [_FakeClient(fail=True), _FakeClient(fail=False, tag="zadnja")]
+    assert f.complete([]).text == "zadnja"           # svi cooled -> zadnja šansa svejedno proba
+
+
+def test_parse_retry_after_seconds_and_clamp():
+    from atlas.core.llm import _parse_retry_after
+    assert _parse_retry_after("30") == 30_000
+    assert _parse_retry_after("0") == 1000            # clamp donji
+    assert _parse_retry_after(None) is None
+    assert _parse_retry_after("smeće") is None
