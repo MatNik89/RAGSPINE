@@ -20,7 +20,15 @@ def create_skill(spine, org_id: int, name: str, description: str = "", trigger: 
     name = (name or "").strip()
     if not name:
         raise ValueError("naziv skilla je obavezan")
+    # cap duljine + broja (anti DoS/context-exhaustion: aktivne vještine idu u
+    # agent-prompt; neomeđen unos bi napunio SQLite i pojeo kontekst; Codex)
+    name = name[:120]
+    description, trigger = (description or "")[:300], (trigger or "")[:300]
+    steps, validation = (steps or "")[:8000], (validation or "")[:2000]
     with spine.write() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM skills WHERE org_id=?", (org_id,)).fetchone()["n"]
+        if n >= 500:
+            raise ValueError("dosegnut najveći broj vještina za organizaciju")
         sid = c.execute(
             """INSERT INTO skills(org_id, name, description, trigger, steps, validation,
                  owner_user_id, visibility) VALUES(?,?,?,?,?,?,?,?)""",

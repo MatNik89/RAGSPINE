@@ -65,6 +65,15 @@ def test_chat_member_write_returns_pending_and_stores_row(spine, cfg, monkeypatc
     assert spine.read().execute("SELECT 1 FROM clients WHERE name=?", ("Nova Firma",)).fetchone() is None
 
 
+def test_chat_pending_forwards_risk_badge(spine, cfg, monkeypatch):
+    c, h, uid, org_id = _login(spine, cfg, role="member")
+    monkeypatch.setattr("atlas.rag.agent.run_agent", _pending_agent(
+        tool="posalji_poruku_klijentu", args={"klijent": "X", "naslov": "N", "tekst": "T"},
+        summary="Poslat ću poruku klijentu X.", risk="high"))
+    data = c.post("/chat", headers=h, json={"q": "javi klijentu X"}).json()
+    assert data["pending"]["risk"] == "high"
+
+
 def test_chat_potvrdi_executes_audits_and_consumes_token(spine, cfg, monkeypatch):
     c, h, uid, org_id = _login(spine, cfg, role="member")
     monkeypatch.setattr("atlas.rag.agent.run_agent", _pending_agent(

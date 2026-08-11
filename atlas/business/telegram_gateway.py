@@ -124,7 +124,9 @@ def format_agent_reply(res: dict) -> str:
     text = res.get("text") or res.get("answer") or ""
     pending = res.get("pending")
     if pending:
-        text = pending.get("summary", text) + "\n\n⚠ Potvrdi izvršenje:"
+        warn = ("\n\n🔴 VISOK RIZIK — vanjska radnja. Potvrdi izvršenje:"
+                if pending.get("risk") == "high" else "\n\n⚠ Potvrdi izvršenje:")
+        text = pending.get("summary", text) + warn
     return text or "(prazan odgovor)"
 
 

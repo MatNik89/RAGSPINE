@@ -16,6 +16,22 @@ def test_write_pending_asks_confirmation():
     assert "Potvrdi" in out  # traži potvrdu
 
 
+def test_high_risk_pending_shows_stronger_warning():
+    res = {"text": "Poslat ću poruku.", "sources": [],
+           "pending": {"tool": "posalji_poruku_klijentu", "risk": "high",
+                       "summary": "Poslat ću poruku klijentu X."}}
+    out = tgw.format_agent_reply(res)
+    assert "VISOK RIZIK" in out  # vanjska radnja -> jača potvrda
+
+
+def test_med_risk_pending_uses_plain_confirm():
+    res = {"text": "Dodat ću klijenta.", "sources": [],
+           "pending": {"tool": "dodaj_klijenta", "risk": "med",
+                       "summary": "Dodat ću klijenta X."}}
+    out = tgw.format_agent_reply(res)
+    assert "VISOK RIZIK" not in out and "Potvrdi" in out
+
+
 def test_confirm_keyboard_carries_token():
     kb = tgw._confirm_keyboard("TKN123")
     btns = kb["inline_keyboard"][0]

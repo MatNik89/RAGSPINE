@@ -288,6 +288,20 @@ def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
     return {"klijent": row["name"], "dokumenti": [dict(d) for d in docs]}
 
 
+def _run_predlozi_vjestinu(spine, cfg, actor, args) -> dict:
+    """Self-evolving skills (Abu): spremi ponovljivu proceduru kao DRAFT vještinu
+    (owner=predlagatelj, org-scoped, private). Draft ne ulazi u prompt-katalog dok
+    ga ured ne aktivira. Ide kroz propose->confirm kao svaki write (LLM ne kreira
+    tiho — korisnik potvrdi)."""
+    from atlas.knowledge import skills as skills_mod
+    sid = skills_mod.create_skill(
+        spine, actor.org_id, args["ime"], description=args.get("opis") or "",
+        trigger=args.get("okidac") or "", steps=args["koraci"],
+        validation=args.get("validacija") or "", owner_user_id=actor.user_id,
+        visibility="private", user=actor.username)
+    return {"skill_id": sid, "ime": args["ime"], "status": "draft"}
+
+
 def _run_probudi_racunalo(spine, cfg, actor, args) -> dict:
     """Probudi radnikovu radnu stanicu preko mreže (Wake-on-LAN). Admin+, pandan
     alatu pokreni_program."""
@@ -478,6 +492,17 @@ TOOLS: dict[str, Tool] = {
                 "required": ["ime"]},
         readonly=True, min_role="viewer", run=_run_ucitaj_vjestinu,
     ),
+    "predlozi_vjestinu": Tool(
+        name="predlozi_vjestinu",
+        description="Predloži spremanje upravo odrađene ponovljive procedure kao "
+                    "NOVE vještine (nacrt) — ponudi kad korisnik radnju vjerojatno ponavlja.",
+        schema={"type": "object",
+                "properties": {"ime": {"type": "string"}, "opis": {"type": "string"},
+                               "okidac": {"type": "string"}, "koraci": {"type": "string"},
+                               "validacija": {"type": "string"}},
+                "required": ["ime", "koraci"]},
+        readonly=False, min_role="member", run=_run_predlozi_vjestinu,
+    ),
 }
 
 _ROLE_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
@@ -524,6 +549,29 @@ def validate(name: str, args: dict) -> tuple[bool, str | None]:
             return False, f"nedozvoljena polja: {sorted(bad)}"
 
     return True, None
+
+
+# Vanjska nuspojava izvan ureda (poruka klijentu, pokretanje/buđenje radne
+# stanice, dohvat s weba) — najviši tier. Ostali write pišu u bazu ureda (med),
+# readonly samo čitaju (low). OpenWorker "tier consequential actions" obrazac.
+_HIGH_RISK = frozenset({"posalji_poruku_klijentu", "pokreni_program",
+                        "probudi_racunalo", "nauci_izvor"})
+
+
+def risk(name: str) -> str:
+    """Rizik alata: 'low' (čita), 'med' (piše u bazu ureda), 'high' (vanjska
+    nuspojava). Nepoznat alat -> 'high' (fail-safe: neklasificirano = najoprezniji
+    tier). Čista funkcija — UI/potvrda prikažu jačinu, high traži jaču potvrdu.
+
+    SAVJETODAVNO (Codex): ovo je LABEL za prikaz, ne gate — write alati ionako idu
+    kroz propose->confirm. Neki readonly alati imaju uzgredne efekte koje ovaj
+    label NE hvata: `pretrazi` (web=True/auto) šalje upit van LAN-a, `popis_obveza`/
+    `izvezi_excel` okidaju ensure_period (materijalizacija obveza). To su
+    pre-postojeća ponašanja; egress-uz-potvrdu je zaseban širi zahvat."""
+    tool = TOOLS.get(name)
+    if tool is None or name in _HIGH_RISK:
+        return "high"
+    return "low" if tool.readonly else "med"
 
 
 def allowed(actor, tool) -> bool:
