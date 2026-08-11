@@ -116,20 +116,30 @@ def build_persona(spine, org_id: int, user_id: int, llm) -> str | None:
 
 def recall(spine, org_id: int, user_id: int, query: str,
            max_items: int = 6, max_chars: int = 1200) -> dict:
-    """Slojevit dohvat: L3 persona (brzi bootstrap) + top L1 atomi za upit, budžetirano."""
+    """Slojevit dohvat: L3 persona (brzi bootstrap) + top L1 atomi za upit, budžetirano.
+    Recall-tracking (MateClaw): atomi koji se STVARNO dohvate dobiju recall_count +
+    -> na izjednačenom preklapanju rangiraju se više ('zaslužni' izbiju gore).
+    Petlja koja mjeri što se koristi i promovira korisno."""
     p = spine.read().execute(
         "SELECT persona FROM mem_l3 WHERE org_id=? AND user_id=?", (org_id, user_id)).fetchone()
     persona = (p["persona"] if p else "") or ""
     qt = _tokens(query)
     scored = []
-    for a in _existing_atoms(spine, org_id, user_id):
+    for a in spine.read().execute(
+            "SELECT id, content, recall_count FROM mem_l1 WHERE org_id=? AND user_id=?",
+            (org_id, user_id)).fetchall():
         overlap = len(qt & _tokens(a["content"]))
-        if overlap:
-            scored.append((overlap, a["content"]))
-    scored.sort(key=lambda x: -x[0])
-    atoms, used = [], 0
-    for _, content in scored:
+        if overlap:  # rang: preklapanje pa recall_count (zaslužni izbiju na izjednačenom)
+            scored.append((overlap, a["recall_count"] or 0, a["id"], a["content"]))
+    scored.sort(key=lambda x: (-x[0], -x[1]))
+    atoms, used, hit_ids = [], 0, []
+    for _ov, _rc, aid, content in scored:
         if len(atoms) >= max_items or used + len(content) > max_chars:
             break
-        atoms.append(content); used += len(content)
+        atoms.append(content); used += len(content); hit_ids.append(aid)
+    if hit_ids:  # promoviraj STVARNO dohvaćene atome
+        ph = ",".join("?" * len(hit_ids))
+        with spine.write() as c:
+            c.execute(f"UPDATE mem_l1 SET recall_count=COALESCE(recall_count,0)+1, "
+                      f"last_recalled_at=datetime('now') WHERE id IN ({ph})", tuple(hit_ids))
     return {"persona": persona[:max_chars], "atoms": atoms}
