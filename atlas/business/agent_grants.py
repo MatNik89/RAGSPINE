@@ -10,9 +10,14 @@ Grant veže: scope (user|org) + TOČAN alat + TOČAN cilj (klijent/obveza) + max
 argumenata (nikad "bilo koji cilj za ovaj alat")."""
 import json
 
+from atlas.business.acl import ROLE_RANK
+
 _RANK = {"low": 0, "med": 1, "high": 2}
 
-# cilj-ključevi po alatu (identitet radnje); ako ih nema -> cijeli args (exact)
+# cilj-ključevi po alatu (identitet radnje); ako ih nema -> cijeli args (exact).
+# NAPOMENA: oznaci_obvezu/zakazi_rok NAMJERNO ne uključuju period/datum — grant je
+# "za ovog klijenta+vrstu kroz razdoblja" (rekurencija je smisao "zapamti"); radnje
+# su reverzibilne+interne i safety-floor jamči da nikad ne okinu vanjski efekt.
 _TARGET_KEYS = {
     "oznaci_obvezu": ("klijent", "vrsta"),
     "zakazi_rok": ("klijent", "vrsta"),
@@ -26,10 +31,20 @@ _TARGET_KEYS = {
 
 
 def target_for(name: str, args: dict) -> str:
+    """Kanonski JSON cilja (bez '|' kolizije; Codex). Za alate s cilj-ključevima
+    uzmi taj podskup, inače cijeli args (exact-target)."""
     keys = _TARGET_KEYS.get(name)
-    if keys:
-        return "|".join(str((args or {}).get(k, "")) for k in keys)
-    return json.dumps(args or {}, sort_keys=True, ensure_ascii=False, default=str)
+    src = {k: (args or {}).get(k, "") for k in keys} if keys else (args or {})
+    return json.dumps(src, sort_keys=True, ensure_ascii=False, default=str)
+
+
+def _target_empty(name: str, args: dict) -> bool:
+    """True ako cilj nema nijednu značajnu vrijednost (npr. dodaj_klijenta bez
+    naziva) -> grant bi bio wildcard; to se ODBIJA (Codex)."""
+    keys = _TARGET_KEYS.get(name)
+    if not keys:
+        return not (args or {})  # bez cilj-ključeva: prazan args = wildcard
+    return not any(str((args or {}).get(k, "")).strip() for k in keys)
 
 
 def can_auto_approve(spine, actor, name: str, args: dict) -> bool:
@@ -58,6 +73,8 @@ def create_grant(spine, actor, name: str, args: dict, scope: str = "user",
     (safety-floor: high se ne može ni zapamtiti). org-scope traži owner/admin
     (provjerava se u ruti). `days` None = trajno."""
     from atlas.rag import agent_tools
+    if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
+        raise ValueError("za pravilo odobrenja potrebna je barem member uloga")  # Codex
     if name not in agent_tools.TOOLS:
         raise ValueError(f"nepoznat alat: {name!r}")
     risk = agent_tools.risk(name)
@@ -65,6 +82,10 @@ def create_grant(spine, actor, name: str, args: dict, scope: str = "user",
         raise ValueError("radnja visokog rizika ne može se automatski odobriti (uvijek traži potvrdu)")
     if scope not in ("user", "org"):
         raise ValueError("scope mora biti 'user' ili 'org'")
+    # grant nosi SAMO cilj (klijent/obveza), ne pun poziv -> ne validiramo sve
+    # obavezne args-e; dovoljno je da cilj NIJE prazan (inače wildcard; Codex)
+    if _target_empty(name, args):
+        raise ValueError("pravilo mora imati konkretan cilj (nije dopušten wildcard)")
     target = target_for(name, args)
     expire = None if not days else f"datetime('now', '+{int(days)} days')"
     with spine.write() as c:
@@ -84,7 +105,16 @@ def list_grants(spine, actor) -> list[dict]:
         "FROM agent_grants WHERE revoked=0 AND org_id=? "
         "AND (scope='org' OR (scope='user' AND user_id=?)) ORDER BY id DESC",
         (actor.org_id, actor.user_id)).fetchall()
-    return [dict(r) for r in rows]
+    # org-cilj može sadržavati ime/OIB klijenta kojeg restringirani radnik ne smije
+    # vidjeti -> maskiraj ne-adminu (Codex; vlastiti user-grantovi ostaju vidljivi)
+    is_admin = ROLE_RANK.get(actor.role, 0) >= ROLE_RANK["admin"]
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d["scope"] == "org" and not is_admin:
+            d["target"] = "…"
+        out.append(d)
+    return out
 
 
 def revoke_grant(spine, actor, grant_id: int, is_owner: bool, user: str = "?") -> bool:

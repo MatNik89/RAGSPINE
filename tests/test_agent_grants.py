@@ -142,3 +142,35 @@ def test_org_grant_requires_owner(spine, cfg):
     _client(spine, "K")
     assert c.post("/grants", headers={"Authorization": f"Bearer {tm}"},
                   json={"tool": "zapisi_belesku", "args": {"klijent": "K"}, "scope": "org"}).status_code == 403
+
+
+def test_empty_target_rejected(spine, cfg):
+    a = _actor(spine)
+    with pytest.raises(ValueError):  # dodaj_klijenta bez naziva = wildcard -> odbij
+        agent_grants.create_grant(spine, a, "dodaj_klijenta", {})
+
+
+def test_viewer_cannot_create_grant(spine, cfg):
+    v = _actor(spine, role="viewer", uid=9)
+    with pytest.raises(ValueError):
+        agent_grants.create_grant(spine, v, "zapisi_belesku", {"klijent": "X"})
+
+
+def test_org_grant_target_masked_for_non_admin(spine, cfg):
+    owner = _actor(spine, role="owner", uid=1)
+    agent_grants.create_grant(spine, owner, "zapisi_belesku", {"klijent": "TajniKlijent"}, scope="org")
+    member = _actor(spine, role="member", uid=2)
+    grants = agent_grants.list_grants(spine, member)
+    org = [g for g in grants if g["scope"] == "org"][0]
+    assert "TajniKlijent" not in org["target"] and org["target"] == "…"
+    # admin vidi pravi cilj
+    admin = _actor(spine, role="admin", uid=3)
+    assert "TajniKlijent" in [g for g in agent_grants.list_grants(spine, admin) if g["scope"] == "org"][0]["target"]
+
+
+def test_target_no_pipe_collision(spine, cfg):
+    a = _actor(spine)
+    # vrijednosti s '|' ne smiju kolidirati (kanonski JSON)
+    t1 = agent_grants.target_for("zapisi_belesku", {"klijent": "A|B"})
+    t2 = agent_grants.target_for("zapisi_belesku", {"klijent": "A", "x": "B"})
+    assert t1 != t2
