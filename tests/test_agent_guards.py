@@ -45,3 +45,22 @@ def test_append_caution():
 def test_loop_key_stable_and_distinct():
     assert g.loop_key("t", {"a": 1, "b": 2}) == g.loop_key("t", {"b": 2, "a": 1})
     assert g.loop_key("t", {"a": 1}) != g.loop_key("t", {"a": 2})
+
+
+def test_unverified_accepts_set_and_string():
+    assert g.unverified_oibs(f"OIB {VALID}", {VALID}) == []          # set: viđen
+    assert g.unverified_oibs(f"OIB {VALID}", set()) == [VALID]       # set: nije viđen
+    assert g.unverified_oibs(f"OIB {VALID}", f"tekst {VALID}") == []  # string back-compat
+
+
+def test_observed_oibs_extracts():
+    assert g.observed_oibs(f"a {VALID} b {VALID2}") == {VALID, VALID2}
+
+
+def test_loop_key_none_name_safe():
+    assert g.loop_key(None, {"a": 1}).startswith("|")  # ne baca TypeError
+
+
+def test_truncate_total_within_limit():
+    out = g.truncate_structured("x" * 5000, limit=200)
+    assert len(out) <= 200 and "skraćeno" in out

@@ -180,12 +180,14 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
     messages = [{"role": "user", "content": query}]
     sources: list = []
     last_text = ""
-    observed = ""          # sav STVARNO viđeni sadržaj alata (evidence za OIB-guard)
-    seen_calls: set = set()  # potpisi poziva (loop-guard)
+    # evidence = SKUP viđenih OIB-ova (upit + rezultati alata), ne golem string
+    # (memorija; Codex). Upit uključen jer user-tipkan OIB nije halucinacija.
+    observed_oibs: set = agent_guards.observed_oibs(query)
+    seen_calls: set = set()  # potpisi USPJEŠNIH readonly poziva (loop-guard)
 
     def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
         return {"text": agent_guards.append_evidence_caution(
-            text, agent_guards.unverified_oibs(text, observed)),
+            text, agent_guards.unverified_oibs(text, observed_oibs)),
             "sources": sources, "pending": None}
 
     for _ in range(max_steps):
@@ -199,7 +201,8 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
         name, args = call.get("name"), call.get("args") or {}
         tool = agent_tools.TOOLS.get(name)
 
-        # loop-guard: isti alat+argumenti već pozvan (readonly) = bez napretka
+        # loop-guard: isti readonly alat+argumenti već USPJEŠNO pozvan = bez napretka
+        # (dodaje se u seen TEK nakon uspjeha niže -> neuspjeh se smije ponoviti; Codex)
         lk = agent_guards.loop_key(name, args)
         if tool is not None and tool.readonly and lk in seen_calls:
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
@@ -207,7 +210,6 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
                               f"Alat {name} s istim argumentima već je pozvan — "
                               f"rezultat se nije promijenio. Promijeni pristup ili odgovori."})
             continue
-        seen_calls.add(lk)
 
         if tool is None:
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
@@ -223,9 +225,10 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4) -> dict:
                 messages.append({"role": "assistant", "content": _echo(result.text, name)})
                 messages.append({"role": "user", "content": f"Greška pri pozivu alata {name}: {e}"})
                 continue
+            seen_calls.add(lk)  # uspješan readonly -> zabilježi (neuspjeh se smije ponoviti)
             _accumulate_sources(sources, name, tool_result)
             payload = json.dumps(tool_result, ensure_ascii=False, default=str)
-            observed += "\n" + payload  # evidence (prije reza — vidjeli smo cijelo)
+            observed_oibs |= agent_guards.observed_oibs(payload)  # evidence (samo OIB-ovi)
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
                               f"Rezultat alata {name}: {agent_guards.truncate_structured(payload)}"})
