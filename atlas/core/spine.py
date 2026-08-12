@@ -130,8 +130,6 @@ CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY, question TEXT, answ
   category TEXT, tags TEXT, hits INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS reminders(id INTEGER PRIMARY KEY, user TEXT, body TEXT,
   due TEXT, done INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, user TEXT, query TEXT,
-  answer_id TEXT, score INTEGER, comment TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory(id INTEGER PRIMARY KEY, user TEXT, key TEXT, value TEXT,
   UNIQUE(user, key));
 CREATE TABLE IF NOT EXISTS kontni_plan(konto TEXT PRIMARY KEY, naziv TEXT, razred TEXT);
