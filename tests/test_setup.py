@@ -1,4 +1,4 @@
-from atlas.business.dnevnice import RATES
+from atlas.business.per_diem import RATES
 from atlas.ops import seeds, setup
 
 
