@@ -43,3 +43,12 @@ def decrypt(value: str, cfg) -> str:
         return Fernet(_key(cfg)).decrypt(value[len(_PREFIX):].encode()).decode()
     except InvalidToken:
         return ""  # kriv ključ (npr. promijenjen jwt_secret) — tretiraj kao prazno
+
+
+def key_fingerprint(cfg) -> str:
+    """Prvih 12 hex sha256(jwt_secret) — dijagnostika krivog ključa BEZ otkrivanja
+    ključa (Paperclip). Kad restore s krivim ključem tiho vrati prazne tajne, usporedba
+    fingerprinta pokaže je li ključ isti. '' ako nema tajne. (Perm-provjera datoteke
+    ključa je već u doctor._check_secret_perms — ne dupliramo.)"""
+    secret = getattr(cfg, "jwt_secret", "") or ""
+    return hashlib.sha256(secret.encode()).hexdigest()[:12] if secret else ""

@@ -171,8 +171,11 @@ def _check_secret_perms(cfg) -> dict:
                 bad.append(f"{os.path.basename(p)}={oct(mode)}")
         except OSError:
             pass
+    from atlas.business import secretbox
+    fp = secretbox.key_fingerprint(cfg)  # dijagnostika krivog ključa pri restoreu (Paperclip)
+    base = "0600" if not bad else "preširoke dozvole: " + ", ".join(bad)
     return {"check": "perms", "ok": not bad,
-            "detail": "0600" if not bad else "preširoke dozvole: " + ", ".join(bad)}
+            "detail": base + (f"; ključ={fp}" if fp else "")}
 
 
 _CHECKS = [
