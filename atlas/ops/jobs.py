@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date
 
-from atlas.business import expiry, folder_sync, kalendar, obveze, power, rokovi
+from atlas.business import deadlines, expiry, folder_sync, deadline_calendar, obligations, power
 from atlas.core import memory
 from atlas.docs import imap_fetch
 from atlas.ops import digest, health, reminders_dump
@@ -56,7 +56,7 @@ def imap_job(spine, cfg) -> None:
 
 
 def deadlines_job(spine, cfg) -> None:
-    for row in kalendar.upcoming(spine, days=7):
+    for row in deadline_calendar.upcoming(spine, days=7):
         _notify_once(spine, "deadline", f"{row['description']} — rok {row['due']}")
 
 
@@ -66,14 +66,14 @@ def expiry_job(spine, cfg) -> None:
         _notify_once(spine, "expiry", body, client_id=row["client_id"])
 
 
-def obveze_job(spine, cfg) -> None:
+def obligations_job(spine, cfg) -> None:
     period = _period_now()
-    for kind in obveze.active_kinds(spine):
-        obveze.ensure_period(spine, kind, period)
+    for kind in obligations.active_kinds(spine):
+        obligations.ensure_period(spine, kind, period)
 
 
-def rokovi_job(spine, cfg) -> None:
-    added = rokovi.generate(spine)
+def deadline_dates_job(spine, cfg) -> None:
+    added = deadlines.generate(spine)
     logger.info("rokovi_job: %d new deadline dates materialised", added)
 
 
@@ -152,8 +152,8 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="scheduled_tasks", fn=scheduled_tasks_job, interval_s=300))
     sched.register(Job(name="deadlines", fn=deadlines_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
-    sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
-    sched.register(Job(name="rokovi", fn=rokovi_job, interval_s=0, daily=True, at_hour=5))
+    sched.register(Job(name="obveze", fn=obligations_job, interval_s=0, daily=True, at_hour=6))
+    sched.register(Job(name="rokovi", fn=deadline_dates_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))

@@ -14,7 +14,7 @@ _MJ_NOM = ("Siječanj", "Veljača", "Ožujak", "Travanj", "Svibanj", "Lipanj", "
 
 def _shift_month(period: str, delta: int) -> str:
     # Defense-in-depth: endpoints validate period as \\d{4}-\\d{2}, but
-    # render_obveze must never crash if called with a malformed one — echoed
+    # render_obligations must never crash if called with a malformed one — echoed
     # values stay html.escaped/script_json'd regardless.
     try:
         y, m = int(period[:4]), int(period[5:7])
@@ -105,7 +105,7 @@ def _section(title: str, list_id: str, count_id: str, empty_id: str,
 </div>"""
 
 
-def render_obveze(kind: str, period: str, rows: list[dict],
+def render_obligations(kind: str, period: str, rows: list[dict],
                   tabs: list[tuple[str, str]] | None = None) -> str:
     kind_e, period_e = html.escape(kind), html.escape(period)
     prev_m, next_m = _shift_month(period, -1), _shift_month(period, 1)
@@ -236,14 +236,14 @@ loadTypes();
 """
 
 
-def obveze_none_page() -> str:
+def obligations_none_page() -> str:
     body = """<h1>Obveze</h1>
 <p class="meta">Nijedna vrsta obveze trenutno nije aktivna.</p>
 <p><a class="btn" href="/ui/obveze-tipovi">Uredi vrste obveza</a></p>"""
     return page_shell("Obveze", body, active="obveze")
 
 
-def obveze_types_page() -> str:
+def obligation_types_page() -> str:
     freq_opts = "".join(f'<option value="{k}">{html.escape(v)}</option>'
                         for k, v in (("monthly", "Mjesečno"), ("quarterly", "Tromjesečno"),
                                      ("yearly", "Godišnje")))

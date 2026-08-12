@@ -130,8 +130,6 @@ CREATE TABLE IF NOT EXISTS knowledge(id INTEGER PRIMARY KEY, question TEXT, answ
   category TEXT, tags TEXT, hits INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS reminders(id INTEGER PRIMARY KEY, user TEXT, body TEXT,
   due TEXT, done INTEGER DEFAULT 0);
-CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, user TEXT, query TEXT,
-  answer_id TEXT, score INTEGER, comment TEXT, at TEXT DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS memory(id INTEGER PRIMARY KEY, user TEXT, key TEXT, value TEXT,
   UNIQUE(user, key));
 CREATE TABLE IF NOT EXISTS kontni_plan(konto TEXT PRIMARY KEY, naziv TEXT, razred TEXT);
@@ -197,7 +195,7 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
 
 
-def _migrate_pdv_rok_2026(conn: sqlite3.Connection) -> None:
+def _migrate_pdv_deadline_2026(conn: sqlite3.Connection) -> None:
     """VAT Act amendments effective 2026-01-01: the filing deadline for the
     PDV/PDV-S/ZP forms moves from the 20th of the month to the LAST day of the
     month (monthly:31 is clamped to the end of the month). Changes ONLY the old
@@ -305,7 +303,7 @@ class Spine:
             })
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
             _migrate_setup_complete_for_upgrades(c)
-            _migrate_pdv_rok_2026(c)
+            _migrate_pdv_deadline_2026(c)
         # The DB holds all client PII + pbkdf2 password hashes — 0600 so other
         # local host users cannot read it (chmod is a no-op on Windows).
         for p in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):

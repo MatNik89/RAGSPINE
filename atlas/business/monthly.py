@@ -4,7 +4,7 @@
 import re
 from datetime import date
 
-from atlas.business import expiry, obveze
+from atlas.business import expiry, obligations
 
 MONTHLY_RE = re.compile(
     r"[sš]to (sve )?(mi )?(jo[šs] )?moram|obaveze ovaj mjesec|mjese[cč]ni pregled|[sš]to moram ovaj mjesec",
@@ -36,7 +36,7 @@ def overview(spine, period: str, visible=None) -> dict:
     start, end = _period_bounds(period)
 
     # ponytail: query deadline_dates directly for the requested period instead
-    # of kalendar.upcoming() — upcoming() is anchored to today's 31-day window,
+    # of deadline_calendar.upcoming() — upcoming() is anchored to today's 31-day window,
     # which is wrong for an arbitrary ?period= that isn't the current month.
     deadline_rows = spine.read().execute(
         """SELECT dd.id, dd.kind, dd.due, dd.year, d.description
@@ -48,9 +48,9 @@ def overview(spine, period: str, visible=None) -> dict:
     deadlines = [dict(r) for r in deadline_rows]
 
     unsent = []
-    for kind in obveze.KINDS:
-        obveze.ensure_period(spine, kind, period)
-        for row in obveze.list_period(spine, kind, period):
+    for kind in obligations.KINDS:
+        obligations.ensure_period(spine, kind, period)
+        for row in obligations.list_period(spine, kind, period):
             if not row["sent"]:
                 unsent.append({**row, "kind": kind})
 

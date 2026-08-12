@@ -39,7 +39,7 @@ def _resolve_actor(spine, org_id, created_by):
     return actor
 
 
-def _run_autonomni_pregled(spine, cfg, params: dict, org_id, created_by) -> dict:
+def _run_autonomous_review(spine, cfg, params: dict, org_id, created_by) -> dict:
     """Autonomous (unattended) agent run over a given prompt: the agent
     AUTONOMOUSLY does read/draft; every write action is PARKED for the owner's
     approval (does not touch data; high is always parked). 'Prepare -> sign'
@@ -63,12 +63,12 @@ def _run_autonomni_pregled(spine, cfg, params: dict, org_id, created_by) -> dict
             "izvrseno": len(out.get("izvrseno", [])), "tekst": (out.get("text") or "")[:200]}
 
 
-def _validate_autonomni(params: dict) -> None:
+def _validate_autonomous(params: dict) -> None:
     if not (params.get("prompt") or "").strip():
         raise ValueError("'prompt' je obavezan (što agent treba pripremiti)")
 
 
-def _run_kampanja_obveza(spine, cfg, params: dict, org_id, created_by=None) -> dict:
+def _run_obligation_campaign(spine, cfg, params: dict, org_id, created_by=None) -> dict:
     """Send a reminder to clients with an UNSUBMITTED obligation `kind` for the
     CURRENT month (the period is computed at fire time). Consent-gated
     (send_to_client skips without consent). NOTE: clients/obligations in ATLAS
@@ -87,16 +87,16 @@ def _run_kampanja_obveza(spine, cfg, params: dict, org_id, created_by=None) -> d
 
 
 # allowlist: key -> (label, validate(params)->None, run(spine,cfg,params)->dict)
-def _validate_kampanja(params: dict) -> None:
+def _validate_campaign(params: dict) -> None:
     if not (params.get("kind") or "").strip():
         raise ValueError("'kind' je obavezan (npr. PDV)")
 
 
 ACTIONS = {
     "kampanja_obveza": ("Kampanja podsjetnika za nepredanu obvezu",
-                        _validate_kampanja, _run_kampanja_obveza),
+                        _validate_campaign, _run_obligation_campaign),
     "autonomni_pregled": ("Autonomni AI pregled/priprema (rezultat ide u red za odobrenje)",
-                          _validate_autonomni, _run_autonomni_pregled),
+                          _validate_autonomous, _run_autonomous_review),
 }
 
 

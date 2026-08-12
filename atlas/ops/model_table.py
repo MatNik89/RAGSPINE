@@ -11,7 +11,7 @@ _QUANT_BITS = [
 
 # Ranked purposes per family (1st = strongest). Key = substring of ollama name;
 # order matters (coder before qwen). llmfit use_case is the fallback.
-_NAMJENE = [
+_PURPOSES = [
     ("deepseek-r1", ["reasoning", "kod", "chat"]),
     ("qwen2.5-coder", ["kod", "chat"]),
     ("codellama", ["kod", "chat"]),
@@ -56,7 +56,7 @@ def disk_gb(params: str, quant: str) -> float:
 def namjene(ollama_name: str, use_case: str = "") -> str:
     """Ranked display of purposes ('kod > chat'); fallback llmfit use_case."""
     name = (ollama_name or "").lower()
-    for key, uses in _NAMJENE:
+    for key, uses in _PURPOSES:
         if key in name:
             return " › ".join(uses)
     return (use_case or "chat").strip()

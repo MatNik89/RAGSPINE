@@ -393,13 +393,13 @@ def wake_worker(spine, worker_name: str, actor_role: str, sender=None) -> dict:
     return {"ok": True, "message": f"Šaljem signal za buđenje: {workers[0]['name']}."}
 
 
-_FLOTA_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)
+_FLEET_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)
 
 
 def flota_handle(spine, cfg, query: str, llm=None, actor=None) -> str:
     """Chat lane: 'kod <name> otvori <program>'. Actor-threaded (admin-gate)."""
     role = getattr(actor, "role", None)
-    m = _FLOTA_RE.search(query)
+    m = _FLEET_RE.search(query)
     if not m:
         return "Reci: kod <ime radnika> otvori <program>."
     return open_on_worker(spine, m.group(1).strip(), m.group(2).strip(),

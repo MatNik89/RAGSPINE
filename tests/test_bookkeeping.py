@@ -1,13 +1,13 @@
 from fastapi.testclient import TestClient
 
-from atlas.business import feedback_learn, kategorizacija, knjizenje
+from atlas.business import feedback_learn, categorization, bookkeeping
 from atlas.rag import pipeline
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 
 
 def test_categorize_reprezentacija_half_deductible():
-    r = kategorizacija.categorize("Račun za reprezentaciju u restoranu")
+    r = categorization.categorize("Račun za reprezentaciju u restoranu")
     assert r["matched"] is True
     assert r["porezno_priznato"] == 0.5
     assert "50" in r["note"] or "provjeri" in r["note"].lower()
@@ -15,20 +15,20 @@ def test_categorize_reprezentacija_half_deductible():
 
 
 def test_categorize_unknown_expense_falls_back():
-    r = kategorizacija.categorize("nepoznati trošak xyz")
+    r = categorization.categorize("nepoznati trošak xyz")
     assert r["matched"] is False
     assert r["konto"] == "6000"
 
 
 def test_categorize_diacritic_insensitive():
-    a = kategorizacija.categorize("racun za telefon i internet")
-    b = kategorizacija.categorize("račun za telefon i internet")
+    a = categorization.categorize("racun za telefon i internet")
+    b = categorization.categorize("račun za telefon i internet")
     assert a["konto"] == b["konto"]
     assert a["matched"] and b["matched"]
 
 
 def test_suggest_uses_rule_when_no_correction_exists(spine):
-    r = knjizenje.suggest(spine, "kupnja uredskog materijala za ured")
+    r = bookkeeping.suggest(spine, "kupnja uredskog materijala za ured")
     assert r["source"] == "pravilo"
     assert r["konto"]
     assert 0.0 <= r["porezno_priznato"] <= 1.0
@@ -36,17 +36,17 @@ def test_suggest_uses_rule_when_no_correction_exists(spine):
 
 def test_suggest_learns_from_correction_and_beats_rule(spine):
     desc = "racun za reprezentaciju u restoranu Zagreb"
-    original = kategorizacija.categorize(desc)["konto"]
+    original = categorization.categorize(desc)["konto"]
     feedback_learn.record_correction(spine, "ana", desc, original, "4099")
 
     similar = "reprezentacija restoran vecera s klijentom"
-    suggestion = knjizenje.suggest(spine, similar)
+    suggestion = bookkeeping.suggest(spine, similar)
     assert suggestion["source"] == "naučeno"
     assert suggestion["konto"] == "4099"
     first_confidence = suggestion["confidence"]
 
     feedback_learn.record_correction(spine, "ana", desc, original, "4099")
-    suggestion2 = knjizenje.suggest(spine, similar)
+    suggestion2 = bookkeeping.suggest(spine, similar)
     assert suggestion2["confidence"] > first_confidence
 
 
@@ -63,7 +63,7 @@ def test_suggest_from_feedback_ignores_generic_word_overlap(spine):
 def test_suggest_falls_back_to_rule_when_only_generic_overlap(spine):
     desc = "racun za reprezentaciju u restoranu Zagreb"
     feedback_learn.record_correction(spine, "ana", desc, "4004", "4099")
-    r = knjizenje.suggest(spine, "racun za novi laptop")
+    r = bookkeeping.suggest(spine, "racun za novi laptop")
     assert r["source"] != "naučeno"
     assert r["konto"] != "4099"
 
@@ -79,7 +79,7 @@ def test_suggest_from_feedback_matches_single_distinctive_word(spine):
 
 
 def test_unmatched_fallback_uses_nesigurno_source(spine):
-    r = knjizenje.suggest(spine, "nepoznati trošak xyz")
+    r = bookkeeping.suggest(spine, "nepoznati trošak xyz")
     assert r["source"] == "nesigurno"
 
 
@@ -109,9 +109,9 @@ def test_suggest_enriches_naziv_from_kontni_plan(spine):
         c.execute("INSERT INTO kontni_plan(konto,naziv,razred) VALUES(?,?,?)",
                    ("4099", "Posebni troškovi", "4"))
     desc = "racun za reprezentaciju u restoranu Zagreb"
-    original = kategorizacija.categorize(desc)["konto"]
+    original = categorization.categorize(desc)["konto"]
     feedback_learn.record_correction(spine, "ana", desc, original, "4099")
-    r = knjizenje.suggest(spine, "reprezentacija restoran vecera s klijentom")
+    r = bookkeeping.suggest(spine, "reprezentacija restoran vecera s klijentom")
     assert r["naziv"] == "Posebni troškovi"
 
 

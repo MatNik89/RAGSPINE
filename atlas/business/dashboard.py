@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from atlas.business import expiry, kalendar, obveze, peer_compare
+from atlas.business import expiry, deadline_calendar, obligations, peer_compare
 
 
 def _today() -> date:
@@ -11,7 +11,7 @@ def _today() -> date:
 
 def _urgency(due_str: str, today: date) -> str:
     """past due -> bad; soon (<=7 days) -> warn; else -> ok.
-    Matches business/karton.py._urgency + .sdd/ui-DESIGN.md (soon(<=7d))."""
+    Matches business/client_card.py._urgency + .sdd/ui-DESIGN.md (soon(<=7d))."""
     delta = (date.fromisoformat(due_str) - today).days
     if delta < 0:
         return "bad"
@@ -34,7 +34,7 @@ def _with_state(row: dict, date_field: str, today: date) -> dict:
 
 def _deadlines_window(spine, today: date, back_days: int = 7, fwd_days: int = 7) -> list[dict]:
     """Deadlines due in [-back_days, +fwd_days] around today — surfaces both
-    upcoming AND recently-missed ones (kalendar.upcoming() only looks forward,
+    upcoming AND recently-missed ones (deadline_calendar.upcoming() only looks forward,
     so a past-due deadline would otherwise never reach the dashboard)."""
     start = (today - timedelta(days=back_days)).isoformat()
     end = (today + timedelta(days=fwd_days)).isoformat()
@@ -117,11 +117,11 @@ def _group_unsent(unsent: list[dict], kind_state: dict) -> list[dict]:
 
 
 def _unsent_obligations(spine, period: str) -> list[dict]:
-    kinds = obveze.active_kinds(spine)
+    kinds = obligations.active_kinds(spine)
     if not kinds:
         return []
     for kind in kinds:
-        obveze.ensure_period(spine, kind, period)
+        obligations.ensure_period(spine, kind, period)
     placeholders = ",".join("?" * len(kinds))
     rows = spine.read().execute(
         f"""SELECT o.client_id AS client_id, c.name AS client, o.kind AS kind
@@ -139,7 +139,7 @@ def stats(spine, visible=None) -> dict:
     active_clients = spine.read().execute(
         "SELECT COUNT(*) AS n FROM clients WHERE active=1"
     ).fetchone()["n"]
-    deadlines_this_week = len(kalendar.upcoming(spine, days=7))
+    deadlines_this_week = len(deadline_calendar.upcoming(spine, days=7))
     # ponytail: interactions has no client_id (no client attribution), so we
     # compute "top clients" by note count - the only available signal.
     # Upgrade path: add clients.id attribution to interactions when needed.

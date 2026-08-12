@@ -2,7 +2,7 @@
 Podatak već postoji (sent_by/sent_at) — ovo je samo agregacija + prikaz."""
 from fastapi.testclient import TestClient
 
-from atlas.business import obveze, tenancy
+from atlas.business import obligations, tenancy
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 from tests.conftest import complete_setup
@@ -23,10 +23,10 @@ def _seed_obligations(spine):
 
 def test_worker_activity_counts_closures_per_worker(spine):
     o1, o2, o3 = _seed_obligations(spine)
-    obveze.mark_sent(spine, o1, "ana")
-    obveze.mark_sent(spine, o2, "ana")
-    obveze.mark_sent(spine, o3, "boris")
-    act = obveze.worker_activity(spine)
+    obligations.mark_sent(spine, o1, "ana")
+    obligations.mark_sent(spine, o2, "ana")
+    obligations.mark_sent(spine, o3, "boris")
+    act = obligations.worker_activity(spine)
     by = {r["worker"]: r for r in act}
     assert by["ana"]["closed"] == 2 and by["boris"]["closed"] == 1
     assert by["ana"]["last_at"] and by["boris"]["last_at"]
@@ -39,16 +39,16 @@ def test_worker_activity_since_filter(spine):
     with spine.write() as c:  # stara zatvorena obveza
         c.execute("INSERT INTO obligation_status(obligation_id,sent,sent_by,sent_at) "
                   "VALUES(?,1,'ana','2020-01-01 10:00:00')", (o1,))
-    obveze.mark_sent(spine, o2, "ana")  # danas
-    recent = obveze.worker_activity(spine, since="2026-01-01")
+    obligations.mark_sent(spine, o2, "ana")  # danas
+    recent = obligations.worker_activity(spine, since="2026-01-01")
     assert {r["worker"]: r["closed"] for r in recent} == {"ana": 1}  # stara ispala
 
 
 def test_worker_closed_detail(spine):
     o1, _, o3 = _seed_obligations(spine)
-    obveze.mark_sent(spine, o1, "ana")
-    obveze.mark_sent(spine, o3, "ana")
-    rows = obveze.worker_closed(spine, "ana")
+    obligations.mark_sent(spine, o1, "ana")
+    obligations.mark_sent(spine, o3, "ana")
+    rows = obligations.worker_closed(spine, "ana")
     kinds = sorted(r["kind"] for r in rows)
     assert kinds == ["JOPPD", "PDV"]
     assert all(r["client"] and r["sent_at"] for r in rows)
@@ -70,7 +70,7 @@ def test_activity_endpoint_admin_only(spine, cfg):
     tenancy.add_member(spine, tenancy.default_org_id(spine), uid, "member")
     assert c.get("/obveze/aktivnost", headers={"Authorization": f"Bearer {tok}"}).status_code == 403
     o1, _, _ = _seed_obligations(spine)
-    obveze.mark_sent(spine, o1, "ana")
+    obligations.mark_sent(spine, o1, "ana")
     r = c.get("/obveze/aktivnost", headers=ha)
     assert r.status_code == 200 and any(w["worker"] == "ana" for w in r.json())
 

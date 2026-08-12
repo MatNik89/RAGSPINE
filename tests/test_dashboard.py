@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from atlas.business import dashboard, expiry, kalendar, monthly
+from atlas.business import dashboard, expiry, deadline_calendar, monthly
 from atlas.rag import pipeline
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
@@ -65,7 +65,7 @@ def test_period_bounds():
 
 
 def test_overview_deadlines_use_requested_period_not_today(spine, monkeypatch):
-    kalendar.seed(spine, 2026)
+    deadline_calendar.seed(spine, 2026)
     # today/_period_now anchored to a DIFFERENT month than the requested period
     monkeypatch.setattr(monthly, "_period_now", lambda: "2026-01")
     ov = monthly.overview(spine, "2026-07")
@@ -84,9 +84,9 @@ def test_overview_watch_changes_excludes_next_month_bleed(spine):
 
 def test_overview_has_all_keys_and_unsent_client(spine, monkeypatch):
     _seed_july(spine)
-    monkeypatch.setattr(kalendar, "_today", lambda: date(2026, 7, 5))
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: date(2026, 7, 5))
     monkeypatch.setattr(expiry, "_today", lambda: date(2026, 7, 5))
-    kalendar.seed(spine, 2026)
+    deadline_calendar.seed(spine, 2026)
     cid = spine.read().execute("SELECT id FROM clients WHERE name='Alfa'").fetchone()["id"]
     expiry.add(spine, cid, "osobna", "Osobna iskaznica", "2026-08-01")
 
@@ -130,7 +130,7 @@ def test_api_dashboard_and_monthly(spine, cfg):
 def test_pipeline_monthly_intent(spine, cfg, monkeypatch):
     _seed(spine)
     monkeypatch.setattr(monthly, "_period_now", lambda: "2026-07")
-    monkeypatch.setattr(kalendar, "_today", lambda: date(2026, 7, 5))
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: date(2026, 7, 5))
     r = pipeline.answer(spine, cfg, "što sve moram ovaj mjesec?", "ana", llm=None)
     assert r["lane"] == "monthly"
     assert r["confidence"] == 1.0

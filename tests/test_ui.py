@@ -179,8 +179,8 @@ def test_preflight_bez_literalnih_escapeova():
 
 def test_klijenti_ima_poveznicu_na_uvoz():
     """B8: /ui/klijenti-uvoz je bio dohvatljiv samo upisom URL-a ručno."""
-    from atlas.web.templates_ui import klijenti_page
-    assert 'href="/ui/klijenti-uvoz"' in klijenti_page()
+    from atlas.web.templates_ui import clients_page
+    assert 'href="/ui/klijenti-uvoz"' in clients_page()
 
 
 def test_svi_active_kljucevi_postoje_u_nav():
@@ -302,7 +302,7 @@ def test_ui_radnici_no_auth_redirects(spine, cfg):
 
 
 def test_postavke_lists_radnici_card():
-    from atlas.web.templates_ui import postavke_page
-    html_out = postavke_page()
+    from atlas.web.templates_ui import settings_page
+    html_out = settings_page()
     assert "/ui/radnici" in html_out
     assert "<h2>Radnici</h2>" in html_out

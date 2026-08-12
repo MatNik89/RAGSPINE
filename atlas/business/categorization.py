@@ -13,9 +13,9 @@ def _norm(s: str) -> str:
     return (s or "").translate(_DIACRITICS).lower()
 
 
-def _rule(pattern: str, konto: str, naziv: str, porezno: float, note: str) -> dict:
-    return {"pattern": re.compile(pattern), "konto": konto, "naziv": naziv,
-            "porezno_priznato": porezno, "note": note}
+def _rule(pattern: str, account: str, name: str, deductible: float, note: str) -> dict:
+    return {"pattern": re.compile(pattern), "konto": account, "naziv": name,
+            "porezno_priznato": deductible, "note": note}
 
 
 RULES: list[dict] = [

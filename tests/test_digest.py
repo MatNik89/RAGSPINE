@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from atlas.business import expiry, kalendar
+from atlas.business import expiry, deadline_calendar
 from atlas.ops import digest
 from atlas.ops.scheduler import Scheduler
 
@@ -29,7 +29,7 @@ def _obligation(spine, client_id, kind, period, sent=0):
 
 def test_build_digest_aggregates_sections(spine, cfg, monkeypatch):
     today = date(2026, 8, 1)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(expiry, "_today", lambda: today)
 
     cid = _client(spine, "Alfa doo")

@@ -1,7 +1,7 @@
 """A: rast registra — porezni_rokovi, kompletnost_klijenta, posalji_poruku_klijentu."""
 import pytest
 
-from atlas.business import client_visibility, kalendar, secretbox, tenancy
+from atlas.business import client_visibility, deadline_calendar, secretbox, tenancy
 from atlas.business.acl import Actor
 from atlas.rag import agent, agent_tools
 
@@ -22,7 +22,7 @@ def test_registered():
 
 
 def test_porezni_rokovi(spine, cfg):
-    kalendar.seed(spine, 2026)
+    deadline_calendar.seed(spine, 2026)
     out = agent_tools.run_tool(spine, cfg, _actor(spine, "viewer"), "porezni_rokovi", {"dana": 3650})
     assert isinstance(out["rokovi"], list) and out["rokovi"]
 

@@ -9,7 +9,7 @@ import json
 import os
 import re
 
-from atlas.business.onboarding import klijenti_root
+from atlas.business.onboarding import clients_root
 from atlas.core import security
 
 _MODULE = "arhitektura"
@@ -45,7 +45,7 @@ def _subdirs(path: str, base: str) -> list:
 def learn_structure(spine, cfg) -> dict:
     """Read how the KLIJENTI folder is ALREADY organized: number of clients (subfolders)
     + the frequency of their child-subfolders. A starting point for the agreement, does not touch disk."""
-    root = klijenti_root(spine, cfg)  # ValueError (unavailable) propagates to the caller
+    root = clients_root(spine, cfg)  # ValueError (unavailable) propagates to the caller
     if root is None:
         return {"root": None, "n_clients": 0, "subdir_counts": {}}
     counts: dict[str, int] = {}
@@ -111,7 +111,7 @@ def propose(spine, cfg) -> dict:
     root = _root(cfg)
     must = [e for n in tpl["office"] if (e := _entry(root, os.path.join(root, n), n))]
     clients = []
-    kroot = klijenti_root(spine, cfg)  # ValueError (unavailable) propagates — better than the wrong trees
+    kroot = clients_root(spine, cfg)  # ValueError (unavailable) propagates — better than the wrong trees
     if kroot and tpl["client_subdirs"]:
         for c in _subdirs(kroot, kroot):
             subs = [e for s in tpl["client_subdirs"]
@@ -120,7 +120,7 @@ def propose(spine, cfg) -> dict:
                             "folder_exists": True, "subdirs": subs})
     n_missing = (sum(1 for e in must if not e["exists"])
                  + sum(1 for c in clients for e in c["subdirs"] if not e["exists"]))
-    return {"root": root, "klijenti_root": kroot, "template": tpl,
+    return {"root": root, "clients_root": kroot, "template": tpl,
             "must_have": must, "clients": clients, "n_missing": n_missing}
 
 

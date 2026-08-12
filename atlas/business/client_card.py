@@ -3,7 +3,7 @@
 # not crash the whole card - it degrades to an empty/default result.
 from datetime import date
 
-from atlas.business import checklist, cjenik, notes, obveze
+from atlas.business import checklist, notes, obligations, pricelist
 from atlas.business import onboarding
 
 
@@ -20,8 +20,8 @@ def _urgency(expires: str, today: date) -> tuple:
 
 
 def _client_obligations(spine, client_id: int, period: str) -> list[dict]:
-    for kind in obveze.KINDS:
-        obveze.ensure_period(spine, kind, period)
+    for kind in obligations.KINDS:
+        obligations.ensure_period(spine, kind, period)
     rows = spine.read().execute(
         """SELECT o.kind AS kind, o.period AS period, COALESCE(s.sent, 0) AS sent,
                   s.sent_at AS sent_at
@@ -50,7 +50,7 @@ def _client_expiry(spine, client_id: int) -> list[dict]:
     return out
 
 
-def _client_eracuni(spine, oib: str | None) -> dict:
+def _client_einvoices(spine, oib: str | None) -> dict:
     if not oib:
         return {"count": 0, "recent": []}
     count = spine.read().execute(
@@ -65,7 +65,7 @@ def _client_eracuni(spine, oib: str | None) -> dict:
     return {"count": count, "recent": [dict(r) for r in recent]}
 
 
-def karton_data(spine, cfg, client_id: int) -> dict:
+def client_card_data(spine, cfg, client_id: int) -> dict:
     row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     if row is None:
         raise ValueError(f"nepoznat klijent: {client_id}")
@@ -86,11 +86,11 @@ def karton_data(spine, cfg, client_id: int) -> dict:
         "ORDER BY updated_at DESC", (client_id,)).fetchall()], [])
     obligations = _safe(lambda: _client_obligations(spine, client_id, period), [])
     expiry_rows = _safe(lambda: _client_expiry(spine, client_id), [])
-    cjenik_data = _safe(lambda: {
-        "ukupno": cjenik.izracunaj_cijenu(spine, client_id)["ukupno"],
-        "usporedba": cjenik.usporedi_s_trzistem(spine, client_id),
+    pricelist_data = _safe(lambda: {
+        "ukupno": pricelist.calculate_price(spine, client_id)["ukupno"],
+        "usporedba": pricelist.compare_to_market(spine, client_id),
     }, {"ukupno": 0, "usporedba": None})
-    eracuni = _safe(lambda: _client_eracuni(spine, client.get("oib")), {"count": 0, "recent": []})
+    einvoices = _safe(lambda: _client_einvoices(spine, client.get("oib")), {"count": 0, "recent": []})
     documents = _safe(lambda: onboarding.list_documents(spine, cfg, client_id), [])
 
     return {
@@ -100,7 +100,7 @@ def karton_data(spine, cfg, client_id: int) -> dict:
         "sops": sops,
         "obligations": obligations,
         "expiry": expiry_rows,
-        "cjenik": cjenik_data,
-        "eracuni": eracuni,
+        "cjenik": pricelist_data,
+        "eracuni": einvoices,
         "documents": documents,
     }

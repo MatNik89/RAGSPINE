@@ -7,7 +7,7 @@
 
 from datetime import date, timedelta
 
-from atlas.business import obveze
+from atlas.business import obligations
 
 # Fixed Croatian public holidays (month, day). Easter/Easter Monday/Corpus
 # Christi are movable (computed from Easter).
@@ -89,7 +89,7 @@ def due_for_month(rule: str, year: int, month: int) -> date | None:
         except ValueError:
             return None
     if freq == "quarterly":
-        if month not in obveze._QUARTER_MONTHS:
+        if month not in obligations._QUARTER_MONTHS:
             return None
         try:
             return _clamp(year, month, int(spec))
@@ -115,7 +115,7 @@ def generate(spine, months_ahead: int = 12, today: date | None = None) -> int:
     month forward, with a shift to a workday. Idempotent (dedupe by kind+due).
     Returns the number of newly inserted dates."""
     today = today or _today()
-    types = obveze.list_types(spine)
+    types = obligations.list_types(spine)
     month_start = date(today.year, today.month, 1).isoformat()
     added = 0
     with spine.write() as c:

@@ -88,12 +88,12 @@ def test_answer_sql_scoped_for_restricted_actor(spine, cfg):
 
 
 def test_monthly_unsent_obveze_scoped(spine):
-    from atlas.business import obveze
+    from atlas.business import obligations
     ids = _clients(spine, ("Alfa", "1"), ("Beta", "2"))
     with spine.write() as c:
         for cid in (ids["Alfa"], ids["Beta"]):
             c.execute("INSERT INTO obligations(client_id, kind, period) VALUES(?,'PDV','2026-01')", (cid,))
-    rows = obveze.list_period(spine, "PDV", "2026-01")
+    rows = obligations.list_period(spine, "PDV", "2026-01")
     assert all("client_id" in r.keys() for r in rows) and len(rows) == 2   # fix: client_id vraćen
     # monthly._vis filtrira po client_id
     vis = monthly._vis([dict(r) for r in rows], {ids["Alfa"]})

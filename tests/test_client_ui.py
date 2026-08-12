@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi.testclient import TestClient
 
-from atlas.business import checklist, expiry as expiry_mod, obveze
+from atlas.business import checklist, expiry as expiry_mod, obligations
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 from tests.conftest import complete_setup
@@ -111,7 +111,7 @@ def test_karton_json_has_expected_keys_and_seeded_data(spine, cfg):
         )
 
     period = date.today().strftime("%Y-%m")
-    obveze.ensure_period(spine, "PDV", period)
+    obligations.ensure_period(spine, "PDV", period)
 
     expiry_mod.add(spine, cid, "osobna", "Osobna iskaznica", "2030-01-01")
 

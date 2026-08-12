@@ -5,7 +5,7 @@
 import logging
 from datetime import date
 
-from atlas.business import expiry, kalendar
+from atlas.business import expiry, deadline_calendar
 from atlas.core import optional
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _law_changes(spine) -> list:
     ).fetchall()
 
 
-def _eracun_count(spine) -> int:
+def _einvoice_count(spine) -> int:
     row = spine.read().execute(
         "SELECT COUNT(*) AS n FROM notifications WHERE kind='eracun' AND at >= datetime('now','-1 day')"
     ).fetchone()
@@ -41,11 +41,11 @@ def build_digest(spine, cfg, now_fn=None) -> str:
     today = (now_fn or date.today)()
     period = today.strftime("%Y-%m")
 
-    deadlines = kalendar.upcoming(spine, days=7)
+    deadlines = deadline_calendar.upcoming(spine, days=7)
     unsent = _unsent(spine, period)
     expiring = expiry.expiring(spine, days=30)
     law_changes = _law_changes(spine)
-    eracun_count = _eracun_count(spine)
+    eracun_count = _einvoice_count(spine)
 
     lines = [f"Jutarnji pregled — {today.isoformat()}", ""]
 

@@ -74,17 +74,17 @@ def blend_authority(base_confidence: float, hits) -> float:
 # ponytail: multi-word law names ("Zakon o porezu na dohodak") aren't split
 # out — upgrade to a bounded word-count capture if that's ever needed.
 _TOKEN = r"([^\s.,;()\n]+)"
-_CLANAK_RE = re.compile(
+_ARTICLE_RE = re.compile(
     r"čl(?:anak|anku|anka|\.)\s*(\d+)\.?\s+zakona\s+o\s+" + _TOKEN, re.IGNORECASE,
 )
-_ZAKON_RE = re.compile(r"\bzakon[au]?\s+o\s+" + _TOKEN, re.IGNORECASE)
-_PRAVILNIK_RE = re.compile(r"\bpravilnik[au]?\s+o\s+" + _TOKEN, re.IGNORECASE)
+_LAW_RE = re.compile(r"\bzakon[au]?\s+o\s+" + _TOKEN, re.IGNORECASE)
+_REGULATION_RE = re.compile(r"\bpravilnik[au]?\s+o\s+" + _TOKEN, re.IGNORECASE)
 _NN_RE = re.compile(r"\bNN\s+(\d+)/(\d{4})\b")
 
 REFERENCE_PATTERNS = {
-    "clanak": _CLANAK_RE,
-    "zakon": _ZAKON_RE,
-    "pravilnik": _PRAVILNIK_RE,
+    "clanak": _ARTICLE_RE,
+    "zakon": _LAW_RE,
+    "pravilnik": _REGULATION_RE,
     "nn": _NN_RE,
 }
 
@@ -103,7 +103,7 @@ def extract_references(text: str) -> list[dict]:
     out: list[dict] = []
     consumed: list[tuple[int, int]] = []
 
-    for m in _CLANAK_RE.finditer(text):
+    for m in _ARTICLE_RE.finditer(text):
         consumed.append(m.span())
         article = int(m.group(1))
         value = f"članak {article} Zakona o {_norm(m.group(2))}"
@@ -112,7 +112,7 @@ def extract_references(text: str) -> list[dict]:
             seen.add(key)
             out.append({"kind": "clanak", "value": value, "article": article})
 
-    for m in _ZAKON_RE.finditer(text):
+    for m in _LAW_RE.finditer(text):
         if _overlaps(m.span(), consumed):
             continue
         value = f"Zakon o {_norm(m.group(1))}"
@@ -121,7 +121,7 @@ def extract_references(text: str) -> list[dict]:
             seen.add(key)
             out.append({"kind": "zakon", "value": value, "article": None})
 
-    for m in _PRAVILNIK_RE.finditer(text):
+    for m in _REGULATION_RE.finditer(text):
         value = f"Pravilnik o {_norm(m.group(1))}"
         key = ("pravilnik", value.lower())
         if key not in seen:

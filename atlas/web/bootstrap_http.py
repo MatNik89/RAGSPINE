@@ -17,7 +17,7 @@ from atlas.ops.certs import best_display_host  # noqa: F401 - re-export, single 
 
 logger = logging.getLogger(__name__)
 
-BAT_IME = "postavi-vezu.bat"
+BAT_NAME = "postavi-vezu.bat"
 
 
 def bat_content(cert_url: str, https_url: str) -> bytes:
@@ -35,7 +35,7 @@ def bat_content(cert_url: str, https_url: str) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
-def postavi_html(https_url: str, bat_ime: str = BAT_IME) -> str:
+def setup_html(https_url: str, bat_name: str = BAT_NAME) -> str:
     """The /postavi HTML page — 3 steps + an advanced (manual) section."""
     return f"""<!doctype html>
 <html lang="hr">
@@ -46,7 +46,7 @@ def postavi_html(https_url: str, bat_ime: str = BAT_IME) -> str:
 <body>
 <h1>Postavljanje sigurne veze na ATLAS</h1>
 <ol>
-<li><a href="/{bat_ime}">Preuzmi postavljanje</a></li>
+<li><a href="/{bat_name}">Preuzmi postavljanje</a></li>
 <li>Dupli klik na preuzetu datoteku, zatim desni klik →
 "Pokreni kao administrator" → Da (UAC upit)</li>
 <li>Otvori <a href="{https_url}">{https_url}</a> — ubuduće radi i
@@ -82,11 +82,11 @@ def _make_handler(cert_path: str, https_url: str, cert_url: str):
                 self.end_headers()
             elif self.path == "/postavi":
                 self._send(200, "text/html; charset=utf-8",
-                           postavi_html(https_url).encode("utf-8"))
-            elif self.path == f"/{BAT_IME}":
+                           setup_html(https_url).encode("utf-8"))
+            elif self.path == f"/{BAT_NAME}":
                 self._send(200, "application/octet-stream",
                            bat_content(cert_url, https_url),
-                           {"Content-Disposition": f'attachment; filename="{BAT_IME}"'})
+                           {"Content-Disposition": f'attachment; filename="{BAT_NAME}"'})
             elif self.path == "/cert.pem":
                 try:
                     body = Path(cert_path).read_bytes()

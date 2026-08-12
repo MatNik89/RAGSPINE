@@ -55,7 +55,7 @@ def test_home_data_includes_missing_docs(spine):
 
 def test_home_data_visibility_covers_calendar_stats_notifications(spine):
     # Codex: /dashboard.json ne smije procuriti skrivenog klijenta ni kroz
-    # kalendar/stats/notifications, ne samo kroz expiring/unsent
+    # deadline_calendar/stats/notifications, ne samo kroz expiring/unsent
     from atlas.business import dashboard, expiry, notes
     from datetime import date
     vis = _client(spine, "Vidljiv"); hid = _client(spine, "Skriven")

@@ -14,20 +14,20 @@ from pydantic import BaseModel, Field
 
 from atlas.business import auditlog
 from atlas.business import checklist
-from atlas.business import cjenik
+from atlas.business import pricelist
 from atlas.business import client_visibility
 from atlas.business import dashboard
 from atlas.business import expiry as expiry_mod
 from atlas.business import feedback_learn
 from atlas.business import folders as folders_mod
-from atlas.business import kalendar
-from atlas.business import karton as karton_mod
-from atlas.business import knjizenje  # noqa: F401 — register knjizenje lane handler
+from atlas.business import deadline_calendar
+from atlas.business import client_card as client_card_mod
+from atlas.business import bookkeeping  # noqa: F401 — register bookkeeping lane handler
 from atlas.business import model_settings
 from atlas.business import monthly
 from atlas.business import nldate
 from atlas.business import notes
-from atlas.business import doc_registry, obveze
+from atlas.business import doc_registry, obligations
 from atlas.business import onboarding
 from atlas.business import fleet
 from atlas.business import peer_compare
@@ -63,13 +63,13 @@ from atlas.web import websearch  # noqa: F401 — register web lane handler
 from atlas.web.deps import (COOKIE_NAME, add_user, require_actor, require_actor_web, require_user,
                                require_user_web)
 from atlas.web.templates_login import render_login
-from atlas.web.templates_mape import mape_page
+from atlas.web.templates_mape import folders_page
 from atlas.web.templates_model import model_page
-from atlas.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
+from atlas.web.templates_obveze import obligations_none_page, obligation_types_page, render_obligations
 from atlas.web.templates_org import (org_page, radnici_page, skills_page,
                                         vidljivost_page, wiki_page as wiki_page_ui)
-from atlas.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
-                                        klijenti_page, obavijesti_page, postavke_page, upute_page)
+from atlas.web.templates_ui import (chat_page, dashboard_page, documents_page, client_page,
+                                        clients_page, notifications_page, settings_page, upute_page)
 
 
 class ChatBody(BaseModel):
@@ -89,7 +89,7 @@ class GrantBody(BaseModel):
     days: int | None = None      # None = permanent
 
 
-class UredPravilaBody(BaseModel):
+class OfficeRulesBody(BaseModel):
     pravila: str = ""
 
 
@@ -125,7 +125,7 @@ class AgentResultBody(BaseModel):
     detail: str = ""
 
 
-class NaredbaBody(BaseModel):
+class CommandBody(BaseModel):
     action: str
     program_key: str | None = None
 
@@ -276,7 +276,7 @@ class LoginActivateBody(BaseModel):
     password2: str = Field(min_length=8, max_length=128)
 
 
-class RadnikCreateBody(BaseModel):
+class WorkerCreateBody(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     role: str = "member"
 
@@ -394,13 +394,13 @@ class ClientMessagingBody(BaseModel):
     target: str = ""
 
 
-class CjenikIzracunBody(BaseModel):
+class PricelistCalcBody(BaseModel):
     client_id: int
     employees: int = 0
     extras: list[str] | None = None
 
 
-class PausalBody(BaseModel):
+class FlatRateBody(BaseModel):
     pausal_eur: float
 
 
@@ -511,11 +511,11 @@ class ClientObligationsBody(BaseModel):
     manual_kinds: list[str] | None = None
 
 
-class KnjizenjeBody(BaseModel):
+class BookkeepingBody(BaseModel):
     description: str
 
 
-class KnjizenjeCorrectBody(BaseModel):
+class BookkeepingCorrectBody(BaseModel):
     description: str
     original_konto: str
     corrected_konto: str
@@ -981,7 +981,7 @@ def create_app(spine, cfg) -> FastAPI:
     # /radnici — account-level worker management (Settings -> Radnici), unlike
     # /workers above which manages only client visibility.
     @app.get("/radnici")
-    def radnici_list(actor: Actor = Depends(require_actor_web)):
+    def worker_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import devices as devices_mod
         _require_admin(actor)
         rows = spine.read().execute(
@@ -994,7 +994,7 @@ def create_app(spine, cfg) -> FastAPI:
                 for r in rows]
 
     @app.post("/radnici")
-    def radnici_add(body: RadnikCreateBody, actor: Actor = Depends(require_actor_web)):
+    def worker_add(body: WorkerCreateBody, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         if body.role not in ("member", "admin"):
             raise HTTPException(400, "nepoznata uloga")
@@ -1022,7 +1022,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(409, "zadnji vlasnik organizacije se ne može ukloniti niti resetirati")
 
     @app.post("/radnici/{radnik_id}/reset")
-    def radnici_reset(radnik_id: int, request: Request, actor: Actor = Depends(require_actor_web)):
+    def worker_reset(radnik_id: int, request: Request, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         role = tenancy.role_of(spine, actor.org_id, radnik_id)
         if role is None:
@@ -1037,7 +1037,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {"ok": True}
 
     @app.delete("/radnici/{radnik_id}")
-    def radnici_delete(radnik_id: int, actor: Actor = Depends(require_actor_web)):
+    def worker_delete(radnik_id: int, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         role = tenancy.role_of(spine, actor.org_id, radnik_id)
         if role is None:
@@ -1178,7 +1178,7 @@ def create_app(spine, cfg) -> FastAPI:
         return out
 
     @app.post("/chat/potvrdi")
-    def chat_potvrdi(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
+    def chat_confirm(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
         # double-clicking does not execute twice (atomic consume in confirm_pending);
         # permissions are re-checked in run_tool now, not at proposal time.
         try:
@@ -1190,19 +1190,19 @@ def create_app(spine, cfg) -> FastAPI:
         return {"ok": True, **out}
 
     @app.post("/chat/odustani")
-    def chat_odustani(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
+    def chat_cancel(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
         agent.cancel_pending(spine, body.token, actor)
         return {"ok": True}
 
     # --- Parked actions (an autonomous run prepares, the owner approves) ---
     @app.get("/parkirano")
-    def parkirano_list(actor: Actor = Depends(require_actor_web)):
+    def parked_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import parked
         _require_owner(actor)  # approval queue = office owner
         return {"radnje": parked.list_pending(spine, actor.org_id)}
 
     @app.post("/parkirano/{park_id}/odobri")
-    def parkirano_approve(park_id: int, actor: Actor = Depends(require_actor_web)):
+    def parked_approve(park_id: int, actor: Actor = Depends(require_actor_web)):
         from atlas.business import parked
         _require_owner(actor)
         try:
@@ -1211,7 +1211,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, str(e)) from e
 
     @app.post("/parkirano/{park_id}/odbaci")
-    def parkirano_reject(park_id: int, actor: Actor = Depends(require_actor_web)):
+    def parked_reject(park_id: int, actor: Actor = Depends(require_actor_web)):
         from atlas.business import parked
         _require_owner(actor)
         return {"ok": parked.reject(spine, park_id, actor)}
@@ -1246,12 +1246,12 @@ def create_app(spine, cfg) -> FastAPI:
 
     # --- Power (UPS/NUT + ordered shutdown) — all admin-only ---
     @app.get("/napajanje/config")
-    def napajanje_config_get(actor: Actor = Depends(require_actor_web)):
+    def power_config_get(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         return power_mod.get_config(spine)
 
     @app.post("/napajanje/config")
-    def napajanje_config_set(body: PowerConfigBody, actor: Actor = Depends(require_actor_web)):
+    def power_config_set(body: PowerConfigBody, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         fields = body.model_dump(exclude_none=True)
         before = power_mod.get_config(spine)
@@ -1265,7 +1265,7 @@ def create_app(spine, cfg) -> FastAPI:
         return after
 
     @app.get("/napajanje/status")
-    def napajanje_status(actor: Actor = Depends(require_actor_web)):
+    def power_status(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         pc = power_mod.get_config(spine)
         st = power_mod.read_status(pc["nut_host"], pc["nut_port"], pc["ups_name"])
@@ -1273,12 +1273,12 @@ def create_app(spine, cfg) -> FastAPI:
         return st
 
     @app.get("/napajanje/plan")
-    def napajanje_plan(actor: Actor = Depends(require_actor_web)):
+    def power_plan(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
         return power_mod.shutdown_plan(spine)  # dry-run: just a preview of the order
 
     @app.post("/napajanje/arm")
-    def napajanje_arm(body: ArmBody, actor: Actor = Depends(require_actor_web)):
+    def power_arm(body: ArmBody, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         power_mod.save_config(spine, armed=body.armed)
         spine.audit(actor.username, "napajanje_arm", "", "1" if body.armed else "0")
@@ -1332,12 +1332,12 @@ def create_app(spine, cfg) -> FastAPI:
     # ATLAS is a single office; multi-tenant org-scoping of config_overrides is a
     # pre-existing larger change. _require_owner is the same gate as power/enrollment/scheduler.
     @app.get("/ured-pravila")
-    def ured_pravila_get(actor: Actor = Depends(require_actor_web)):
+    def office_rules_get(actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)  # rules are office configuration -> owner (Codex)
         return {"pravila": agent.get_ured_pravila(spine)}
 
     @app.post("/ured-pravila")
-    def ured_pravila_set(body: UredPravilaBody, actor: Actor = Depends(require_actor_web)):
+    def office_rules_set(body: OfficeRulesBody, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         agent.set_ured_pravila(spine, body.pravila, user=actor.username)
         return {"ok": True}
@@ -1377,14 +1377,14 @@ def create_app(spine, cfg) -> FastAPI:
 
     # --- Scheduled tasks (owner; action from an allowlist, no arbitrary code) ---
     @app.get("/zakazano")
-    def zakazano_list(actor: Actor = Depends(require_actor_web)):
+    def scheduled_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
         _require_owner(actor)  # tasks carry messages/schedules -> owner only (Codex)
         return {"zadaci": scheduler_tasks.list_tasks(spine, actor.org_id),
                 "akcije": scheduler_tasks.action_labels()}
 
     @app.post("/zakazano")
-    def zakazano_create(body: ScheduledTaskBody, actor: Actor = Depends(require_actor_web)):
+    def scheduled_create(body: ScheduledTaskBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
         _require_owner(actor)
         try:
@@ -1397,7 +1397,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": tid}
 
     @app.post("/zakazano/{task_id}/toggle")
-    def zakazano_toggle(task_id: int, actor: Actor = Depends(require_actor_web)):
+    def scheduled_toggle(task_id: int, actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
         _require_owner(actor)
         rows = scheduler_tasks.list_tasks(spine, actor.org_id)
@@ -1408,14 +1408,14 @@ def create_app(spine, cfg) -> FastAPI:
         return {"enabled": not cur["enabled"]}
 
     @app.delete("/zakazano/{task_id}")
-    def zakazano_delete(task_id: int, actor: Actor = Depends(require_actor_web)):
+    def scheduled_delete(task_id: int, actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
         _require_owner(actor)
         scheduler_tasks.delete_task(spine, task_id, actor.org_id)
         return {"ok": True}
 
     @app.post("/uredjaji/enrollments/open")
-    def uredjaj_enroll_open(actor: Actor = Depends(require_actor_web)):
+    def device_enroll_open(actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)  # only the owner opens pairing (fail-closed by default)
         until = fleet.open_enrollment(spine, actor.username)
         return {"open_until": until}
@@ -1444,12 +1444,12 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/uredjaji/enrollments")
-    def uredjaj_enrollments(actor: Actor = Depends(require_actor_web)):
+    def device_enrollments(actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         return fleet.list_pending_enrollments(spine)
 
     @app.post("/uredjaji/enrollments/{enroll_id}/approve")
-    def uredjaj_enroll_approve(enroll_id: str, body: ApproveBody,
+    def device_enroll_approve(enroll_id: str, body: ApproveBody,
                                actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         try:
@@ -1460,12 +1460,12 @@ def create_app(spine, cfg) -> FastAPI:
         return {"device_id": device_id}
 
     @app.get("/uredjaji/{device_id}/aktivnost")
-    def uredjaj_aktivnost(device_id: int, actor: Actor = Depends(require_actor_web)):
+    def device_activity(device_id: int, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)  # fleet monitoring = owner; the UI polls for a "live" view
         return {"aktivnost": fleet.device_activity(spine, device_id)}
 
     @app.post("/uredjaji/{device_id}/token")
-    def uredjaj_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
+    def device_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)  # token issuing = machine-level, owner-only
         try:
             token = fleet.issue_token(spine, device_id)
@@ -1478,14 +1478,14 @@ def create_app(spine, cfg) -> FastAPI:
         return {"token": token, "sign_key": fleet.device_sign_key(spine, device_id, cfg)}
 
     @app.delete("/uredjaji/{device_id}/token")
-    def uredjaj_token_revoke(device_id: int, actor: Actor = Depends(require_actor_web)):
+    def device_token_revoke(device_id: int, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         fleet.revoke_token(spine, device_id)
         spine.audit(actor.username, "device_token_revoke", f"device:{device_id}")
         return {"ok": True}
 
     @app.post("/uredjaji/{device_id}/naredba")
-    def uredjaj_naredba(device_id: int, body: NaredbaBody,
+    def device_command(device_id: int, body: CommandBody,
                         actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)  # daily start/stop = admin+ (with audit)
         from atlas.business import devices as devices_mod
@@ -1500,12 +1500,12 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": cid}
 
     @app.get("/fleet/programi")
-    def fleet_programi_list(actor: Actor = Depends(require_actor_web)):
+    def fleet_programs_list(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)  # reading the allowlist admin+
         return fleet.list_programs(spine)
 
     @app.post("/fleet/programi")
-    def fleet_programi_add(body: ProgramBody, actor: Actor = Depends(require_actor_web)):
+    def fleet_programs_add(body: ProgramBody, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)  # defining WHAT it may ever run = security policy
         try:
             key = fleet.add_program(spine, body.key, body.label, user=actor.username)
@@ -1515,7 +1515,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {"key": key}
 
     @app.delete("/fleet/programi/{key}")
-    def fleet_programi_remove(key: str, actor: Actor = Depends(require_actor_web)):
+    def fleet_programs_remove(key: str, actor: Actor = Depends(require_actor_web)):
         _require_owner(actor)
         fleet.remove_program(spine, key)
         spine.audit(actor.username, "fleet_program_remove", key)
@@ -1630,7 +1630,7 @@ def create_app(spine, cfg) -> FastAPI:
         return chat_page()
 
     @app.get("/ui/upute", response_class=HTMLResponse)
-    def ui_upute(request: Request):
+    def ui_instructions(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1638,15 +1638,15 @@ def create_app(spine, cfg) -> FastAPI:
         return upute_page(sop_mod.list_pending(spine))
 
     @app.get("/ui/klijenti", response_class=HTMLResponse)
-    def ui_klijenti(request: Request):
+    def ui_clients(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return klijenti_page()
+        return clients_page()
 
     @app.get("/ui/klijenti-uvoz", response_class=HTMLResponse)
-    def ui_klijenti_uvoz(request: Request):
+    def ui_clients_import(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1655,7 +1655,7 @@ def create_app(spine, cfg) -> FastAPI:
         return uvoz_page()
 
     @app.get("/ui/novi-klijent", response_class=HTMLResponse)
-    def ui_novi_klijent(request: Request):
+    def ui_new_client(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1664,39 +1664,39 @@ def create_app(spine, cfg) -> FastAPI:
         return wizard_page()
 
     @app.get("/ui/klijent/{client_id}", response_class=HTMLResponse)
-    def ui_klijent(request: Request, client_id: int):
+    def ui_client(request: Request, client_id: int):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return klijent_page(client_id)
+        return client_page(client_id)
 
     @app.get("/ui/obavijesti", response_class=HTMLResponse)
-    def ui_obavijesti(request: Request):
+    def ui_notifications(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return obavijesti_page()
+        return notifications_page()
 
     @app.get("/ui/obveze-tipovi", response_class=HTMLResponse)
-    def ui_obveze_tipovi(request: Request):
+    def ui_obligation_types(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return obveze_types_page()
+        return obligation_types_page()
 
     @app.get("/ui/postavke", response_class=HTMLResponse)
-    def ui_postavke(request: Request):
+    def ui_settings(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return postavke_page()
+        return settings_page()
 
     @app.get("/ui/pracenje", response_class=HTMLResponse)
-    def ui_pracenje(request: Request):
+    def ui_tracking(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1705,7 +1705,7 @@ def create_app(spine, cfg) -> FastAPI:
         return pracenje_page()
 
     @app.get("/ui/uredjaji", response_class=HTMLResponse)
-    def ui_uredjaji(request: Request):
+    def ui_devices(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1739,23 +1739,23 @@ def create_app(spine, cfg) -> FastAPI:
                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     @app.get("/obveze/aktivnost")
-    def obveze_aktivnost(since: str | None = None, worker: str | None = None,
+    def obligations_activity(since: str | None = None, worker: str | None = None,
                          actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)  # who-does-what is monitoring insight
         if worker:
-            return obveze.worker_closed(spine, worker, since=since)
-        return obveze.worker_activity(spine, since=since)
+            return obligations.worker_closed(spine, worker, since=since)
+        return obligations.worker_activity(spine, since=since)
 
     # --- user-defined obligation fields (registry + JSON meta, core locked) ---
     @app.get("/obveze/polja")
-    def obveze_polja_list(actor: Actor = Depends(require_actor_web)):
+    def obligation_fields_list(actor: Actor = Depends(require_actor_web)):
         # reading field definitions = any logged-in user (a worker needs to know the
         # columns to fill a value / render the table); defining is owner-only
         from atlas.business import obligation_fields
         return obligation_fields.list_fields(spine)
 
     @app.post("/obveze/polja")
-    def obveze_polja_add(body: ObligationFieldBody, actor: Actor = Depends(require_actor_web)):
+    def obligation_fields_add(body: ObligationFieldBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import obligation_fields
         _require_owner(actor)  # defining "columns" = structural policy
         try:
@@ -1765,14 +1765,14 @@ def create_app(spine, cfg) -> FastAPI:
         return {"key": key}
 
     @app.delete("/obveze/polja/{key}")
-    def obveze_polja_remove(key: str, actor: Actor = Depends(require_actor_web)):
+    def obligation_fields_remove(key: str, actor: Actor = Depends(require_actor_web)):
         from atlas.business import obligation_fields
         _require_owner(actor)
         obligation_fields.remove_field(spine, key, user=actor.username)
         return {"ok": True}
 
     @app.post("/obveze/{obligation_id}/polje")
-    def obveze_polje_set(obligation_id: int, body: FieldValueBody,
+    def obligation_field_set(obligation_id: int, body: FieldValueBody,
                          actor: Actor = Depends(require_actor_web)):
         from atlas.business import obligation_fields
         # filling values = everyday work (member+); defining is owner
@@ -1792,44 +1792,44 @@ def create_app(spine, cfg) -> FastAPI:
         return {"obligation_id": obligation_id, "meta": meta}
 
     @app.get("/ui/obveze-polja", response_class=HTMLResponse)
-    def ui_obveze_polja(request: Request):
+    def ui_obligation_fields(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import obveze_polja_page
-        return obveze_polja_page()
+        from atlas.web.templates_ui import obligation_fields_page
+        return obligation_fields_page()
 
     @app.get("/ui/obveze-aktivnost", response_class=HTMLResponse)
-    def ui_obveze_aktivnost(request: Request):
+    def ui_obligations_activity(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import obveze_aktivnost_page
-        return obveze_aktivnost_page()
+        from atlas.web.templates_ui import obligations_activity_page
+        return obligations_activity_page()
 
     @app.get("/postavi-agent", response_class=HTMLResponse)
-    def ui_postavi_agent(request: Request):
+    def ui_setup_agent(request: Request):
         try:
             actor = require_actor_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         _require_owner(actor)  # agent issuing = machine-level, owner-only
-        from atlas.web.templates_ui import postavi_agent_page
-        return postavi_agent_page()
+        from atlas.web.templates_ui import setup_agent_page
+        return setup_agent_page()
 
     @app.get("/ui/napajanje", response_class=HTMLResponse)
-    def ui_napajanje(request: Request):
+    def ui_power(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import napajanje_page
-        return napajanje_page()
+        from atlas.web.templates_ui import power_page
+        return power_page()
 
     @app.get("/ui/posta", response_class=HTMLResponse)
-    def ui_posta(request: Request):
+    def ui_mail(request: Request):
         try:
             _require_admin(require_actor_web(request))
         except HTTPException:
@@ -1929,7 +1929,7 @@ def create_app(spine, cfg) -> FastAPI:
                             filename=os.path.basename(path))
 
     @app.get("/ui/racunalo", response_class=HTMLResponse)
-    def ui_racunalo(request: Request):
+    def ui_computer(request: Request):
         # system state + software inventory = admin (not every worker)
         try:
             _require_admin(require_actor_web(request))
@@ -1973,7 +1973,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {"ok": True, "username": body.username.strip()}
 
     @app.get("/ui/arhitektura", response_class=HTMLResponse)
-    def ui_arhitektura(request: Request):
+    def ui_architecture(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1982,7 +1982,7 @@ def create_app(spine, cfg) -> FastAPI:
         return arhitektura_page()
 
     @app.get("/ui/dok-tipovi", response_class=HTMLResponse)
-    def ui_dok_tipovi(request: Request):
+    def ui_doc_types(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1991,12 +1991,12 @@ def create_app(spine, cfg) -> FastAPI:
         return doctypes_page()
 
     @app.get("/ui/mape", response_class=HTMLResponse)
-    def ui_mape(request: Request):
+    def ui_folders(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return mape_page()
+        return folders_page()
 
     @app.get("/ui/org", response_class=HTMLResponse)
     def ui_org(request: Request):
@@ -2007,7 +2007,7 @@ def create_app(spine, cfg) -> FastAPI:
         return org_page()
 
     @app.get("/ui/vidljivost", response_class=HTMLResponse)
-    def ui_vidljivost(request: Request):
+    def ui_visibility(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -2015,7 +2015,7 @@ def create_app(spine, cfg) -> FastAPI:
         return vidljivost_page()
 
     @app.get("/ui/radnici", response_class=HTMLResponse)
-    def ui_radnici(request: Request):
+    def ui_workers(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -2194,12 +2194,12 @@ def create_app(spine, cfg) -> FastAPI:
         return {"ok": True, "key": key}
 
     @app.get("/ui/dokumenti", response_class=HTMLResponse)
-    def ui_dokumenti(request: Request):
+    def ui_documents(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return dokumenti_page()
+        return documents_page()
 
     @app.get("/notifications.json")
     def notifications_json(actor: Actor = Depends(require_actor_web)):
@@ -2217,42 +2217,42 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": notif_id, "seen": True}
 
     @app.get("/obveze", response_class=HTMLResponse)
-    def obveze_page(request: Request, kind: str | None = None, period: str | None = None):
+    def obligations_page(request: Request, kind: str | None = None, period: str | None = None):
         try:
             actor = require_actor_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        tabs = [(t["kind"], t["label"]) for t in obveze.list_types(spine, active_only=True)]
+        tabs = [(t["kind"], t["label"]) for t in obligations.list_types(spine, active_only=True)]
         active = [k for k, _ in tabs]
         if not active:
-            return HTMLResponse(obveze_none_page())
+            return HTMLResponse(obligations_none_page())
         kind = kind or active[0]
         if kind not in active:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
-        obveze.ensure_period(spine, kind, period)
-        rows = _visible_rows(actor, obveze.list_period(spine, kind, period))
-        return render_obveze(kind, period, rows, tabs)
+        obligations.ensure_period(spine, kind, period)
+        rows = _visible_rows(actor, obligations.list_period(spine, kind, period))
+        return render_obligations(kind, period, rows, tabs)
 
-    @app.get("/obveze.json")
-    def obveze_json(kind: str = "PDV", period: str | None = None,
+    @app.get("/obligations.json")
+    def obligations_json(kind: str = "PDV", period: str | None = None,
                      actor: Actor = Depends(require_actor_web)):
-        if obveze.get_type(spine, kind) is None:
+        if obligations.get_type(spine, kind) is None:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
         # a restricted worker doesn't see obligations (nor meta) of others' clients
-        return _visible_rows(actor, obveze.list_period(spine, kind, period))
+        return _visible_rows(actor, obligations.list_period(spine, kind, period))
 
     @app.get("/obveze/tipovi")
-    def obveze_types_list(user: str = Depends(require_user_web)):
-        return obveze.list_types(spine)
+    def obligation_types_list(user: str = Depends(require_user_web)):
+        return obligations.list_types(spine)
 
     @app.post("/obveze/tipovi")
-    def obveze_types_upsert(body: ObligationTypeBody, user: str = Depends(require_user_web)):
+    def obligation_types_upsert(body: ObligationTypeBody, user: str = Depends(require_user_web)):
         try:
-            kind = obveze.upsert_type(
+            kind = obligations.upsert_type(
                 spine, body.kind, body.label, body.rule, body.frequency,
                 body.applies_to, active=bool(body.active), sort=body.sort,
                 description=body.description, user=user)
@@ -2439,13 +2439,13 @@ def create_app(spine, cfg) -> FastAPI:
         if row is None:
             raise HTTPException(404, "nepoznat klijent")
         available = [{"kind": t["kind"], "label": t["label"]}
-                     for t in obveze.list_types(spine, active_only=True)
+                     for t in obligations.list_types(spine, active_only=True)
                      if t["applies_to"] == "manual"]
         return {
             "has_employees": row["has_employees"] or 0,
             "pdv_freq": row["pdv_freq"] or "monthly",
             "regime": row["regime"] or "",
-            "manual_kinds": obveze.client_types(spine, client_id),
+            "manual_kinds": obligations.client_types(spine, client_id),
             "available_manual": available,
         }
 
@@ -2455,7 +2455,7 @@ def create_app(spine, cfg) -> FastAPI:
         _guard_client(actor, client_id)
         if body.pdv_freq is not None and body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
-        if body.regime is not None and body.regime not in obveze.REGIMES:
+        if body.regime is not None and body.regime not in obligations.REGIMES:
             raise HTTPException(400, f"nepoznat porezni sustav: {body.regime!r}")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
@@ -2471,15 +2471,15 @@ def create_app(spine, cfg) -> FastAPI:
             with spine.write() as c:
                 c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", (*vals, client_id))
         if body.manual_kinds is not None:
-            obveze.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
+            obligations.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         return {"client_id": client_id, "has_employees": row["has_employees"] or 0,
                 "pdv_freq": row["pdv_freq"] or "monthly", "regime": row["regime"] or "",
-                "manual_kinds": obveze.client_types(spine, client_id)}
+                "manual_kinds": obligations.client_types(spine, client_id)}
 
     @app.post("/obveze/mark")
-    async def obveze_mark(request: Request, user: str = Depends(require_user_web)):
+    async def obligations_mark(request: Request, user: str = Depends(require_user_web)):
         ctype = request.headers.get("content-type", "")
         if "application/json" in ctype:
             body = await request.json()
@@ -2492,12 +2492,12 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, "obligation_id required")
         kind = body.get("kind", "PDV")
         period = body.get("period", date.today().strftime("%Y-%m"))
-        if obveze.get_type(spine, kind) is None:
+        if obligations.get_type(spine, kind) is None:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         _require_valid_period(period)
         sent = str(body.get("sent", "1")) not in ("0", "false", "False")
         try:
-            obveze.mark_sent(spine, obligation_id, user, sent)
+            obligations.mark_sent(spine, obligation_id, user, sent)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         if "application/json" in ctype:
@@ -2505,8 +2505,8 @@ def create_app(spine, cfg) -> FastAPI:
         return RedirectResponse(f"/obveze?kind={quote(kind)}&period={quote(period)}", status_code=303)
 
     @app.get("/kalendar")
-    def kalendar_upcoming(days: int = 14, user: str = Depends(require_user_web)):
-        return [dict(r) for r in kalendar.upcoming(spine, days)]
+    def calendar_upcoming(days: int = 14, user: str = Depends(require_user_web)):
+        return [dict(r) for r in deadline_calendar.upcoming(spine, days)]
 
     @app.get("/expiry")
     def expiry_expiring(days: int = 60, actor: Actor = Depends(require_actor_web)):
@@ -2706,10 +2706,10 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/clients/{client_id}/karton.json")
-    def client_karton(client_id: int, actor: Actor = Depends(require_actor_web)):
+    def client_card(client_id: int, actor: Actor = Depends(require_actor_web)):
         _guard_client(actor, client_id)
         try:
-            return karton_mod.karton_data(spine, cfg, client_id)
+            return client_card_mod.client_card_data(spine, cfg, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
@@ -2735,29 +2735,29 @@ def create_app(spine, cfg) -> FastAPI:
         return {"client_id": client_id, "consent": body.consent}
 
     @app.get("/cjenik")
-    def cjenik_list(user: str = Depends(require_user_web)):
-        return cjenik.price_list(spine)
+    def pricelist_list(user: str = Depends(require_user_web)):
+        return pricelist.price_list(spine)
 
     @app.post("/cjenik/izracun")
-    def cjenik_izracun(body: CjenikIzracunBody, actor: Actor = Depends(require_actor_web)):
+    def pricelist_calculate(body: PricelistCalcBody, actor: Actor = Depends(require_actor_web)):
         if body.client_id is not None:
             _guard_client(actor, body.client_id)
         try:
-            return cjenik.izracunaj_cijenu(spine, body.client_id, employees=body.employees,
+            return pricelist.calculate_price(spine, body.client_id, employees=body.employees,
                                             extras=body.extras)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.get("/cjenik/usporedba/{client_id}")
-    def cjenik_usporedba(client_id: int, actor: Actor = Depends(require_actor_web)):
+    def pricelist_compare(client_id: int, actor: Actor = Depends(require_actor_web)):
         _guard_client(actor, client_id)
         try:
-            return cjenik.usporedi_s_trzistem(spine, client_id)
+            return pricelist.compare_to_market(spine, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
     @app.post("/clients/{client_id}/pausal")
-    def client_pausal_set(client_id: int, body: PausalBody, actor: Actor = Depends(require_actor_web)):
+    def client_flatrate_set(client_id: int, body: FlatRateBody, actor: Actor = Depends(require_actor_web)):
         _guard_client(actor, client_id)
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
@@ -2787,11 +2787,11 @@ def create_app(spine, cfg) -> FastAPI:
         return {**ov, "text": monthly.format_overview(ov)}
 
     @app.post("/knjizenje")
-    def knjizenje_suggest(body: KnjizenjeBody, user: str = Depends(require_user_web)):
-        return knjizenje.suggest(spine, body.description)
+    def bookkeeping_suggest(body: BookkeepingBody, user: str = Depends(require_user_web)):
+        return bookkeeping.suggest(spine, body.description)
 
     @app.post("/knjizenje/correct")
-    def knjizenje_correct(body: KnjizenjeCorrectBody, user: str = Depends(require_user_web)):
+    def bookkeeping_correct(body: BookkeepingCorrectBody, user: str = Depends(require_user_web)):
         cid = feedback_learn.record_correction(spine, user, body.description,
                                                 body.original_konto, body.corrected_konto)
         return {"id": cid, "learned": True}

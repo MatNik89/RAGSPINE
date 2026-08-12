@@ -64,12 +64,12 @@ def test_obveze_mark_sent_still_works(spine, cfg):
     tok = _token(c, spine)
     r = c.get("/obveze?kind=PDV&period=2026-07", headers=_auth(tok))
     assert "Alfa" in r.text
-    from atlas.business import obveze
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    from atlas.business import obligations
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     r2 = c.post("/obveze/mark", json={"obligation_id": rows[0]["obligation_id"], "kind": "PDV",
                                        "period": "2026-07"}, headers=_auth(tok))
     assert r2.status_code == 200
-    rows2 = obveze.list_period(spine, "PDV", "2026-07")
+    rows2 = obligations.list_period(spine, "PDV", "2026-07")
     assert rows2[0]["sent"] == 1
 
 
@@ -94,7 +94,7 @@ def test_obveze_page_rejects_script_breakout_period(spine, cfg):
 def test_obveze_json_rejects_script_breakout_period(spine, cfg):
     c = _client(spine, cfg)
     tok = _token(c, spine)
-    r = c.get("/obveze.json", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
+    r = c.get("/obligations.json", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
     assert r.status_code == 400
 
 
@@ -102,9 +102,9 @@ def test_obveze_mark_rejects_script_breakout_period(spine, cfg):
     _seed_client(spine, "Alfa")
     c = _client(spine, cfg)
     tok = _token(c, spine)
-    from atlas.business import obveze
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    from atlas.business import obligations
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     r = c.post("/obveze/mark", json={"obligation_id": rows[0]["obligation_id"], "kind": "PDV",
                                       "period": _XSS_PERIOD}, headers=_auth(tok))
     assert r.status_code == 400
@@ -137,10 +137,10 @@ def test_script_json_escapes_js_line_separators():
 
 def test_render_obveze_defense_in_depth_even_with_malicious_period():
     # belt-and-suspenders: even if a future caller forgets endpoint-level
-    # validation, render_obveze() itself must never let `period` break out
+    # validation, render_obligations() itself must never let `period` break out
     # of the inline <script> tag.
-    from atlas.web.templates_obveze import render_obveze
-    html_out = render_obveze("PDV", _XSS_PERIOD, [])
+    from atlas.web.templates_obveze import render_obligations
+    html_out = render_obligations("PDV", _XSS_PERIOD, [])
     assert "</script><script>alert(1)</script>" not in html_out
     assert "\\u003c" in html_out
 
@@ -277,9 +277,9 @@ def test_doc_generate_flow_still_works(spine, cfg):
 # ---------- 5E: dashboard urgency threshold ≤7d ----------
 
 def test_dashboard_deadline_in_5_days_is_warn(spine, cfg, monkeypatch):
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     with spine.write() as conn:
         conn.execute("INSERT INTO deadlines(kind, rule, description) VALUES('Q','monthly:1','Rok')")
@@ -297,9 +297,9 @@ def test_dashboard_deadline_in_5_days_is_warn(spine, cfg, monkeypatch):
 
 
 def test_dashboard_deadline_past_still_bad(spine, cfg, monkeypatch):
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     with spine.write() as conn:
         conn.execute("INSERT INTO deadlines(kind, rule, description) VALUES('R','monthly:1','Rok')")

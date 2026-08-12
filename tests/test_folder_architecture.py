@@ -73,7 +73,7 @@ def test_propose_and_apply_from_agreement(spine, cfg, tmp_path):
     prop = fa.propose(spine, cfg)
     # SCANNER fali + PERIĆ: Izvodi + PODUZEĆE: Ugovori, Izvodi
     assert prop["n_missing"] == 4
-    assert prop["klijenti_root"] == os.path.realpath(str(root))
+    assert prop["clients_root"] == os.path.realpath(str(root))
     res = fa.apply(spine, cfg)
     assert res["n_created"] == 4
     assert os.path.isdir(os.path.join(prop["root"], "SCANNER"))

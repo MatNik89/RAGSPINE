@@ -1,5 +1,5 @@
-"""DB seed data: kontni plan, watch defaults, dnevnice rates (+ kalendar/quickref via all())."""
-from atlas.business import cjenik, dnevnice, kalendar, quickref
+"""DB seed data: kontni plan, watch defaults, dnevnice rates (+ deadline_calendar/quickref via all())."""
+from atlas.business import deadline_calendar, per_diem, pricelist, quickref
 from atlas.web.watchlist import DEFAULT_RSS, add_source
 
 # ponytail: plausible RRIF-style konto layout (razred = first digit), not the
@@ -88,10 +88,10 @@ INDUSTRY_SOURCES = [
 def kontni_plan(spine) -> int:
     n = 0
     with spine.write() as c:
-        for konto, naziv, razred in KONTNI_PLAN:
+        for account, name, grade in KONTNI_PLAN:
             cur = c.execute(
                 "INSERT OR IGNORE INTO kontni_plan(konto,naziv,razred) VALUES(?,?,?)",
-                (konto, naziv, razred),
+                (account, name, grade),
             )
             n += cur.rowcount
     return n
@@ -113,13 +113,13 @@ def watch_defaults(spine) -> int:
     return n
 
 
-def dnevnice_seed(spine) -> int:
+def per_diem_seed(spine) -> int:
     n = 0
     with spine.write() as c:
-        for country, amount in dnevnice.RATES.items():
+        for country, amount in per_diem.RATES.items():
             cur = c.execute(
                 "INSERT OR IGNORE INTO dnevnice_rates(country,amount,currency,source) VALUES(?,?,?,?)",
-                (country, amount, "EUR", dnevnice.SOURCE),
+                (country, amount, "EUR", per_diem.SOURCE),
             )
             n += cur.rowcount
     return n
@@ -130,7 +130,7 @@ def all(spine, year: int) -> dict:
         "kontni_plan": kontni_plan(spine),
         "watch": watch_defaults(spine),
         "quickref": quickref.seed(spine),
-        "kalendar": kalendar.seed(spine, year),
-        "dnevnice": dnevnice_seed(spine),
-        "cjenik": cjenik.seed(spine),
+        "kalendar": deadline_calendar.seed(spine, year),
+        "dnevnice": per_diem_seed(spine),
+        "cjenik": pricelist.seed(spine),
     }

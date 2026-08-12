@@ -21,7 +21,7 @@ DEFAULT_TYPES = [
     ("PD", "Prijava poreza na dobit (PD)", "yearly:04-30", "yearly", "dobit", 50, 0, ""),
 ]
 
-# Back-compat: some modules/tests import obveze.KINDS. The registry is the source
+# Back-compat: some modules/tests import obligations.KINDS. The registry is the source
 # of truth; these are just the default kinds.
 KINDS = tuple(t[0] for t in DEFAULT_TYPES)
 
