@@ -116,8 +116,8 @@ def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
     period = today.strftime("%Y-%m")
 
     # unsent PDV obligation for Alfa this period
-    from atlas.business import obveze
-    obveze.ensure_period(spine, "PDV", period)
+    from atlas.business import obligations
+    obligations.ensure_period(spine, "PDV", period)
 
     # past-due deadline
     with spine.write() as c:
@@ -181,9 +181,9 @@ def test_urgency_thresholds():
 
 def test_dashboard_json_xss_safe_client_name(spine, cfg):
     _seed_client(spine, name="<script>alert(1)</script>", oib="22222222222")
-    from atlas.business import obveze
+    from atlas.business import obligations
     period = date.today().strftime("%Y-%m")
-    obveze.ensure_period(spine, "PDV", period)
+    obligations.ensure_period(spine, "PDV", period)
 
     c = _client(spine, cfg)
     tok = _token(c, spine)
@@ -272,9 +272,9 @@ def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
     monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     for i in range(12):
         _seed_client(spine, name=f"Klijent{i}", oib=str(10000000000 + i))
-    from atlas.business import obveze
+    from atlas.business import obligations
     period = today.strftime("%Y-%m")
-    obveze.ensure_period(spine, "PDV", period)
+    obligations.ensure_period(spine, "PDV", period)
 
     c = _client(spine, cfg)
     tok = _token(c, spine)

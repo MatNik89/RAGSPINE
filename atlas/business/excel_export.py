@@ -7,7 +7,7 @@ import secrets
 from datetime import date
 from pathlib import Path
 
-from atlas.business import obveze
+from atlas.business import obligations
 from atlas.core import optional, security
 
 EXPORTS = ("klijenti", "obveze")
@@ -59,9 +59,9 @@ def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
     else:  # obligations for the period
         ws.title = f"Obveze {period}"
         ws.append(["Klijent", "Vrsta", "Poslano", "Tko", "Kad"])
-        for k in obveze.active_kinds(spine):
-            obveze.ensure_period(spine, k, period)
-            for r in obveze.list_period(spine, k, period):
+        for k in obligations.active_kinds(spine):
+            obligations.ensure_period(spine, k, period)
+            for r in obligations.list_period(spine, k, period):
                 if visible is not None and r["client_id"] is not None and r["client_id"] not in visible:
                     continue
                 ws.append([_cell(r["client"]), _cell(k), "da" if r["sent"] else "ne",

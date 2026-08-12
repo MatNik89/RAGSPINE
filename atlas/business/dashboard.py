@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from atlas.business import expiry, deadline_calendar, obveze, peer_compare
+from atlas.business import expiry, deadline_calendar, obligations, peer_compare
 
 
 def _today() -> date:
@@ -117,11 +117,11 @@ def _group_unsent(unsent: list[dict], kind_state: dict) -> list[dict]:
 
 
 def _unsent_obligations(spine, period: str) -> list[dict]:
-    kinds = obveze.active_kinds(spine)
+    kinds = obligations.active_kinds(spine)
     if not kinds:
         return []
     for kind in kinds:
-        obveze.ensure_period(spine, kind, period)
+        obligations.ensure_period(spine, kind, period)
     placeholders = ",".join("?" * len(kinds))
     rows = spine.read().execute(
         f"""SELECT o.client_id AS client_id, c.name AS client, o.kind AS kind

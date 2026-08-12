@@ -4,7 +4,7 @@
 import re
 from datetime import date
 
-from atlas.business import expiry, obveze
+from atlas.business import expiry, obligations
 
 MONTHLY_RE = re.compile(
     r"[sš]to (sve )?(mi )?(jo[šs] )?moram|obaveze ovaj mjesec|mjese[cč]ni pregled|[sš]to moram ovaj mjesec",
@@ -48,9 +48,9 @@ def overview(spine, period: str, visible=None) -> dict:
     deadlines = [dict(r) for r in deadline_rows]
 
     unsent = []
-    for kind in obveze.KINDS:
-        obveze.ensure_period(spine, kind, period)
-        for row in obveze.list_period(spine, kind, period):
+    for kind in obligations.KINDS:
+        obligations.ensure_period(spine, kind, period)
+        for row in obligations.list_period(spine, kind, period):
             if not row["sent"]:
                 unsent.append({**row, "kind": kind})
 

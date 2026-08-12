@@ -27,7 +27,7 @@ from atlas.business import model_settings
 from atlas.business import monthly
 from atlas.business import nldate
 from atlas.business import notes
-from atlas.business import doc_registry, obveze
+from atlas.business import doc_registry, obligations
 from atlas.business import onboarding
 from atlas.business import fleet
 from atlas.business import peer_compare
@@ -1743,8 +1743,8 @@ def create_app(spine, cfg) -> FastAPI:
                          actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)  # who-does-what is monitoring insight
         if worker:
-            return obveze.worker_closed(spine, worker, since=since)
-        return obveze.worker_activity(spine, since=since)
+            return obligations.worker_closed(spine, worker, since=since)
+        return obligations.worker_activity(spine, since=since)
 
     # --- user-defined obligation fields (registry + JSON meta, core locked) ---
     @app.get("/obveze/polja")
@@ -2222,7 +2222,7 @@ def create_app(spine, cfg) -> FastAPI:
             actor = require_actor_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        tabs = [(t["kind"], t["label"]) for t in obveze.list_types(spine, active_only=True)]
+        tabs = [(t["kind"], t["label"]) for t in obligations.list_types(spine, active_only=True)]
         active = [k for k, _ in tabs]
         if not active:
             return HTMLResponse(obveze_none_page())
@@ -2231,28 +2231,28 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
-        obveze.ensure_period(spine, kind, period)
-        rows = _visible_rows(actor, obveze.list_period(spine, kind, period))
+        obligations.ensure_period(spine, kind, period)
+        rows = _visible_rows(actor, obligations.list_period(spine, kind, period))
         return render_obveze(kind, period, rows, tabs)
 
-    @app.get("/obveze.json")
+    @app.get("/obligations.json")
     def obveze_json(kind: str = "PDV", period: str | None = None,
                      actor: Actor = Depends(require_actor_web)):
-        if obveze.get_type(spine, kind) is None:
+        if obligations.get_type(spine, kind) is None:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
         # a restricted worker doesn't see obligations (nor meta) of others' clients
-        return _visible_rows(actor, obveze.list_period(spine, kind, period))
+        return _visible_rows(actor, obligations.list_period(spine, kind, period))
 
     @app.get("/obveze/tipovi")
     def obveze_types_list(user: str = Depends(require_user_web)):
-        return obveze.list_types(spine)
+        return obligations.list_types(spine)
 
     @app.post("/obveze/tipovi")
     def obveze_types_upsert(body: ObligationTypeBody, user: str = Depends(require_user_web)):
         try:
-            kind = obveze.upsert_type(
+            kind = obligations.upsert_type(
                 spine, body.kind, body.label, body.rule, body.frequency,
                 body.applies_to, active=bool(body.active), sort=body.sort,
                 description=body.description, user=user)
@@ -2439,13 +2439,13 @@ def create_app(spine, cfg) -> FastAPI:
         if row is None:
             raise HTTPException(404, "nepoznat klijent")
         available = [{"kind": t["kind"], "label": t["label"]}
-                     for t in obveze.list_types(spine, active_only=True)
+                     for t in obligations.list_types(spine, active_only=True)
                      if t["applies_to"] == "manual"]
         return {
             "has_employees": row["has_employees"] or 0,
             "pdv_freq": row["pdv_freq"] or "monthly",
             "regime": row["regime"] or "",
-            "manual_kinds": obveze.client_types(spine, client_id),
+            "manual_kinds": obligations.client_types(spine, client_id),
             "available_manual": available,
         }
 
@@ -2455,7 +2455,7 @@ def create_app(spine, cfg) -> FastAPI:
         _guard_client(actor, client_id)
         if body.pdv_freq is not None and body.pdv_freq not in ("monthly", "quarterly"):
             raise HTTPException(400, "pdv_freq mora biti monthly ili quarterly")
-        if body.regime is not None and body.regime not in obveze.REGIMES:
+        if body.regime is not None and body.regime not in obligations.REGIMES:
             raise HTTPException(400, f"nepoznat porezni sustav: {body.regime!r}")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
@@ -2471,12 +2471,12 @@ def create_app(spine, cfg) -> FastAPI:
             with spine.write() as c:
                 c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", (*vals, client_id))
         if body.manual_kinds is not None:
-            obveze.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
+            obligations.set_client_types(spine, client_id, body.manual_kinds, user=actor.username)
         row = spine.read().execute(
             "SELECT has_employees, pdv_freq, regime FROM clients WHERE id=?", (client_id,)).fetchone()
         return {"client_id": client_id, "has_employees": row["has_employees"] or 0,
                 "pdv_freq": row["pdv_freq"] or "monthly", "regime": row["regime"] or "",
-                "manual_kinds": obveze.client_types(spine, client_id)}
+                "manual_kinds": obligations.client_types(spine, client_id)}
 
     @app.post("/obveze/mark")
     async def obveze_mark(request: Request, user: str = Depends(require_user_web)):
@@ -2492,12 +2492,12 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, "obligation_id required")
         kind = body.get("kind", "PDV")
         period = body.get("period", date.today().strftime("%Y-%m"))
-        if obveze.get_type(spine, kind) is None:
+        if obligations.get_type(spine, kind) is None:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         _require_valid_period(period)
         sent = str(body.get("sent", "1")) not in ("0", "false", "False")
         try:
-            obveze.mark_sent(spine, obligation_id, user, sent)
+            obligations.mark_sent(spine, obligation_id, user, sent)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         if "application/json" in ctype:

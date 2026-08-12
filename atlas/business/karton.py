@@ -3,7 +3,7 @@
 # not crash the whole card - it degrades to an empty/default result.
 from datetime import date
 
-from atlas.business import checklist, notes, obveze, pricelist
+from atlas.business import checklist, notes, obligations, pricelist
 from atlas.business import onboarding
 
 
@@ -20,8 +20,8 @@ def _urgency(expires: str, today: date) -> tuple:
 
 
 def _client_obligations(spine, client_id: int, period: str) -> list[dict]:
-    for kind in obveze.KINDS:
-        obveze.ensure_period(spine, kind, period)
+    for kind in obligations.KINDS:
+        obligations.ensure_period(spine, kind, period)
     rows = spine.read().execute(
         """SELECT o.kind AS kind, o.period AS period, COALESCE(s.sent, 0) AS sent,
                   s.sent_at AS sent_at

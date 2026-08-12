@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from atlas.business import expiry, deadline_calendar, obveze
+from atlas.business import expiry, deadline_calendar, obligations
 from atlas.ops import jobs
 from atlas.ops.scheduler import Scheduler
 
@@ -48,11 +48,11 @@ def test_obveze_job_seeds_current_period_idempotently(spine, cfg, monkeypatch):
     monkeypatch.setattr(jobs, "_period_now", lambda: "2026-07")
 
     jobs.obveze_job(spine, cfg)
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     assert len(rows) == 1
 
     jobs.obveze_job(spine, cfg)
-    rows2 = obveze.list_period(spine, "PDV", "2026-07")
+    rows2 = obligations.list_period(spine, "PDV", "2026-07")
     assert len(rows2) == 1
 
 

@@ -1,6 +1,6 @@
 from datetime import date
 
-from atlas.business import obveze, deadlines
+from atlas.business import obligations, deadlines
 
 
 def test_holidays_fixed_and_movable_2026():
@@ -31,7 +31,7 @@ def test_due_for_month_rules():
 def test_generate_materialises_and_shifts(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('A','1','u sustavu pdv',1)")
-    obveze.upsert_type(spine, "TZ", "Turistička", "monthly:15", "monthly", "manual")
+    obligations.upsert_type(spine, "TZ", "Turistička", "monthly:15", "monthly", "manual")
 
     added = deadlines.generate(spine, months_ahead=2, today=date(2026, 8, 2))
     assert added > 0
@@ -59,7 +59,7 @@ def test_generate_reconciles_legacy_unshifted_date(spine):
     # legacy seed upiše NEPOMAKNUTI datum na blagdan; generate ga zamijeni pomaknutim
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('A','1','u sustavu pdv',1)")
-    obveze.upsert_type(spine, "TZ", "Turistička", "monthly:15", "monthly", "manual")
+    obligations.upsert_type(spine, "TZ", "Turistička", "monthly:15", "monthly", "manual")
     with spine.write() as c:
         c.execute("INSERT INTO deadline_dates(kind,due,year) VALUES('TZ','2026-08-15',2026)")  # subota+blagdan
     deadlines.generate(spine, months_ahead=0, today=date(2026, 8, 2))

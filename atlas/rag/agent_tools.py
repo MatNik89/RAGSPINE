@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
-from atlas.business import client_visibility, expiry, karton, notes, obveze, onboarding
+from atlas.business import client_visibility, expiry, karton, notes, obligations, onboarding
 from atlas.core import security
 from atlas.rag import retrieval
 from atlas.web import websearch
@@ -83,11 +83,11 @@ def _run_popis_obveza(spine, cfg, actor, args) -> dict:
     vrsta = (args.get("vrsta") or "").strip().upper() or None
     period = args.get("period") or date.today().strftime("%Y-%m")
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-    kinds = [vrsta] if vrsta else obveze.active_kinds(spine)
+    kinds = [vrsta] if vrsta else obligations.active_kinds(spine)
     out = []
     for k in kinds:
-        obveze.ensure_period(spine, k, period)
-        for row in obveze.list_period(spine, k, period):
+        obligations.ensure_period(spine, k, period)
+        for row in obligations.list_period(spine, k, period):
             if visible is not None and row["client_id"] not in visible:
                 continue
             if args.get("samo_neposlano") and row["sent"]:
@@ -139,7 +139,7 @@ def _run_oznaci_obvezu(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["klijent"])
     vrsta = args["vrsta"].strip().upper()
     period = args.get("period") or date.today().strftime("%Y-%m")
-    obveze.ensure_period(spine, vrsta, period)
+    obligations.ensure_period(spine, vrsta, period)
     ob = spine.read().execute(
         "SELECT id FROM obligations WHERE client_id=? AND kind=? AND period=?",
         (row["id"], vrsta, period),
@@ -147,7 +147,7 @@ def _run_oznaci_obvezu(spine, cfg, actor, args) -> dict:
     if ob is None:
         raise ValueError(f"klijent {row['name']!r} nema obvezu {vrsta} za {period}")
     sent = bool(args.get("stanje", True))
-    obveze.mark_sent(spine, ob["id"], actor.username, sent)
+    obligations.mark_sent(spine, ob["id"], actor.username, sent)
     return {"obligation_id": ob["id"], "client_id": row["id"], "vrsta": vrsta, "sent": sent}
 
 
@@ -169,7 +169,7 @@ def _run_zapisi_belesku(spine, cfg, actor, args) -> dict:
 # --- Phase 2: promotion — more business capabilities as tools --------------
 
 def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
-    kind = obveze.upsert_type(
+    kind = obligations.upsert_type(
         spine, args["kind"], args.get("label") or args["kind"], args.get("rule", ""),
         args.get("frequency", "monthly"), args.get("applies_to", "all_active"),
         active=bool(args.get("active", True)), category=args.get("category"),

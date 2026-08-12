@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from atlas.business import obligation_fields as of
-from atlas.business import obveze, tenancy
+from atlas.business import obligations, tenancy
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 from tests.conftest import complete_setup
@@ -94,7 +94,7 @@ def test_list_period_includes_meta(spine):
     oid = _obl(spine)
     of.add_field(spine, "napomena", "text", user="a")
     of.set_value(spine, oid, "napomena", "hitno")
-    rows = obveze.list_period(spine, "PDV", "2026-08")
+    rows = obligations.list_period(spine, "PDV", "2026-08")
     mine = [r for r in rows if r["obligation_id"] == oid][0]
     assert mine["meta"]["napomena"] == "hitno"
 

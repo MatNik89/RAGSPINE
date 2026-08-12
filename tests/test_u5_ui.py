@@ -64,12 +64,12 @@ def test_obveze_mark_sent_still_works(spine, cfg):
     tok = _token(c, spine)
     r = c.get("/obveze?kind=PDV&period=2026-07", headers=_auth(tok))
     assert "Alfa" in r.text
-    from atlas.business import obveze
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    from atlas.business import obligations
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     r2 = c.post("/obveze/mark", json={"obligation_id": rows[0]["obligation_id"], "kind": "PDV",
                                        "period": "2026-07"}, headers=_auth(tok))
     assert r2.status_code == 200
-    rows2 = obveze.list_period(spine, "PDV", "2026-07")
+    rows2 = obligations.list_period(spine, "PDV", "2026-07")
     assert rows2[0]["sent"] == 1
 
 
@@ -94,7 +94,7 @@ def test_obveze_page_rejects_script_breakout_period(spine, cfg):
 def test_obveze_json_rejects_script_breakout_period(spine, cfg):
     c = _client(spine, cfg)
     tok = _token(c, spine)
-    r = c.get("/obveze.json", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
+    r = c.get("/obligations.json", params={"kind": "PDV", "period": _XSS_PERIOD}, headers=_auth(tok))
     assert r.status_code == 400
 
 
@@ -102,9 +102,9 @@ def test_obveze_mark_rejects_script_breakout_period(spine, cfg):
     _seed_client(spine, "Alfa")
     c = _client(spine, cfg)
     tok = _token(c, spine)
-    from atlas.business import obveze
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    from atlas.business import obligations
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     r = c.post("/obveze/mark", json={"obligation_id": rows[0]["obligation_id"], "kind": "PDV",
                                       "period": _XSS_PERIOD}, headers=_auth(tok))
     assert r.status_code == 400

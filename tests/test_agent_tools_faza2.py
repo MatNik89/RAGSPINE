@@ -4,7 +4,7 @@ import importlib.util
 
 import pytest
 
-from atlas.business import devices, doc_registry, fleet, obveze, tenancy
+from atlas.business import devices, doc_registry, fleet, obligations, tenancy
 from atlas.business.acl import Actor
 from atlas.rag import agent, agent_tools
 
@@ -35,7 +35,7 @@ def test_dodaj_vrstu_obveze_writes_type(spine, cfg):
                                {"kind": "najam", "label": "Najam", "rule": "monthly:10",
                                 "frequency": "monthly", "applies_to": "manual"})
     assert out["kind"] == "NAJAM"
-    assert obveze.get_type(spine, "NAJAM")["label"] == "Najam"
+    assert obligations.get_type(spine, "NAJAM")["label"] == "Najam"
 
 
 def test_dodaj_vrstu_obveze_bad_domain_raises(spine, cfg):

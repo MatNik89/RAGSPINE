@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date
 
-from atlas.business import deadlines, expiry, folder_sync, deadline_calendar, obveze, power
+from atlas.business import deadlines, expiry, folder_sync, deadline_calendar, obligations, power
 from atlas.core import memory
 from atlas.docs import imap_fetch
 from atlas.ops import digest, health, reminders_dump
@@ -68,8 +68,8 @@ def expiry_job(spine, cfg) -> None:
 
 def obveze_job(spine, cfg) -> None:
     period = _period_now()
-    for kind in obveze.active_kinds(spine):
-        obveze.ensure_period(spine, kind, period)
+    for kind in obligations.active_kinds(spine):
+        obligations.ensure_period(spine, kind, period)
 
 
 def rokovi_job(spine, cfg) -> None:

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from atlas.business import obveze
+from atlas.business import obligations
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 from tests.conftest import complete_setup
@@ -15,32 +15,32 @@ def _seed(spine):
 
 def test_only_pdv_clients(spine):
     _seed(spine)
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     assert [r["client"] for r in rows] == ["Alfa", "Zebra"]  # Beta van, abecedno
 
 
 def test_mark_sent_moves_down(spine):
     _seed(spine)
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    rows = obveze.list_period(spine, "PDV", "2026-07")
-    obveze.mark_sent(spine, rows[0]["obligation_id"], "ana")
-    rows2 = obveze.list_period(spine, "PDV", "2026-07")
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
+    obligations.mark_sent(spine, rows[0]["obligation_id"], "ana")
+    rows2 = obligations.list_period(spine, "PDV", "2026-07")
     assert rows2[-1]["client"] == "Alfa" and rows2[-1]["sent"]
 
 
 def test_ensure_period_idempotent(spine):
     _seed(spine)
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    obveze.ensure_period(spine, "PDV", "2026-07")
-    rows = obveze.list_period(spine, "PDV", "2026-07")
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    obligations.ensure_period(spine, "PDV", "2026-07")
+    rows = obligations.list_period(spine, "PDV", "2026-07")
     assert len(rows) == 2
 
 
 def test_mark_sent_unknown_obligation_raises(spine):
     import pytest
     with pytest.raises(ValueError):
-        obveze.mark_sent(spine, 999, "ana")
+        obligations.mark_sent(spine, 999, "ana")
 
 
 def _client(spine, cfg):
@@ -114,9 +114,9 @@ def test_obveze_mark_unknown_obligation_404(spine, cfg):
 # ---------- registar vrsta obveza (data-driven) ----------
 
 def test_types_seeded_by_default(spine):
-    kinds = {t["kind"] for t in obveze.list_types(spine)}
+    kinds = {t["kind"] for t in obligations.list_types(spine)}
     assert {"PDV", "JOPPD", "DOH"} <= kinds
-    pdv = obveze.get_type(spine, "PDV")
+    pdv = obligations.get_type(spine, "PDV")
     assert pdv["applies_to"] == "pdv" and pdv["active"] == 1
 
 
@@ -125,52 +125,52 @@ def test_pdv_excludes_canonical_negative_status(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('Da','1','u sustavu PDV-a',1)")
         c.execute("INSERT INTO clients(name,oib,pdv_status,active) VALUES('Ne','2','nije u sustavu PDV-a',1)")
-    obveze.ensure_period(spine, "PDV", "2026-08")
-    assert [r["client"] for r in obveze.list_period(spine, "PDV", "2026-08")] == ["Da"]
+    obligations.ensure_period(spine, "PDV", "2026-08")
+    assert [r["client"] for r in obligations.list_period(spine, "PDV", "2026-08")] == ["Da"]
 
 
 def test_ensure_period_reconciles_stale_unsent(spine):
     with spine.write() as c:
         cid = c.execute("INSERT INTO clients(name,oib,active,has_employees) VALUES('E','1',1,1)").lastrowid
-    obveze.ensure_period(spine, "JOPPD", "2026-08")
-    assert [r["client"] for r in obveze.list_period(spine, "JOPPD", "2026-08")] == ["E"]
+    obligations.ensure_period(spine, "JOPPD", "2026-08")
+    assert [r["client"] for r in obligations.list_period(spine, "JOPPD", "2026-08")] == ["E"]
     # klijent izgubi zaposlene -> neposlana JOPPD obveza se ukloni pri sljedećem ensure
     with spine.write() as c:
         c.execute("UPDATE clients SET has_employees=0 WHERE id=?", (cid,))
-    obveze.ensure_period(spine, "JOPPD", "2026-08")
-    assert obveze.list_period(spine, "JOPPD", "2026-08") == []
+    obligations.ensure_period(spine, "JOPPD", "2026-08")
+    assert obligations.list_period(spine, "JOPPD", "2026-08") == []
 
 
 def test_ensure_period_keeps_sent_obligation_as_history(spine):
     with spine.write() as c:
         cid = c.execute("INSERT INTO clients(name,oib,active,has_employees) VALUES('E','1',1,1)").lastrowid
-    obveze.ensure_period(spine, "JOPPD", "2026-08")
-    oid = obveze.list_period(spine, "JOPPD", "2026-08")[0]["obligation_id"]
-    obveze.mark_sent(spine, oid, "ana")            # predano
+    obligations.ensure_period(spine, "JOPPD", "2026-08")
+    oid = obligations.list_period(spine, "JOPPD", "2026-08")[0]["obligation_id"]
+    obligations.mark_sent(spine, oid, "ana")            # predano
     with spine.write() as c:
         c.execute("UPDATE clients SET has_employees=0 WHERE id=?", (cid,))
-    obveze.ensure_period(spine, "JOPPD", "2026-08")  # ne smije obrisati poslano
-    rows = obveze.list_period(spine, "JOPPD", "2026-08")
+    obligations.ensure_period(spine, "JOPPD", "2026-08")  # ne smije obrisati poslano
+    rows = obligations.list_period(spine, "JOPPD", "2026-08")
     assert len(rows) == 1 and rows[0]["sent"] == 1
 
 
 def test_upsert_rule_must_match_frequency(spine):
     import pytest
     with pytest.raises(ValueError):
-        obveze.upsert_type(spine, "X", "X", "yearly:04-30", "monthly", "all_active")
+        obligations.upsert_type(spine, "X", "X", "yearly:04-30", "monthly", "all_active")
     with pytest.raises(ValueError):
-        obveze.upsert_type(spine, "X", "X", "monthly:15", "yearly", "all_active")
+        obligations.upsert_type(spine, "X", "X", "monthly:15", "yearly", "all_active")
     # ispravno + prazno pravilo su OK
-    obveze.upsert_type(spine, "OK1", "OK", "monthly:15", "monthly", "all_active")
-    obveze.upsert_type(spine, "OK2", "OK", "", "yearly", "all_active")
+    obligations.upsert_type(spine, "OK1", "OK", "monthly:15", "monthly", "all_active")
+    obligations.upsert_type(spine, "OK2", "OK", "", "yearly", "all_active")
 
 
 def test_joppd_gates_on_employees(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active,has_employees) VALUES('Emp','1','u sustavu pdv',1,1)")
         c.execute("INSERT INTO clients(name,oib,pdv_status,active,has_employees) VALUES('NoEmp','2','u sustavu pdv',1,0)")
-    obveze.ensure_period(spine, "JOPPD", "2026-08")
-    rows = obveze.list_period(spine, "JOPPD", "2026-08")
+    obligations.ensure_period(spine, "JOPPD", "2026-08")
+    rows = obligations.list_period(spine, "JOPPD", "2026-08")
     assert [r["client"] for r in rows] == ["Emp"]
 
 
@@ -178,17 +178,17 @@ def test_pdv_quarterly_client_skips_non_quarter_month(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,pdv_status,active,pdv_freq) VALUES('Mje','1','u sustavu pdv',1,'monthly')")
         c.execute("INSERT INTO clients(name,oib,pdv_status,active,pdv_freq) VALUES('Kvar','2','u sustavu pdv',1,'quarterly')")
-    obveze.ensure_period(spine, "PDV", "2026-05")   # svibanj — nije kvartalni mjesec
-    assert [r["client"] for r in obveze.list_period(spine, "PDV", "2026-05")] == ["Mje"]
-    obveze.ensure_period(spine, "PDV", "2026-04")   # travanj — kvartalni mjesec
-    assert {r["client"] for r in obveze.list_period(spine, "PDV", "2026-04")} == {"Mje", "Kvar"}
+    obligations.ensure_period(spine, "PDV", "2026-05")   # svibanj — nije kvartalni mjesec
+    assert [r["client"] for r in obligations.list_period(spine, "PDV", "2026-05")] == ["Mje"]
+    obligations.ensure_period(spine, "PDV", "2026-04")   # travanj — kvartalni mjesec
+    assert {r["client"] for r in obligations.list_period(spine, "PDV", "2026-04")} == {"Mje", "Kvar"}
 
 
 def test_doh_default_is_yearly_dohodak(spine):
-    doh = obveze.get_type(spine, "DOH")
+    doh = obligations.get_type(spine, "DOH")
     assert doh["frequency"] == "yearly" and doh["applies_to"] == "dohodak"
     assert doh["active"] == 0  # nije tab dok ga radnik ne uključi
-    posd = obveze.get_type(spine, "PO-SD")
+    posd = obligations.get_type(spine, "PO-SD")
     assert posd["applies_to"] == "pausal" and posd["frequency"] == "yearly"
 
 
@@ -197,37 +197,37 @@ def test_regime_yearly_obligation_only_in_filing_month(spine):
         c.execute("INSERT INTO clients(name,oib,active,regime) VALUES('Doh','1',1,'dohodak')")
         c.execute("INSERT INTO clients(name,oib,active,regime) VALUES('Pau','2',1,'pausal')")
     # DOH -> yearly:02-28 -> samo u veljači
-    obveze.ensure_period(spine, "DOH", "2026-03")
-    assert obveze.list_period(spine, "DOH", "2026-03") == []
-    obveze.ensure_period(spine, "DOH", "2026-02")
-    assert [r["client"] for r in obveze.list_period(spine, "DOH", "2026-02")] == ["Doh"]
+    obligations.ensure_period(spine, "DOH", "2026-03")
+    assert obligations.list_period(spine, "DOH", "2026-03") == []
+    obligations.ensure_period(spine, "DOH", "2026-02")
+    assert [r["client"] for r in obligations.list_period(spine, "DOH", "2026-02")] == ["Doh"]
     # dohodaš ne dobiva paušalni PO-SD
-    obveze.ensure_period(spine, "PO-SD", "2026-01")
-    assert [r["client"] for r in obveze.list_period(spine, "PO-SD", "2026-01")] == ["Pau"]
+    obligations.ensure_period(spine, "PO-SD", "2026-01")
+    assert [r["client"] for r in obligations.list_period(spine, "PO-SD", "2026-01")] == ["Pau"]
 
 
 def test_manual_type_only_assigned_clients(spine):
     with spine.write() as c:
         c.execute("INSERT INTO clients(name,oib,active) VALUES('Ima','1',1)")
         c.execute("INSERT INTO clients(name,oib,active) VALUES('Nema','2',1)")
-    obveze.upsert_type(spine, "najam", "Najamnina", "monthly:15", "monthly", "manual")
-    assert obveze.get_type(spine, "NAJAM")["applies_to"] == "manual"  # normalizirano na velika
-    obveze.ensure_period(spine, "NAJAM", "2026-08")
-    assert obveze.list_period(spine, "NAJAM", "2026-08") == []  # nitko nije dodijeljen
+    obligations.upsert_type(spine, "najam", "Najamnina", "monthly:15", "monthly", "manual")
+    assert obligations.get_type(spine, "NAJAM")["applies_to"] == "manual"  # normalizirano na velika
+    obligations.ensure_period(spine, "NAJAM", "2026-08")
+    assert obligations.list_period(spine, "NAJAM", "2026-08") == []  # nitko nije dodijeljen
     ima = spine.read().execute("SELECT id FROM clients WHERE name='Ima'").fetchone()["id"]
-    obveze.set_client_types(spine, ima, ["NAJAM"])
-    obveze.ensure_period(spine, "NAJAM", "2026-08")
-    assert [r["client"] for r in obveze.list_period(spine, "NAJAM", "2026-08")] == ["Ima"]
+    obligations.set_client_types(spine, ima, ["NAJAM"])
+    obligations.ensure_period(spine, "NAJAM", "2026-08")
+    assert [r["client"] for r in obligations.list_period(spine, "NAJAM", "2026-08")] == ["Ima"]
 
 
 def test_upsert_type_validates(spine):
     import pytest
     with pytest.raises(ValueError):
-        obveze.upsert_type(spine, "X", "X", "", "weekly", "pdv")      # bad frequency
+        obligations.upsert_type(spine, "X", "X", "", "weekly", "pdv")      # bad frequency
     with pytest.raises(ValueError):
-        obveze.upsert_type(spine, "X", "X", "", "monthly", "nonsense")  # bad applies_to
+        obligations.upsert_type(spine, "X", "X", "", "monthly", "nonsense")  # bad applies_to
     with pytest.raises(ValueError):
-        obveze.upsert_type(spine, "  ", "X", "", "monthly", "pdv")     # empty kind
+        obligations.upsert_type(spine, "  ", "X", "", "monthly", "pdv")     # empty kind
 
 
 def test_types_endpoints_and_new_tab(spine, cfg):
@@ -248,7 +248,7 @@ def test_types_endpoints_and_new_tab(spine, cfg):
 def test_client_obligations_settings_roundtrip(spine, cfg):
     with spine.write() as conn:
         cid = conn.execute("INSERT INTO clients(name,oib,active) VALUES('Klk','9',1)").lastrowid
-    obveze.upsert_type(spine, "NAJAM", "Najamnina", "monthly:15", "monthly", "manual")
+    obligations.upsert_type(spine, "NAJAM", "Najamnina", "monthly:15", "monthly", "manual")
     c = _client(spine, cfg)
     tok = _token(c, spine)
     H = {"Authorization": f"Bearer {tok}"}
@@ -295,8 +295,8 @@ def test_obveze_page_all_types_inactive_empty_state(spine, cfg):
     tok = _token(c, spine)
     H = {"Authorization": f"Bearer {tok}"}
     for k in ("PDV", "JOPPD"):  # deaktiviraj sve default-aktivne
-        t = obveze.get_type(spine, k)
-        obveze.upsert_type(spine, k, t["label"], t["rule"], t["frequency"],
+        t = obligations.get_type(spine, k)
+        obligations.upsert_type(spine, k, t["label"], t["rule"], t["frequency"],
                            t["applies_to"], active=False, sort=t["sort"])
     r = c.get("/obveze", headers=H)
     assert r.status_code == 200  # ne 400
@@ -331,9 +331,9 @@ def test_obveze_page_has_type_tabs_and_two_sections(spine, cfg):
 
 def test_obveze_page_sent_client_starts_in_predano(spine, cfg):
     _seed(spine)
-    obveze.ensure_period(spine, "PDV", "2026-08")
-    rows = obveze.list_period(spine, "PDV", "2026-08")
-    obveze.mark_sent(spine, rows[0]["obligation_id"], "ana")  # Alfa -> predano
+    obligations.ensure_period(spine, "PDV", "2026-08")
+    rows = obligations.list_period(spine, "PDV", "2026-08")
+    obligations.mark_sent(spine, rows[0]["obligation_id"], "ana")  # Alfa -> predano
 
     c = _client(spine, cfg)
     tok = _token(c, spine)
