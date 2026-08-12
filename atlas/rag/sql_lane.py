@@ -34,7 +34,7 @@ def _ph(visible) -> str:
 
 
 def _oib_cond(visible):
-    """eracuni nemaju client_id — ograniči po OIB-u kupca na vidljive klijente."""
+    """eracuni have no client_id — restrict by the customer's OIB to visible clients."""
     if visible is None:
         return None, ()
     return f"customer_oib IN (SELECT oib FROM clients WHERE id IN ({_ph(visible)}))", tuple(visible)
@@ -57,8 +57,8 @@ def _where(*conds) -> tuple[str, list]:
 
 
 def handle(spine, query: str, visible=None) -> str | None:
-    """visible = skup vidljivih client_id (ili None za manager/nescopeano). Svi
-    agregati se ograničavaju da restringirani radnik ne vidi tuđe brojeve/imena."""
+    """visible = set of visible client_ids (or None for manager/unscoped). All
+    aggregates are restricted so a restricted worker can't see others' numbers/names."""
     q = _normalize(query)
 
     if re.search(r"(koliko|broj)\s+(je\s+)?racuna\b", q):

@@ -1,12 +1,14 @@
-# Agentska petlja (Faza 3, T3): LLM bira alat iz agent_tools.TOOLS, read-only
-# alati se izvrše odmah i rezultat vrati LLM-u; write alat se SAMO predloži
-# (pending) — izvršenje čeka eksplicitnu potvrdu korisnika (T4: /chat/potvrdi).
+# Agent loop (Phase 3, T3): the LLM picks a tool from agent_tools.TOOLS,
+# read-only tools run immediately and the result is returned to the LLM; a
+# write tool is ONLY proposed (pending) — execution waits for the user's
+# explicit confirmation (T4: /chat/potvrdi).
 #
-# ponytail: format poruka natrag LLM-u je obična {"role","content": str}
-# parica (ne puni Anthropic tool_result/tool_use blok) — LLMClient.complete
-# poruke samo proslijedi provideru, a ovaj oblik je dovoljan da model vidi
-# što se dogodilo i nastavi. Upgrade path: pravi tool_use/tool_result blokovi
-# ako se pokaže da neki provider inzistira na strogom formatu.
+# ponytail: the format of messages back to the LLM is a plain
+# {"role","content": str} pair (not the full Anthropic tool_result/tool_use
+# block) — LLMClient.complete just forwards the messages to the provider, and
+# this shape is enough for the model to see what happened and continue. Upgrade
+# path: real tool_use/tool_result blocks if some provider turns out to insist
+# on the strict format.
 import json
 
 from atlas.rag import agent_tools
@@ -39,8 +41,8 @@ PENDING_TTL_MIN = 10
 
 
 def stash_pending(spine, actor, pending: dict) -> str:
-    """Spremi predloženi WRITE kao jednokratni vlasnički token (LLM izlaz je
-    nepovjerljiv: ništa se ne izvrši dok korisnik ne potvrdi). Vrati token."""
+    """Store the proposed WRITE as a one-time ownership token (LLM output is
+    untrusted: nothing runs until the user confirms). Return the token."""
     import secrets
     token = secrets.token_urlsafe(24)
     with spine.write() as c:
@@ -53,10 +55,11 @@ def stash_pending(spine, actor, pending: dict) -> str:
 
 def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MIN,
                     remember: bool = False) -> dict:
-    """Atomično potroši vlasnički, ne-istekli pending token i IZVRŠI alat. Ovlasti
-    se PONOVO provjere u run_tool sad (ne na vrijeme prijedloga). Dijeljeno između
-    web /chat/potvrdi i Telegram inline potvrde. `remember` -> stvori user-grant za
-    ubuduće (high-rizik se NE pamti; safety-floor). Diže ValueError."""
+    """Atomically consume the owned, non-expired pending token and RUN the tool.
+    Authorizations are RE-checked in run_tool now (not at proposal time). Shared
+    between the web /chat/potvrdi and the Telegram inline confirmation.
+    `remember` -> create a user grant for the future (high-risk is NOT
+    remembered; safety-floor). Raises ValueError."""
     with spine.write() as c:
         row = c.execute(
             "SELECT tool, args_json FROM agent_pending "
@@ -72,7 +75,7 @@ def confirm_pending(spine, cfg, token: str, actor, ttl_min: int = PENDING_TTL_MI
     remembered = False
     if remember:
         from atlas.business import agent_grants
-        try:  # high-rizik create_grant baci -> tiho preskoči (ne može se pamtiti)
+        try:  # high-risk create_grant raises -> silently skip (cannot be remembered)
             agent_grants.create_grant(spine, actor, tool, args, scope="user", user=actor.username)
             remembered = True
         except ValueError:
@@ -87,7 +90,7 @@ def cancel_pending(spine, token: str, actor) -> None:
 
 
 def summarize_action(name: str, args: dict) -> str:
-    """Ljudski hrvatski sažetak predložene write akcije, za potvrdu."""
+    """A human, Croatian summary of the proposed write action, for confirmation."""
     if name == "dodaj_klijenta":
         oib = f" (OIB {args['oib']})" if args.get("oib") else ""
         return f"Dodat ću klijenta {args.get('naziv', '')}{oib}."
@@ -117,8 +120,8 @@ def summarize_action(name: str, args: dict) -> str:
     if name == "posalji_poruku_klijentu":
         return f"Poslat ću poruku klijentu {args.get('klijent', '')}: \"{args.get('naslov', '')}\"."
     if name == "predlozi_vjestinu":
-        # prikaži STVARNI sadržaj (opis+koraci) da potvrda ne bude slijepa —
-        # sadržaj je nepovjerljiv (može doći iz injektiranog dokumenta); Codex
+        # show the ACTUAL content (description+steps) so the confirmation is not
+        # blind — the content is untrusted (may come from an injected document); Codex
         opis = (args.get("opis") or "").strip()[:200]
         koraci = (args.get("koraci") or "").strip()[:600]
         d = f"\nOpis: {opis}" if opis else ""
@@ -128,8 +131,8 @@ def summarize_action(name: str, args: dict) -> str:
 
 
 def _echo(result_text: str, name: str) -> str:
-    """Asistentova poruka koju vraćamo u kontekst — nikad prazna (neki
-    provideri odbijaju prazan tekstni blok)."""
+    """The assistant message we return into the context — never empty (some
+    providers reject an empty text block)."""
     return result_text or f"(poziv alata {name})"
 
 
@@ -153,8 +156,8 @@ def set_ured_pravila(spine, text: str, user: str = "?") -> None:
 
 
 def _ured_pravila_text(spine) -> str:
-    """Pravila ureda (owner ih tipka) — uvijek u promptu, ispred svega, nadglasavaju
-    naučeno ponašanje. OpenWorker user_rules obrazac."""
+    """Office rules (the owner types them) — always in the prompt, ahead of
+    everything, overriding learned behavior. The OpenWorker user_rules pattern."""
     p = get_ured_pravila(spine)
     if not p:
         return ""
@@ -163,14 +166,15 @@ def _ured_pravila_text(spine) -> str:
 
 
 def _skills_catalog_text(spine, actor) -> str:
-    """Katalog aktivnih vještina (samo ime+opis) za system-prompt — progresivno
-    otkrivanje: pune korake agent povlači alatom ucitaj_vjestinu kad zatrebaju."""
+    """Catalog of active skills (name+description only) for the system prompt —
+    progressive disclosure: the agent pulls the full steps with the
+    ucitaj_vjestinu tool when needed."""
     from atlas.knowledge import skills as skills_mod
     rows = skills_mod.list_skills(spine, actor.org_id, status="active")
-    rows = skills_mod.readable(rows, actor)  # vidljivost: private/team ne cure drugima (Codex)
+    rows = skills_mod.readable(rows, actor)  # visibility: private/team do not leak to others (Codex)
     if not rows:
         return ""
-    # cap duljine: tuđe ime/opis ide u prompt -> omeđi injection/kontekst (Codex)
+    # length cap: someone else's name/description goes into the prompt -> bound injection/context (Codex)
     lines = "\n".join(f"- {(s['name'] or '')[:60]}: {(s['description'] or '')[:200]}"
                       for s in rows if s.get("name"))
     if not lines:
@@ -179,57 +183,59 @@ def _skills_catalog_text(spine, actor) -> str:
             "ucitaj_vjestinu(ime) da učitaš pune korake kad su relevantne:\n" + lines)
 
 
-# readonly alati s vanjskim/file-efektom — ne izvršavaju se u autonomnom (unattended)
-# radu (izvezi_excel piše datoteke; nauci_izvor je ionako write/high)
+# readonly tools with an external/file effect — not run in autonomous (unattended)
+# operation (izvezi_excel writes files; nauci_izvor is write/high anyway)
 _UNATTENDED_DENY_READONLY = frozenset({"izvezi_excel"})
 
-# trust-taint (Paperclip low-trust): alati koji u kontekst donesu SLOBODNI TEKST /
-# sadržaj dokumenata (mogući prompt-injection nosač). Kad ih run pozove, kontekst
-# postaje "tainted" -> auto-grant se degradira na ručno + samo-modifikacijski alati
-# se odbijaju (untrusted sadržaj NE smije mijenjati konfiguraciju/vještine).
-# ponytail: gruba granulacija (svaki pretrazi tainta); upgrade = source_trust stupac
-# po dokumentu (samo izvana-uneseni dokumenti taintaju, čuva grant-udobnost internih runova).
+# trust-taint (Paperclip low-trust): tools that bring FREE TEXT / document
+# content into the context (a possible prompt-injection carrier). When a run
+# calls them, the context becomes "tainted" -> auto-grant is degraded to manual +
+# self-modifying tools are rejected (untrusted content must NOT change
+# configuration/skills).
+# ponytail: coarse granularity (every pretrazi taints); upgrade = a source_trust
+# column per document (only externally-supplied documents taint, preserving
+# grant convenience of internal runs).
 _TAINTING_TOOLS = frozenset({"pretrazi"})
 _TAINT_BLOCKED_WRITES = frozenset({"nauci_izvor", "predlozi_vjestinu"})
 
 
 def run_unattended(spine, cfg, query: str, actor, llm, source: str, max_steps: int = 6) -> dict:
-    """Autonomni (nenadzirani) run: agent AUTONOMNO odradi read/draft; svaku
-    write-radnju koju NE pokriva grant PARKIRA (red za odobrenje) i NASTAVLJA —
-    ne dira podatke bez odobrenja. HIGH-rizik uvijek parkiran (safety-floor).
-    Vrati {text, parkirano:[id], izvrseno:[tool]}."""
+    """Autonomous (unattended) run: the agent AUTONOMOUSLY does read/draft; any
+    write action NOT covered by a grant is PARKED (approval queue) and it
+    CONTINUES — it does not touch data without approval. HIGH-risk is always
+    parked (safety-floor). Returns {text, parkirano:[id], izvrseno:[tool]}."""
     return run_agent(spine, cfg, query, actor, llm, max_steps=max_steps,
                      unattended=True, source=source)
 
 
 def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
               unattended: bool = False, source: str = "") -> dict:
-    # pokaži SAMO alate koje uloga smije — model tako ne predloži zabranjeni alat
-    # pa lažno ne tvrdi da ga je izvršio (iskrenost umj. tihog pada; OpenWorker obrazac)
+    # show ONLY the tools the role is allowed — so the model does not propose a
+    # forbidden tool and then falsely claim it ran it (honesty over silent failure; OpenWorker pattern)
     tools = [{"name": t.name, "description": t.description, "schema": t.schema}
               for t in agent_tools.TOOLS.values() if agent_tools.allowed(actor, t)]
-    system = (SYSTEM_PROMPT + _ured_pravila_text(spine)  # pravila ureda ispred svega
-              + _skills_catalog_text(spine, actor))       # katalog vještina (progresivno)
+    system = (SYSTEM_PROMPT + _ured_pravila_text(spine)  # office rules ahead of everything
+              + _skills_catalog_text(spine, actor))       # skills catalog (progressive)
     from atlas.rag import agent_guards
     messages = [{"role": "user", "content": query}]
     sources: list = []
     last_text = ""
-    # evidence = SKUP viđenih OIB-ova (upit + rezultati alata), ne golem string
-    # (memorija; Codex). Upit uključen jer user-tipkan OIB nije halucinacija.
+    # evidence = the SET of seen OIBs (query + tool results), not a huge string
+    # (memory; Codex). The query is included because a user-typed OIB is not a hallucination.
     observed_oibs: set = agent_guards.observed_oibs(query)
-    seen_calls: set = set()  # potpisi USPJEŠNIH readonly poziva (loop-guard)
-    parkirano: list = []     # id-evi parkiranih radnji (unattended)
-    izvrseno: list = []      # alati auto-izvršeni po grantu (unattended)
-    run_writes: set = set()  # različite write-radnje u OVOM pokretanju (blast-radius cap)
-    tainted = False          # je li run konzumirao slobodni tekst/dokumente (trust-taint)
+    seen_calls: set = set()  # signatures of SUCCESSFUL readonly calls (loop-guard)
+    parkirano: list = []     # ids of parked actions (unattended)
+    izvrseno: list = []      # tools auto-run by grant (unattended)
+    run_writes: set = set()  # distinct write actions in THIS run (blast-radius cap)
+    tainted = False          # whether the run consumed free text/documents (trust-taint)
 
-    # točne vrijednosti tajni koje bi mogle procuriti u error/odgovor (value-based
-    # redakcija; komplement redakciji-po-imenu u auditu). Skupljeno jednom po runu.
+    # the exact secret values that could leak into an error/response (value-based
+    # redaction; complement to redaction-by-name in the audit). Collected once per run.
     from atlas.core import security
     _secret_vals = [getattr(cfg, k, "") for k in ("imap_pass", "llm_api_key", "jwt_secret")]
 
-    def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
-        text = security.redact_secret_values(text, _secret_vals)  # ne procuri tajnu u odgovor
+    def _finish(text):  # add a warning for unverified OIBs in the response
+        text = security.redact_secret_values(text, _secret_vals)  # do not leak a secret into the response
         out = {"text": agent_guards.append_evidence_caution(
             text, agent_guards.unverified_oibs(text, observed_oibs)),
             "sources": sources, "pending": None}
@@ -237,19 +243,19 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             out["parkirano"], out["izvrseno"] = parkirano, izvrseno
         return out
 
-    from atlas.business import agent_budget  # budžet-štit (cost-runaway, pos. unattended)
+    from atlas.business import agent_budget  # budget guard (cost-runaway, esp. unattended)
     for _ in range(max_steps):
-        # token-plafon se provjerava PRIJE poziva (potrošnja se bilježi nakon; Codex:
-        # inače over-cap tokeni nikad ne uđu u total i vrata se ne zatvore)
+        # the token ceiling is checked BEFORE the call (consumption is recorded after; Codex:
+        # otherwise over-cap tokens never enter the total and the gate never closes)
         if agent_budget.over(spine, "tokens"):
             return _finish((last_text or "") + "\n\n[Zaustavljeno: dnevni budžet 'tokens' iscrpljen]")
         try:
-            agent_budget.consume(spine, "llm", 1)  # dnevni plafon LLM-poziva (rezervacija)
+            agent_budget.consume(spine, "llm", 1)  # daily ceiling of LLM calls (reservation)
         except agent_budget.BudgetError as e:
             return _finish((last_text or "") + f"\n\n[Zaustavljeno: {e}]")
         result = llm.complete(messages, system=system, tools=tools)
         last_text = result.text
-        agent_budget.add(spine, "tokens", agent_budget.tokens_of(result.usage))  # uvijek zabilježi
+        agent_budget.add(spine, "tokens", agent_budget.tokens_of(result.usage))  # always record
 
         if not result.tool_calls:
             return _finish(result.text)
@@ -258,8 +264,8 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
         name, args = call.get("name"), call.get("args") or {}
         tool = agent_tools.TOOLS.get(name)
 
-        # loop-guard: isti readonly alat+argumenti već USPJEŠNO pozvan = bez napretka
-        # (dodaje se u seen TEK nakon uspjeha niže -> neuspjeh se smije ponoviti; Codex)
+        # loop-guard: the same readonly tool+arguments already called SUCCESSFULLY = no progress
+        # (added to seen ONLY after success below -> a failure may be retried; Codex)
         lk = agent_guards.loop_key(name, args)
         if tool is not None and tool.readonly and lk in seen_calls:
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
@@ -277,15 +283,15 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
 
         if tool.readonly:
             if unattended:
-                # autonomni run: readonly s vanjskim/file-efektom NE smije auto (injection
-                # kroz pročitani dokument mogao bi izvesti podatke/pisati datoteke; Codex)
+                # autonomous run: readonly with an external/file effect must NOT auto (injection
+                # through a read document could export data/write files; Codex)
                 if name in _UNATTENDED_DENY_READONLY:
                     messages.append({"role": "assistant", "content": _echo(result.text, name)})
                     messages.append({"role": "user", "content":
                                       f"Alat {name} nije dostupan u autonomnom radu. Nastavi bez njega."})
                     continue
                 if name == "pretrazi":
-                    args = {**args, "web": False}  # bez egress-a van LAN-a u autonomiji
+                    args = {**args, "web": False}  # no egress outside the LAN in autonomy
             try:
                 tool_result = agent_tools.run_tool(spine, cfg, actor, name, args)
             except ValueError as e:
@@ -293,19 +299,19 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
                 messages.append({"role": "user", "content": f"Greška pri pozivu alata {name}: "
                                  f"{security.redact_secret_values(str(e), _secret_vals)}"})
                 continue
-            seen_calls.add(lk)  # uspješan readonly -> zabilježi (neuspjeh se smije ponoviti)
-            if name in _TAINTING_TOOLS:  # trust-taint: run je vidio slobodni tekst/dokumente
-                tainted = True           # (mogući injection-nosač) -> pooštri kasnije write-e
+            seen_calls.add(lk)  # successful readonly -> record (a failure may be retried)
+            if name in _TAINTING_TOOLS:  # trust-taint: the run saw free text/documents
+                tainted = True           # (a possible injection carrier) -> tighten later writes
             _accumulate_sources(sources, name, tool_result)
             payload = json.dumps(tool_result, ensure_ascii=False, default=str)
-            observed_oibs |= agent_guards.observed_oibs(payload)  # evidence (samo OIB-ovi)
+            observed_oibs |= agent_guards.observed_oibs(payload)  # evidence (OIBs only)
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
                               f"Rezultat alata {name}: {agent_guards.truncate_structured(payload)}"})
             continue
 
-        # trust-taint: untrusted (dokument/web) sadržaj NE smije voditi samo-modifikaciju
-        # (učenje izvora / stvaranje vještine) — odbij potpuno, ni ne parkiraj
+        # trust-taint: untrusted (document/web) content must NOT drive self-modification
+        # (learning a source / creating a skill) — reject entirely, do not even park
         if tainted and name in _TAINT_BLOCKED_WRITES:
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
@@ -313,7 +319,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
                               f"(zaštita od injektiranja). Nastavi bez njega."})
             continue
 
-        # write alat: NE izvršavaj — samo validiraj i predloži (čeka potvrdu)
+        # write tool: do NOT run — only validate and propose (awaits confirmation)
         if not agent_tools.allowed(actor, name):
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content": f"Nemate ovlasti za alat {name}."})
@@ -325,9 +331,9 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
                               f"Nevažeći argumenti za {name}: {err}. Ispravi i pokušaj ponovno."})
             continue
 
-        # blast-radius cap: jedan (nenadzirani) run smije dirnuti najviše N RAZLIČITIH
-        # write-radnji (Paperclip cross-issue-influence-limit) — budžet stopira volumen,
-        # ovo stopira rasap po knjizi. Bije samo u unattended (interaktivni staje na 1.).
+        # blast-radius cap: one (unattended) run may touch at most N DISTINCT
+        # write actions (Paperclip cross-issue-influence-limit) — the budget stops volume,
+        # this stops spread across the book. Applies only in unattended (interactive stops at 1).
         wkey = agent_guards.loop_key(name, args)
         cap = agent_budget.run_write_cap(spine)
         if unattended and cap > 0 and wkey not in run_writes and len(run_writes) >= cap:
@@ -337,22 +343,22 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
 
         summary = summarize_action(name, args)
         risk = agent_tools.risk(name)
-        # perzistentni grant: "potvrdi jednom, zapamti" -> auto-izvrši (SAMO low/med;
-        # high nikad, safety-floor u can_auto_approve). Inače normalni propose->confirm.
+        # persistent grant: "confirm once, remember" -> auto-run (ONLY low/med;
+        # high never, safety-floor in can_auto_approve). Otherwise normal propose->confirm.
         from atlas.business import agent_grants
-        # tainted kontekst NE smije auto-izvršiti po grantu — injektirani dokument mogao
-        # bi okinuti zapamćeno pravilo; degradiraj na ručno (parkiraj/predloži)
+        # a tainted context must NOT auto-run by grant — an injected document could
+        # trigger a remembered rule; degrade to manual (park/propose)
         auto = agent_grants.can_auto_approve(spine, actor, name, args) and not tainted
         if auto:
             try:
-                agent_budget.consume(spine, "writes", 1)  # dnevni plafon auto-write-a
+                agent_budget.consume(spine, "writes", 1)  # daily ceiling of auto-writes
             except agent_budget.BudgetError:
-                auto = False  # budžet iscrpljen -> tretiraj kao bez granta (parkiraj/predloži)
+                auto = False  # budget exhausted -> treat as without a grant (park/propose)
         if auto:
             res = agent_tools.run_tool(spine, cfg, actor, name, args)
             spine.audit(actor.username, "agent_auto_grant", name,
                         json.dumps(args, ensure_ascii=False, default=str))
-            if unattended:  # auto-izvršeno po grantu -> nastavi run
+            if unattended:  # auto-run by grant -> continue the run
                 izvrseno.append(name)
                 messages.append({"role": "assistant", "content": _echo(result.text, name)})
                 messages.append({"role": "user", "content":
@@ -361,7 +367,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             return {"text": summary + " (automatski odobreno prema spremljenom pravilu).",
                     "sources": sources, "pending": None, "result": res}
         if unattended:
-            # nema grant / high-rizik -> PARKIRAJ za odobrenje i NASTAVI (ne diraj podatke)
+            # no grant / high-risk -> PARK for approval and CONTINUE (do not touch data)
             from atlas.business import parked
             pid = parked.park(spine, actor.org_id, source or "autonomni", name, args, summary, risk)
             parkirano.append(pid)

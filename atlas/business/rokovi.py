@@ -1,35 +1,35 @@
-# Materijalizacija rokova unaprijed + pomak na radni dan (vikend/blagdan).
+# Materialize deadlines in advance + shift to a workday (weekend/holiday).
 #
-# Rokovi se generiraju iz registra vrsta (obligation_types.rule) za horizont
-# mjeseci unaprijed i upisuju u deadline_dates (koje čita kalendar-hero). Ako
-# rok padne na subotu/nedjelju/blagdan, pomiče se na prvi sljedeći radni dan —
-# hrvatsko pravilo za porezne rokove.
+# Deadlines are generated from the type registry (obligation_types.rule) for a
+# horizon of months ahead and written into deadline_dates (which the calendar
+# hero reads). If a deadline falls on a Saturday/Sunday/holiday, it is shifted to
+# the first following workday — the Croatian rule for tax deadlines.
 
 from datetime import date, timedelta
 
 from atlas.business import obveze
 
-# Fiksni hrvatski neradni blagdani (mjesec, dan). Uskrs/Uskrsni ponedjeljak/
-# Tijelovo su pomični (računaju se iz Uskrsa).
+# Fixed Croatian public holidays (month, day). Easter/Easter Monday/Corpus
+# Christi are movable (computed from Easter).
 _FIXED_HOLIDAYS = [
-    (1, 1),    # Nova godina
-    (1, 6),    # Sveta tri kralja
-    (5, 1),    # Praznik rada
-    (5, 30),   # Dan državnosti
-    (6, 22),   # Dan antifašističke borbe
-    (8, 5),    # Dan pobjede i domovinske zahvalnosti
-    (8, 15),   # Velika Gospa
-    (11, 1),   # Svi sveti
-    (11, 18),  # Dan sjećanja na žrtve Domovinskog rata
-    (12, 25),  # Božić
-    (12, 26),  # Sveti Stjepan
+    (1, 1),    # New Year's Day
+    (1, 6),    # Epiphany
+    (5, 1),    # Labour Day
+    (5, 30),   # Statehood Day
+    (6, 22),   # Anti-Fascist Struggle Day
+    (8, 5),    # Victory and Homeland Thanksgiving Day
+    (8, 15),   # Assumption of Mary
+    (11, 1),   # All Saints' Day
+    (11, 18),  # Remembrance Day for the Victims of the Homeland War
+    (12, 25),  # Christmas
+    (12, 26),  # St. Stephen's Day
 ]
 
 _holiday_cache: dict[int, set] = {}
 
 
 def _easter(year: int) -> date:
-    """Uskrsna nedjelja (gregorijanski, anonimni Meeus algoritam)."""
+    """Easter Sunday (Gregorian, anonymous Meeus algorithm)."""
     a = year % 19
     b, c = year // 100, year % 100
     d, e = b // 4, b % 4
@@ -45,15 +45,15 @@ def _easter(year: int) -> date:
 
 
 def holidays(year: int) -> set:
-    """Set neradnih blagdana za godinu (fiksni + pomični)."""
+    """Set of public holidays for the year (fixed + movable)."""
     cached = _holiday_cache.get(year)
     if cached is not None:
         return cached
     hs = {date(year, mm, dd) for mm, dd in _FIXED_HOLIDAYS}
     e = _easter(year)
-    hs.add(e)                       # Uskrs
-    hs.add(e + timedelta(days=1))   # Uskrsni ponedjeljak
-    hs.add(e + timedelta(days=60))  # Tijelovo
+    hs.add(e)                       # Easter
+    hs.add(e + timedelta(days=1))   # Easter Monday
+    hs.add(e + timedelta(days=60))  # Corpus Christi
     _holiday_cache[year] = hs
     return hs
 
@@ -78,8 +78,8 @@ def _clamp(year: int, month: int, day: int) -> date:
 
 
 def due_for_month(rule: str, year: int, month: int) -> date | None:
-    """Osnovni (nepomaknuti) rok za pravilo u danom mjesecu, ili None ako ga
-    pravilo za taj mjesec ne generira."""
+    """The base (unshifted) deadline for a rule in the given month, or None if
+    the rule does not generate one for that month."""
     if not rule or ":" not in rule:
         return None
     freq, spec = rule.split(":", 1)
@@ -111,25 +111,25 @@ def _today() -> date:
 
 
 def generate(spine, months_ahead: int = 12, today: date | None = None) -> int:
-    """Materijalizira deadline_dates za sve registrirane vrste od tekućeg mjeseca
-    unaprijed, s pomakom na radni dan. Idempotentno (dedupe po kind+due).
-    Vraća broj novoupisanih datuma."""
+    """Materializes deadline_dates for all registered types from the current
+    month forward, with a shift to a workday. Idempotent (dedupe by kind+due).
+    Returns the number of newly inserted dates."""
     today = today or _today()
     types = obveze.list_types(spine)
     month_start = date(today.year, today.month, 1).isoformat()
     added = 0
     with spine.write() as c:
-        # katalog: svaka vrsta s pravilom mora imati deadlines red (za JOIN opisa)
+        # catalog: every type with a rule must have a deadlines row (for the description JOIN)
         for t in types:
             if t["rule"]:
                 c.execute(
                     "INSERT OR IGNORE INTO deadlines(kind, rule, description) VALUES(?,?,?)",
                     (t["kind"], t["rule"], t["label"]),
                 )
-                # Reconcile: obriši BUDUĆE datume ove vrste (od 1. tekućeg mjeseca)
-                # pa ih regeneriraj. Sprječava duple/zastarjele rokove kad
-                # legacy seed upiše nepomaknuti datum ili se pravilo promijeni.
-                # Prošli datumi ostaju kao povijest.
+                # Reconcile: delete FUTURE dates of this type (from the 1st of the
+                # current month) and then regenerate them. Prevents duplicate/stale
+                # deadlines when a legacy seed writes an unshifted date or the rule
+                # changes. Past dates remain as history.
                 c.execute(
                     "DELETE FROM deadline_dates WHERE kind=? AND due>=?",
                     (t["kind"], month_start),

@@ -1,8 +1,8 @@
-# Kategorizacija troškova — regex pravila za prijedlog konta + porezna priznatost.
+# Expense categorization - regex rules for suggesting the account + tax deductibility.
 #
-# ponytail: konto brojevi/nazivi su ilustrativni (RRIF-stil raspored skupine 4),
-# ne službeni kontni plan. Operater treba uskladiti s vlastitim kontnim planom
-# (kontni_plan tablica) ili override-ati kroz naučene ispravke (feedback_learn).
+# ponytail: the account numbers/names are illustrative (RRIF-style group 4 layout),
+# not an official chart of accounts. The operator should align them with their own chart of accounts
+# (kontni_plan table) or override them through learned corrections (feedback_learn).
 
 import re
 

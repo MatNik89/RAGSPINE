@@ -1,10 +1,12 @@
-"""Zakazani zadaci ureda (owner kreira): pokreni ODOBRENU akciju na dan/sat
-(npr. 20. u mjesecu u 8h -> kampanja podsjetnika za nepredanu obvezu).
+"""Scheduled office tasks (created by the owner): run an APPROVED action on a
+given day/hour (e.g. the 20th of the month at 8am -> reminder campaign for an
+unsubmitted obligation).
 
-Sigurnost (kao fleet program_key): akcija je iz ALLOWLISTE — NIKAD proizvoljan
-kod. Owner-only kreiranje. Consent-gate ostaje na razini slanja (send_to_client
-preskače klijente bez pristanka). Ponytail: bez croniter-a — day_of_month/hour
-pokriva uredske potrebe; poller (5 min) fira dospjele, dedupe po datumu."""
+Security (like fleet program_key): the action comes from an ALLOWLIST — NEVER
+arbitrary code. Owner-only creation. The consent gate stays at the sending
+level (send_to_client skips clients without consent). Ponytail: no croniter —
+day_of_month/hour covers office needs; the poller (5 min) fires due tasks,
+deduped by date."""
 import calendar
 import json
 from datetime import datetime
@@ -12,34 +14,36 @@ from datetime import datetime
 try:
     from zoneinfo import ZoneInfo
     _TZ = ZoneInfo("Europe/Zagreb")
-except Exception:  # pragma: no cover — tzdata nedostaje
+except Exception:  # pragma: no cover — tzdata missing
     _TZ = None
 
 
 def _now(now: datetime | None = None) -> datetime:
-    """Uredski sat = Europe/Zagreb (ne naivni host-clock) — inače UTC host fira u
-    krivi sat/mjesec i due-calc se razilazi s periodom kampanje (Codex)."""
+    """Office clock = Europe/Zagreb (not a naive host clock) — otherwise a UTC
+    host fires in the wrong hour/month and the due calc diverges from the
+    campaign period (Codex)."""
     if now is not None:
         return now
     return datetime.now(_TZ) if _TZ else datetime.now()
 
 
 def _resolve_actor(spine, org_id, created_by):
-    """Actor (identitet+ovlasti+vidljivost) za autonomni run — po created_by u org-u."""
+    """Actor (identity+permissions+visibility) for an autonomous run — by created_by within the org."""
     from atlas.business import tenancy
     row = spine.read().execute("SELECT id FROM users WHERE username=?", (created_by or "",)).fetchone()
     if row is None:
         return None
     actor = tenancy.actor_for(spine, org_id, row["id"])
-    if actor is not None:  # atribucija: audit/autor mora nositi ime, ne prazno (Codex)
+    if actor is not None:  # attribution: audit/author must carry a name, not empty (Codex)
         actor.username = created_by
     return actor
 
 
 def _run_autonomni_pregled(spine, cfg, params: dict, org_id, created_by) -> dict:
-    """Autonomni (nenadzirani) agent-run nad zadanim promptom: agent AUTONOMNO
-    odradi read/draft; svaku write-radnju PARKIRA za odobrenje vlasnika (ne dira
-    podatke; high uvijek parkiran). 'Priprema -> potpis' obrazac (OpenWorker/MateClaw)."""
+    """Autonomous (unattended) agent run over a given prompt: the agent
+    AUTONOMOUSLY does read/draft; every write action is PARKED for the owner's
+    approval (does not touch data; high is always parked). 'Prepare -> sign'
+    pattern (OpenWorker/MateClaw)."""
     from atlas.business import model_settings
     from atlas.core.llm import LLMError, LLMUnavailable
     from atlas.rag import agent
@@ -65,12 +69,13 @@ def _validate_autonomni(params: dict) -> None:
 
 
 def _run_kampanja_obveza(spine, cfg, params: dict, org_id, created_by=None) -> dict:
-    """Pošalji podsjetnik klijentima s NEPREDANOM obvezom `kind` za TEKUĆI mjesec
-    (period se računa pri firanju). Consent-gated (send_to_client preskače bez
-    pristanka). NAPOMENA: clients/obligations u ATLAS-u NISU org-particionirani
-    (jedan ured) — doseg je identičan postojećoj ručnoj /messaging/campaign (admin,
-    office-wide); org_id se čuva na zadatku za buduću multi-tenancy."""
-    from atlas.web import messaging
+    """Send a reminder to clients with an UNSUBMITTED obligation `kind` for the
+    CURRENT month (the period is computed at fire time). Consent-gated
+    (send_to_client skips without consent). NOTE: clients/obligations in ATLAS
+    are NOT org-partitioned (single office) — the reach is identical to the
+    existing manual /messaging/campaign (admin, office-wide); org_id is kept on
+    the task for future multi-tenancy."""
+    from atlas.business import messaging
     kind = (params.get("kind") or "").strip()
     if not kind:
         raise ValueError("akcija kampanja_obveza traži 'kind' (npr. PDV)")
@@ -103,7 +108,7 @@ def create_task(spine, org_id, title, action_key, params, day_of_month, hour,
                 user="?") -> int:
     if action_key not in ACTIONS:
         raise ValueError(f"nepoznata akcija: {action_key!r}")
-    ACTIONS[action_key][1](params or {})  # validacija parametara akcije
+    ACTIONS[action_key][1](params or {})  # validate the action's parameters
     dom = None if day_of_month in (None, "", 0) else int(day_of_month)
     if dom is not None and not (1 <= dom <= 31):
         raise ValueError("dan u mjesecu mora biti 1-31 (ili prazno = svaki dan)")
@@ -142,8 +147,8 @@ def delete_task(spine, task_id, org_id) -> None:
 
 
 def _effective_day(day_of_month, year: int, month: int) -> int | None:
-    """Dan 29-31 u kraćem mjesecu -> zadnji dan mjeseca (inače mjesečni zadatak
-    tiho nikad ne bi firao u veljači; Codex)."""
+    """Day 29-31 in a shorter month -> last day of the month (otherwise a
+    monthly task would silently never fire in February; Codex)."""
     if day_of_month is None:
         return None
     return min(int(day_of_month), calendar.monthrange(year, month)[1])
@@ -157,23 +162,23 @@ def _due(row, now: datetime) -> bool:
         return False
     if now.hour < (row["hour"] if row["hour"] is not None else 8):
         return False
-    return row["last_run_date"] != now.date().isoformat()  # jednom po danu
+    return row["last_run_date"] != now.date().isoformat()  # once per day
 
 
-# transient-retry ljestvica (min) — Paperclip bounded backoff; kratka jer poller je 5 min
+# transient-retry ladder (min) — Paperclip bounded backoff; short because the poller is 5 min
 _RETRY_BACKOFF_MIN = (2, 10, 30, 120)
 
 
 def _is_transient(e: Exception) -> bool:
-    """Samo PROLAZNE greške (LLM/mreža) idu na retry; logičke (validacija, uklonjena
-    akcija) NE — inače bismo beskonačno ponavljali krivu radnju."""
+    """Only TRANSIENT errors (LLM/network) get retried; logical ones (validation,
+    a removed action) do NOT — otherwise we would endlessly repeat a wrong action."""
     from atlas.core.llm import LLMError, LLMUnavailable
     return isinstance(e, (LLMError, LLMUnavailable, ConnectionError, TimeoutError, OSError))
 
 
 def _schedule_retry(spine, task_id: int, attempt: int) -> bool:
-    """Zakaži idući pokušaj (UTC, datetime('now') konzistentno). False = ljestvica
-    iscrpljena -> pozivatelj dead-letteruje."""
+    """Schedule the next attempt (UTC, consistent with datetime('now')). False =
+    ladder exhausted -> the caller dead-letters."""
     if attempt >= len(_RETRY_BACKOFF_MIN):
         return False
     delay = _RETRY_BACKOFF_MIN[attempt]
@@ -189,8 +194,9 @@ def _clear_retry(spine, task_id: int) -> None:
 
 
 def _execute(spine, cfg, r, fired: list) -> None:
-    """Pokreni jednu akciju. Uspjeh -> očisti retry. Prolazna greška + ljestvica ima
-    mjesta -> zakaži retry. Trajna greška ili iscrpljena ljestvica -> dead-letter."""
+    """Run a single action. Success -> clear the retry. Transient error + the
+    ladder has room -> schedule a retry. Permanent error or exhausted ladder ->
+    dead-letter."""
     action = ACTIONS.get(r["action_key"])
     params = json.loads(r["params_json"] or "{}")
     status, detail = "ok", None
@@ -200,7 +206,7 @@ def _execute(spine, cfg, r, fired: list) -> None:
         res = action[2](spine, cfg, params, r["org_id"], r["created_by"])
         detail = json.dumps(res, ensure_ascii=False, default=str)[:300]
         _clear_retry(spine, r["id"])
-    except Exception as e:  # ne ruši ostale zadatke
+    except Exception as e:  # do not crash the other tasks
         attempt = r["retry_attempt"] or 0
         if _is_transient(e) and _schedule_retry(spine, r["id"], attempt):
             status = "retry"
@@ -214,41 +220,42 @@ def _execute(spine, cfg, r, fired: list) -> None:
 
 
 def run_due(spine, cfg, now: datetime | None = None) -> list[dict]:
-    """Fira dospjele zadatke + dospjele retry-pokušaje. ATOMIČAN claim PRIJE izvršenja
-    (dva paralelna pollera / pad NE dupliraju; at-most-once). Prolazna greška zakaže
-    retry po backoff-ljestvici umjesto tihog gubitka mjesečne akcije (Paperclip)."""
+    """Fire due tasks + due retry attempts. ATOMIC claim BEFORE execution (two
+    parallel pollers / a crash do NOT duplicate; at-most-once). A transient error
+    schedules a retry via the backoff ladder instead of silently losing the
+    monthly action (Paperclip)."""
     now = _now(now)
     today = now.date().isoformat()
     fired = []
-    # 1) redovni dospjeli — dnevni claim
+    # 1) regular due tasks — daily claim
     for r in spine.read().execute("SELECT * FROM scheduled_tasks WHERE enabled=1").fetchall():
         if not _due(r, now):
             continue
-        with spine.write() as c:  # claim: samo jedan poller prođe
+        with spine.write() as c:  # claim: only one poller gets through
             claim = c.execute("UPDATE scheduled_tasks SET last_run_date=? "
                               "WHERE id=? AND (last_run_date IS NULL OR last_run_date!=?)",
                               (today, r["id"], today))
             if claim.rowcount != 1:
-                continue  # netko drugi već preuzeo danas
+                continue  # someone else already claimed it today
         _execute(spine, cfg, r, fired)
-    # 2) dospjeli retry-pokušaji — claim pomicanjem retry_at=NULL (UTC usporedba)
+    # 2) due retry attempts — claim by setting retry_at=NULL (UTC comparison)
     rrows = spine.read().execute(
         "SELECT * FROM scheduled_tasks WHERE enabled=1 AND retry_at IS NOT NULL "
         "AND retry_at <= datetime('now')").fetchall()
     for r in rrows:
-        with spine.write() as c:  # claim retry: makni retry_at da ga drugi poller ne pokupi
-            # Codex: claim MORA ponoviti due-uvjet (retry_at<=now) — inače bi drugi poller,
-            # ako je _execute u međuvremenu reschedulao BUDUĆI retry, claimao i firao ga rano
+        with spine.write() as c:  # claim retry: clear retry_at so another poller does not pick it up
+            # Codex: the claim MUST repeat the due condition (retry_at<=now) — otherwise another
+            # poller, if _execute had meanwhile rescheduled a FUTURE retry, would claim and fire it early
             claim = c.execute("UPDATE scheduled_tasks SET retry_at=NULL WHERE id=? "
                               "AND retry_at IS NOT NULL AND retry_at <= datetime('now')", (r["id"],))
             if claim.rowcount != 1:
                 continue
-        _execute(spine, cfg, r, fired)  # r još nosi retry_attempt (nije nuliran)
+        _execute(spine, cfg, r, fired)  # r still carries retry_attempt (not reset)
     return fired
 
 
 def _notify(spine, org_id, task_id, reason: str) -> None:
-    # bez naslova zadatka (owner-birano, moglo bi biti osjetljivo) — samo org+id+razlog
+    # no task title (owner-chosen, could be sensitive) — only org+id+reason
     body = f"Zakazani zadatak #{task_id} (org {org_id}) nije uspio: {reason}"
     with spine.write() as c:
         seen = c.execute("SELECT 1 FROM notifications WHERE kind='scheduled_error' "

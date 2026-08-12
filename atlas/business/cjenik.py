@@ -1,9 +1,9 @@
-# Cjenik usluga — the accounting FIRM's own price list for billing its
+# Service price list — the accounting FIRM's own price list for billing its
 # clients (not client tax calculations). Per-client monthly quote + a simple
 # market-position comparison against the firm's own client base.
 #
 # ponytail: DEFAULT_CJENIK amounts are plausible illustrative EUR prices for
-# a small HR knjigovodstveni ured, not a market survey. Operator adjusts via
+# a small Croatian accounting office, not a market survey. Operator adjusts via
 # direct UPDATE on the cjenik table (no override layer — this is the firm's
 # own price, not a legal figure to track for drift).
 

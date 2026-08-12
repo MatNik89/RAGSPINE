@@ -1,6 +1,6 @@
-"""mDNS objava ATLAS servera (`_atlas._tcp`) + otkrivanje s klijenta. Server
-odgovara na upite, radna stanica ga nađe bez ručnog upisivanja adrese.
-Reuse: parsiranje kroz atlas.core.lan (_parse_records)."""
+"""mDNS advertising of the ATLAS server (`_atlas._tcp`) + discovery from the
+client. The server answers queries, the workstation finds it without typing the
+address by hand. Reuse: parsing via atlas.core.lan (_parse_records)."""
 import socket
 import struct
 import time
@@ -24,7 +24,7 @@ def _rr(name: str, rtype: int, rdata: bytes, ttl: int = 120) -> bytes:
 
 
 def atlas_response(ip: str, port: int, version: str = "", instance: str = "ATLAS") -> bytes:
-    """Autoritativni mDNS odgovor: PTR + SRV + A + TXT za _atlas._tcp."""
+    """Authoritative mDNS response: PTR + SRV + A + TXT for _atlas._tcp."""
     inst = f"{instance}.{SERVICE}"
     host = f"{instance.lower()}.local"
     ptr = _rr(SERVICE, 12, _name(inst))
@@ -32,30 +32,30 @@ def atlas_response(ip: str, port: int, version: str = "", instance: str = "ATLAS
     a = _rr(host, 1, socket.inet_aton(ip))
     txt_kv = f"version={version}".encode() if version else b"atlas=1"
     txt = _rr(inst, 16, bytes([len(txt_kv)]) + txt_kv)
-    # header: response (0x8400 = QR+AA), 0 pitanja, 4 odgovora
+    # header: response (0x8400 = QR+AA), 0 questions, 4 answers
     head = struct.pack(">HHHHHH", 0, 0x8400, 0, 4, 0, 0)
     return head + ptr + srv + a + txt
 
 
 def discover_atlas(timeout: float = 2.0, sock=None) -> list[dict]:
-    """Pošalji upit za _atlas._tcp i vrati nađene servere [{host, port, name,
-    version}]. `sock` injektabilan za testove.
+    """Send a query for _atlas._tcp and return the discovered servers [{host,
+    port, name, version}]. `sock` is injectable for tests.
 
-    SAMO PRONALAŽENJE, NE POVJERENJE (Codex nalaz): mDNS zapisi su nepotpisani, pa
-    bilo koji LAN host može lažirati odgovor. Rezultat je savjet čovjeku da nađe IP —
-    agent se NIKAD ne smije automatski prijaviti na otkriveni host niti preuzeti
-    sign_key s njega. Vjerodostojnost servera ide odvojeno: URL potvrđen pri
-    instalaciji (opcija B) + owner koji otvori sparivanje i odobri uređaj."""
+    DISCOVERY ONLY, NOT TRUST (Codex finding): mDNS records are unsigned, so any
+    LAN host can spoof a response. The result is a hint to a human to find the IP —
+    the agent must NEVER automatically log in to a discovered host nor pull a
+    sign_key from it. Server authenticity is handled separately: URL confirmed at
+    install time (option B) + the owner opening the pairing and approving the device."""
     close = False
-    if sock is None:  # pragma: no cover — pravi multicast
+    if sock is None:  # pragma: no cover — real multicast
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.settimeout(timeout)
         sock.sendto(lan._query_packet((SERVICE,)), _MCAST)
         close = True
     found, seen = [], set()
-    # ukupni deadline + cap: LAN napadač ne može flood-om beskonačno produžiti
-    # sweep ni napuniti memoriju (Codex nalaz)
+    # total deadline + cap: a LAN attacker cannot use a flood to endlessly extend
+    # the sweep nor fill memory (Codex finding)
     deadline = time.monotonic() + max(timeout, 0.1) * 2
     try:
         while time.monotonic() < deadline and len(found) < 64:
@@ -88,7 +88,7 @@ def discover_atlas(timeout: float = 2.0, sock=None) -> list[dict]:
 
 
 def _parse_questions(data: bytes) -> list[tuple[str, int]]:
-    """Vrati (ime, qtype) iz QUESTION sekcije (lan._parse_records preskače pitanja)."""
+    """Return (name, qtype) from the QUESTION section (lan._parse_records skips questions)."""
     try:
         _id, _fl, qd, *_ = struct.unpack(">HHHHHH", data[:12])
         off, out = 12, []
@@ -103,13 +103,13 @@ def _parse_questions(data: bytes) -> list[tuple[str, int]]:
 
 
 def _is_atlas_query(data: bytes) -> bool:
-    """Istinit SAMO za pravi PTR upit za _atlas._tcp (ne za lažni answer-record —
-    inače je responder reflection primitive; Codex nalaz)."""
+    """True ONLY for a genuine PTR query for _atlas._tcp (not for a fake answer-record —
+    otherwise the responder is a reflection primitive; Codex finding)."""
     return any(name == SERVICE and qt == 12 for name, qt in _parse_questions(data))
 
 
-def serve_responder(ip: str, port: int, version: str, stop) -> None:  # pragma: no cover — mreža
-    """Slušaj mDNS upite i odgovori za _atlas._tcp. Pokreće se uz `atlas serve`."""
+def serve_responder(ip: str, port: int, version: str, stop) -> None:  # pragma: no cover — network
+    """Listen for mDNS queries and answer for _atlas._tcp. Runs alongside `atlas serve`."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -125,7 +125,7 @@ def serve_responder(ip: str, port: int, version: str, stop) -> None:  # pragma: 
                 continue
             except OSError:
                 break
-            if _is_atlas_query(data):  # odgovori SAMO na pravi PTR upit
+            if _is_atlas_query(data):  # answer ONLY a genuine PTR query
                 sock.sendto(resp, src)
     finally:
         sock.close()

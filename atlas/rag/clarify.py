@@ -119,9 +119,9 @@ def _variant_label(spine, variant: dict) -> str:
 def needs_clarification(spine, query: str, visible=None) -> dict | None:
     """None if the query is specific enough already, or if there's nothing
     to disambiguate (0/1 variant). Otherwise a dict with a concrete HR
-    clarifying question and the distinct variants found. `visible` (skup vidljivih
-    client_id ili None) skriva varijante klijenata koje restringirani radnik ne
-    smije vidjeti (inače bi pitanje otkrilo tuđa imena)."""
+    clarifying question and the distinct variants found. `visible` (a set of visible
+    client_id values, or None) hides client variants that a restricted worker
+    must not see (otherwise the question would reveal other people's names)."""
     if not is_howto(query):
         return None
     if mentions_client(spine, query) is not None:

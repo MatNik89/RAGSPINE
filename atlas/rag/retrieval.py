@@ -35,9 +35,9 @@ def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None,
         return []
 
     conn = spine.read()
-    # Over-fetch kandidata (200): status/freshness filtar dolazi tek nakon
-    # RRF-a, pa superseded/stale chunkovi ne smiju istisnuti aktivne iz uskog
-    # skupa kandidata (inače aktualna verzija propisa postane nevidljiva).
+    # Over-fetch candidates (200): the status/freshness filter comes only after
+    # RRF, so superseded/stale chunks must not push active ones out of the narrow
+    # candidate set (otherwise the current version of a regulation becomes invisible).
     _CAND = 200
     fts_rows = conn.execute(
         "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank LIMIT ?",
@@ -66,14 +66,14 @@ def search(spine, query: str, k: int = 8, freshness: bool = True, org_id=None,
         )
     org_sql = ""
     if org_id is not None:
-        # tvrda tenant-izolacija: dokument bez podudarnog org_id nikad ne izlazi
+        # hard tenant isolation: a document without a matching org_id never comes out
         org_sql = " AND d.org_id = ?"
         params.append(org_id)
     vis_sql = ""
     if visible_client_ids is not None:
-        # restringirani radnik: uredski (client_id IS NULL) dokumenti su svima
-        # vidljivi, ali klijentski dokument izlazi samo ako je klijent vidljiv.
-        # Prazan skup → izlaze samo uredski dokumenti.
+        # restricted worker: office (client_id IS NULL) documents are visible to
+        # everyone, but a client document comes out only if the client is visible.
+        # Empty set -> only office documents come out.
         ph = ",".join("?" * len(visible_client_ids))
         vis_sql = f" AND (d.client_id IS NULL{f' OR d.client_id IN ({ph})' if ph else ''})"
         params.extend(visible_client_ids)

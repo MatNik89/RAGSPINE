@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from fastapi.testclient import TestClient
 
 from atlas.business import expiry as expiry_mod
-from atlas.web import messaging
+from atlas.business import messaging
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 

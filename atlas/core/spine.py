@@ -198,10 +198,10 @@ def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str
 
 
 def _migrate_pdv_rok_2026(conn: sqlite3.Connection) -> None:
-    """Izmjene Zakona o PDV-u od 1.1.2026.: rok predaje PDV/PDV-S/ZP obrazaca
-    pomaknut s 20. u mjesecu na ZADNJI dan mjeseca (monthly:31 se clampa na
-    kraj mjeseca). Mijenja SAMO stari default 'monthly:20' — admin-prilagođena
-    pravila se ne diraju."""
+    """VAT Act amendments effective 2026-01-01: the filing deadline for the
+    PDV/PDV-S/ZP forms moves from the 20th of the month to the LAST day of the
+    month (monthly:31 is clamped to the end of the month). Changes ONLY the old
+    default 'monthly:20' — admin-customized rules are left untouched."""
     conn.execute(
         "UPDATE obligation_types SET rule='monthly:31' "
         "WHERE kind='PDV' AND rule='monthly:20'")
@@ -211,24 +211,24 @@ def _migrate_pdv_rok_2026(conn: sqlite3.Connection) -> None:
 
 
 def _migrate_setup_complete_for_upgrades(conn: sqlite3.Connection) -> None:
-    """Nadogradnja postojećih instalacija prije setup-wizarda (feat/setup-wizard-design):
-    ako baza već ima barem jednog korisnika a setup_complete flag nije postavljen,
-    wizard nikad nije pokrenut na ovoj bazi (stariji deploy, prije uvođenja wizarda)
-    — bez ovoga bi navigacijski gateway (firstrun.needs_setup) trajno preusmjeravao
-    na /ui/setup jer ništa u produkcijskom kodu prije ovoga nije postavljalo taj flag.
-    Prazna baza (bez korisnika) se NE dira — svježa instalacija i dalje ide kroz
-    wizard/onboarding kao i prije. Direktan SQL (ne wizard_state.mark_complete /
-    spine.set_override) jer je ovo pozvano iz __init__ dok je write()-lock već
-    držan pa bi ponovni ulaz u self.write() blokirao (lock nije reentrant).
+    """Upgrade of installations that predate the setup wizard (feat/setup-wizard-design):
+    if the database already has at least one user but the setup_complete flag is
+    not set, the wizard was never run on this database (an older deploy, before the
+    wizard was introduced) — without this the navigation gateway (firstrun.needs_setup)
+    would permanently redirect to /ui/setup because nothing in production code before
+    this ever set that flag. An empty database (no users) is left untouched — a fresh
+    install still goes through the wizard/onboarding as before. Direct SQL (not
+    wizard_state.mark_complete / spine.set_override) because this is called from
+    __init__ while the write() lock is already held, so re-entering self.write()
+    would block (the lock is not reentrant).
 
-    Resume nasuprot legacy: ako postoji config_overrides red module='setup'
-    key='stage', wizard je već pokretan na ovoj bazi (bilo koji stage >= 1
-    znači bar jedan wizard_state.set_stage) — to je nedovršen wizard, ne
-    stara predwizard instalacija, pa se NE smije auto-dovršiti; resume mora
-    ostati moguć u novom procesu. Prihvaćeni rubni slučaj: ako je proces
-    prekinut PRIJE prvog set_stage (nema stage reda), migracija će ovu bazu
-    ipak tretirati kao legacy i postaviti complete=true — obnovljivo kroz
-    `--reset`."""
+    Resume versus legacy: if a config_overrides row with module='setup' key='stage'
+    exists, the wizard has already been started on this database (any stage >= 1
+    means at least one wizard_state.set_stage) — that is an unfinished wizard, not
+    an old pre-wizard install, so it must NOT be auto-completed; resume must remain
+    possible in a new process. Accepted edge case: if the process was interrupted
+    BEFORE the first set_stage (no stage row), the migration will still treat this
+    database as legacy and set complete=true — recoverable via `--reset`."""
     has_user = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
     if not has_user:
         return
@@ -273,16 +273,16 @@ class Spine:
                 "org_id": "INTEGER",
             })
             _ensure_columns(c, "knowledge", {"org_id": "INTEGER"})
-            # user-defined polja obveza žive u JSON meta (registar = obligation_fields)
+            # user-defined obligation fields live in the JSON meta (registry = obligation_fields)
             _ensure_columns(c, "obligations", {"meta": "TEXT"})
-            # category marker na vrsti obveze (JOPPD = plaće); migracija postojećih
+            # category marker on the obligation type (JOPPD = payroll); migrate existing rows
             _ensure_columns(c, "obligation_types", {"category": "TEXT DEFAULT ''"})
             c.execute("UPDATE obligation_types SET category='place' "
                       "WHERE kind='JOPPD' AND (category IS NULL OR category='')")
             c.execute("UPDATE obligation_types SET label='Plaće' "
                       "WHERE kind='JOPPD' AND label='JOPPD'")
-            # sees_all_clients=1 (zadano) → radnik vidi sve klijente; 0 → samo
-            # one iz client_visibility (per-radnik ograničenje vidljivosti)
+            # sees_all_clients=1 (default) -> the worker sees all clients; 0 -> only
+            # those from client_visibility (per-worker visibility restriction)
             _ensure_columns(c, "users", {"sees_all_clients": "INTEGER DEFAULT 1"})
             _ensure_columns(c, "memory", {
                 "hot_score": "REAL DEFAULT 1.0",
@@ -306,8 +306,8 @@ class Spine:
             c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_cjenik_key ON cjenik(key)")
             _migrate_setup_complete_for_upgrades(c)
             _migrate_pdv_rok_2026(c)
-        # DB drži sav klijentski PII + pbkdf2 hasheve lozinki — 0600 da drugi
-        # lokalni korisnici hosta ne mogu čitati (chmod no-op na Windowsu).
+        # The DB holds all client PII + pbkdf2 password hashes — 0600 so other
+        # local host users cannot read it (chmod is a no-op on Windows).
         for p in (self.db_path, self.db_path + "-wal", self.db_path + "-shm"):
             try:
                 os.chmod(p, 0o600)
@@ -350,7 +350,7 @@ class Spine:
 
     def audit(self, user, action, entity="", detail=""):
         from atlas.core.security import redact_secrets
-        with self.write() as c:  # i entity (npr. learn_url sprema URL s lozinkom) i detail
+        with self.write() as c:  # both entity (e.g. learn_url stores a URL with a password) and detail
             c.execute("INSERT INTO audit_log(user,action,entity,detail) VALUES(?,?,?,?)",
                       (user, action, redact_secrets(entity or ""), redact_secrets(detail or "")))
 

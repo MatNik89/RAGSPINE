@@ -1,10 +1,11 @@
-"""HTTP bootstrap server za radnike: /postavi stranica objasni kako uvesti
-self-signed cert (browser to ne smije sam po sigurnosnom dizajnu), .bat
-skida cert.pem sa servera i uvozi ga u Windows Root store (certutil).
+"""HTTP bootstrap server for workers: the /postavi page explains how to import
+the self-signed cert (a browser must not do that on its own by security design);
+the .bat downloads cert.pem from the server and imports it into the Windows Root
+store (certutil).
 
-Čisti stdlib `http.server` — bez novog ovisnosti, bez drugog uvicorna.
-Bootstrap je POMOĆ, ne uvjet: greška binda (port zauzet) ne ruši `atlas
-serve` — samo se preskoči uz upozorenje u logu.
+Pure stdlib `http.server` — no new dependency, no second uvicorn. The bootstrap
+is a HELP, not a requirement: a bind error (port in use) does not crash `atlas
+serve` — it is simply skipped with a warning in the log.
 """
 import logging
 import threading
@@ -12,7 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from atlas.ops.certs import best_display_host  # noqa: F401 - re-export, jedna implementacija (certs.py)
+from atlas.ops.certs import best_display_host  # noqa: F401 - re-export, single implementation (certs.py)
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ BAT_IME = "postavi-vezu.bat"
 
 
 def bat_content(cert_url: str, https_url: str) -> bytes:
-    """Sadržaj .bat datoteke (Windows traži CRLF završetke redaka)."""
+    """Contents of the .bat file (Windows requires CRLF line endings)."""
     lines = [
         "@echo off",
         "echo Postavljam sigurnu vezu za ATLAS...",
@@ -35,7 +36,7 @@ def bat_content(cert_url: str, https_url: str) -> bytes:
 
 
 def postavi_html(https_url: str, bat_ime: str = BAT_IME) -> str:
-    """HTML stranica /postavi — 3 koraka + napredna (ručna) sekcija."""
+    """The /postavi HTML page — 3 steps + an advanced (manual) section."""
     return f"""<!doctype html>
 <html lang="hr">
 <head>
@@ -61,7 +62,7 @@ administrator naredbom:</p>
 
 def _make_handler(cert_path: str, https_url: str, cert_url: str):
     class Handler(BaseHTTPRequestHandler):
-        def log_message(self, format, *args):  # noqa: A002 - stdlib potpis
+        def log_message(self, format, *args):  # noqa: A002 - stdlib signature
             logger.debug(format, *args)
 
         def _send(self, status: int, content_type: str, body: bytes,
@@ -101,14 +102,14 @@ def _make_handler(cert_path: str, https_url: str, cert_url: str):
 
 def start_bootstrap_server(cert_path: str, https_url: str, host: str,
                             port: int = 8080) -> threading.Thread | None:
-    """Pokreni bootstrap server na daemon threadu. `host` je bind adresa
-    (može biti "0.0.0.0"); prikazni host za /cert.pem URL u .bat-u vadi se
-    iz `https_url` (isto ime koje radnik vidi u uputi).
+    """Start the bootstrap server on a daemon thread. `host` is the bind address
+    (may be "0.0.0.0"); the display host for the /cert.pem URL in the .bat is
+    taken from `https_url` (the same name the worker sees in the instructions).
 
-    Vraća thread s dodatnim atributom `.server` (ThreadingHTTPServer) —
-    testovima treba stvarni port kod port=0 (`thread.server.server_address[1]`)
-    i uredan shutdown (`thread.server.shutdown()`). Bind greška (port zauzet
-    i sl.) je samo upozorenje — vraća None, `atlas serve` nastavlja normalno.
+    Returns a thread with an extra `.server` attribute (ThreadingHTTPServer) —
+    tests need the actual port when port=0 (`thread.server.server_address[1]`)
+    and a clean shutdown (`thread.server.shutdown()`). A bind error (port in use
+    etc.) is only a warning — returns None, `atlas serve` continues normally.
     """
     display_host = urlparse(https_url).hostname or host
     cert_url = f"http://{display_host}:{port}/cert.pem"
@@ -116,8 +117,8 @@ def start_bootstrap_server(cert_path: str, https_url: str, host: str,
     try:
         server = ThreadingHTTPServer((host, port), handler_cls)
     except (OSError, OverflowError) as e:
-        # OverflowError: port izvan 0-65535 (npr. ATLAS_BOOTSTRAP_PORT=70000) —
-        # socket sloj to ne javlja kao OSError nego kao OverflowError.
+        # OverflowError: port outside 0-65535 (e.g. ATLAS_BOOTSTRAP_PORT=70000) —
+        # the socket layer reports this not as OSError but as OverflowError.
         logger.warning("Bootstrap server ne može se pokrenuti na %s:%s (%s)",
                         host, port, e)
         return None

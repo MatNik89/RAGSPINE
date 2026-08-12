@@ -1,10 +1,11 @@
 # atlas/ops/winsvc.py
-"""Windows servis (WinSW wrapper) + firewall + ACL; systemd unit za
-Linux/macOS. ATLAS (spec 2026-08-08: pravi 24/7 servis). Sve subprocess
-komande idu kroz run_isolated — nikad shell string. Servis ide pod ugrađeni
-low-priv račun LocalService.
-ponytail: custom servisni račun (atlas_svc) + DPAPI tajne = backlog;
-LocalService + file-secret s ACL-om pokriva P3. Nadogradnja: gMSA za domene."""
+"""Windows service (WinSW wrapper) + firewall + ACL; systemd unit for
+Linux/macOS. ATLAS (spec 2026-08-08: a real 24/7 service). All subprocess
+commands go through run_isolated — never a shell string. The service runs
+under the built-in low-priv LocalService account.
+ponytail: custom service account (atlas_svc) + DPAPI secrets = backlog;
+LocalService + a file-secret with an ACL covers P3. Upgrade: gMSA for
+domains."""
 import os
 import platform
 import shutil
@@ -17,17 +18,17 @@ from atlas.core.subproc import run_isolated
 from atlas.ops import winpath
 
 _SVC = "ATLAS"
-# Pinnan release (ne latest) — determinizam. Nadogradnja: ručno podigni broj.
+# Pinned release (not latest) — determinism. Upgrade: bump the number manually.
 WINSW_URL = "https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
 
 
 def resolve_atlas_cmd() -> tuple[str, list[str]]:
-    """(executable, args) za `atlas serve` servis — pravi atlas.exe ako je na
-    PATH-u, inače tekući python interpreter + `-m atlas` (isti obrazac kao
-    wizard.launch_now). RAZDVOJENO, ne spojeno u jedan string — WinSW
-    <executable> mora biti stvarna putanja do JEDNE datoteke (review nalaz:
-    'python -m atlas' kao jedan string traži nepostojeću datoteku tog imena
-    pa servis nikad ne starta kad atlas nije na PATH-u)."""
+    """(executable, args) for the `atlas serve` service — a real atlas.exe if
+    it is on PATH, otherwise the current python interpreter + `-m atlas` (the
+    same pattern as wizard.launch_now). SPLIT, not joined into one string —
+    WinSW <executable> must be a real path to a SINGLE file (review finding:
+    'python -m atlas' as one string looks for a nonexistent file of that name,
+    so the service never starts when atlas is not on PATH)."""
     exe = shutil.which("atlas")
     if exe:
         return exe, ["serve"]
@@ -35,9 +36,9 @@ def resolve_atlas_cmd() -> tuple[str, list[str]]:
 
 
 def download_winsw(dest_path, *, urlopen=urllib.request.urlopen, out=print) -> bool:
-    """Skini WinSW.exe u dest_path. Idempotentno: postojeći file = True bez
-    mreže. Atomski (tmp pa os.replace) — polu-skinuti exe ne smije završiti
-    kao 'instaliran'."""
+    """Download WinSW.exe to dest_path. Idempotent: an existing file = True
+    without network. Atomic (tmp then os.replace) — a half-downloaded exe must
+    not end up 'installed'."""
     dest = Path(dest_path)
     if dest.exists():
         return True
@@ -56,7 +57,7 @@ def download_winsw(dest_path, *, urlopen=urllib.request.urlopen, out=print) -> b
 
 
 def _env_block(pairs: dict[str, str], *, xml: bool) -> str:
-    """Zajednička env serijalizacija za winsw_xml/systemd_unit."""
+    """Shared env serialization for winsw_xml/systemd_unit."""
     if xml:
         return "".join(f'  <env name="{escape(k)}" value="{escape(str(v))}"/>\n'
                        for k, v in pairs.items())
@@ -65,11 +66,11 @@ def _env_block(pairs: dict[str, str], *, xml: bool) -> str:
 
 def winsw_xml(exe: str, args: list[str], data_dir: str, port: int, *,
              extra_env: dict[str, str] | None = None) -> str:
-    """WinSW servisni XML — čista funkcija. exe/args ODVOJENI: <executable>
-    mora biti stvarna putanja do jedne datoteke (Program Files smije imati
-    razmake — stoji u vlastitom XML elementu, bez potrebe za navodnicima za
-    razliku od sc.exe binPath tokenizacije), <arguments> nosi ostatak
-    naredbenog retka (npr. '-m atlas serve')."""
+    """WinSW service XML — a pure function. exe/args SEPARATE: <executable>
+    must be a real path to a single file (Program Files may contain spaces — it
+    sits in its own XML element, without needing quotes, unlike sc.exe binPath
+    tokenization), <arguments> carries the rest of the command line (e.g.
+    '-m atlas serve')."""
     log_dir = str(Path(data_dir) / "logs")
     args_str = " ".join(args)
     exe_x, args_x = escape(str(exe)), escape(args_str)
@@ -98,8 +99,8 @@ def winsw_xml(exe: str, args: list[str], data_dir: str, port: int, *,
 
 
 def service_commands(data_dir: str, port: int) -> list[list[str]]:
-    """Firewall + ACL komande (sc.exe create/failure zamijenjen WinSW-om —
-    on kreira i nadzire pravi SCM servis)."""
+    """Firewall + ACL commands (sc.exe create/failure replaced by WinSW — it
+    creates and supervises the real SCM service)."""
     return [
         ["netsh", "advfirewall", "firewall", "add", "rule", f"name={_SVC}",
          "dir=in", "action=allow", "protocol=TCP", f"localport={port}"],
@@ -111,9 +112,9 @@ def service_commands(data_dir: str, port: int) -> list[list[str]]:
 
 def systemd_unit(exe: str, args: list[str], data_dir: str, *,
                  extra_env: dict[str, str] | None = None) -> str:
-    """Predložak systemd unita za ne-Windows servere. exe+args se spajaju u
-    jedan ExecStart string — systemd word-splita ExecStart pa 'python -m
-    atlas serve' radi ispravno (za razliku od WinSW <executable>)."""
+    """systemd unit template for non-Windows servers. exe+args are joined into
+    one ExecStart string — systemd word-splits ExecStart, so 'python -m
+    atlas serve' works correctly (unlike WinSW <executable>)."""
     cmd = " ".join([str(exe), *args])
     env_pairs = {"ATLAS_DATA_DIR": data_dir, **(extra_env or {})}
     envs = _env_block(env_pairs, xml=False)
@@ -137,9 +138,9 @@ def _install_systemd(exe: str, args: list[str], data_dir: str, unit_path: str, *
     try:
         Path(unit_path).write_text(unit, encoding="utf-8")
     except OSError as e:
-        # OSError (ne samo PermissionError) — macOS nema /etc/systemd/system pa
-        # write_text baca FileNotFoundError, koje inače propagira i ruši wizard
-        # stranicu umjesto da ispiše upute (review nalaz).
+        # OSError (not just PermissionError) — macOS has no /etc/systemd/system,
+        # so write_text raises FileNotFoundError, which otherwise propagates and
+        # crashes the wizard page instead of printing instructions (review finding).
         out(f"Ne mogu zapisati {unit_path} ({e}). Spremi ručno ovaj sadržaj pa pokreni:")
         out(unit)
         out(f"sudo cp <datoteka> {unit_path} && sudo systemctl daemon-reload "
@@ -158,16 +159,17 @@ def _install_systemd(exe: str, args: list[str], data_dir: str, unit_path: str, *
 
 
 def _looks_like_user_profile_path(exe: str) -> bool:
-    """LocalService najčešće nema prava čitanja pod korisničkim profilom
-    (C:\\Users\\...) — samo detekcija za upozorenje, bez blokade."""
+    """LocalService usually lacks read rights under a user profile
+    (C:\\Users\\...) — detection for a warning only, no blocking."""
     return "\\users\\" in str(exe).lower().replace("/", "\\")
 
 
 def _extra_env(data_dir: str, mount_roots: list[str] | None) -> dict[str, str]:
-    """Servisni env koji LocalService/systemd inače ne bi vidio: mreže mape
-    (folders su fail-closed bez ATLAS_MOUNT_ROOTS) i TESSDATA_PREFIX (HKCU
-    persist iz preflight.ensure_traineddata ne vrijedi za LocalService —
-    drugi logon session, drugi registry hive)."""
+    """Service env that LocalService/systemd would otherwise not see: network
+    shares (folders are fail-closed without ATLAS_MOUNT_ROOTS) and
+    TESSDATA_PREFIX (the HKCU persist from preflight.ensure_traineddata does not
+    apply to LocalService — a different logon session, a different registry
+    hive)."""
     env: dict[str, str] = {}
     if mount_roots:
         env["ATLAS_MOUNT_ROOTS"] = ",".join(mount_roots)
@@ -185,14 +187,14 @@ def install_service(exe: str, args: list[str], data_dir: str, port: int, *, out=
                      urlopen=urllib.request.urlopen,
                      unit_path: str = "/etc/systemd/system/atlas.service",
                      mount_roots: list[str] | None = None) -> bool:
-    """Windows: WinSW pretvara `atlas serve` (konzolna app) u pravi SCM
-    servis — skida WinSW, piše XML, install+start, pa firewall+ACL (isto
-    kao prije). Ne-Windows: zapiši systemd unit (OSError → upute).
-    exe/args RAZDVOJENI — v. resolve_atlas_cmd. mount_roots ide u
-    ATLAS_MOUNT_ROOTS servisnog enva (servis ne dijeli proces koji je
-    wizard/CLI pokrenuo); TESSDATA_PREFIX se doda automatski ako postoji.
-    Idempotentno: postojeći servis (bilo koje stanje) se ukloni prije
-    reinstalacije umjesto da WinSW install padne na 'već postoji'."""
+    """Windows: WinSW turns `atlas serve` (a console app) into a real SCM
+    service — downloads WinSW, writes the XML, install+start, then firewall+ACL
+    (same as before). Non-Windows: write the systemd unit (OSError -> instructions).
+    exe/args SPLIT — see resolve_atlas_cmd. mount_roots goes into the
+    ATLAS_MOUNT_ROOTS of the service env (the service does not share the process
+    the wizard/CLI started); TESSDATA_PREFIX is added automatically if present.
+    Idempotent: an existing service (in any state) is removed before
+    reinstallation instead of letting WinSW install fail on 'already exists'."""
     extra_env = _extra_env(data_dir, mount_roots)
     if platform.system() != "Windows":
         return _install_systemd(exe, args, data_dir, unit_path, extra_env=extra_env, out=out)
@@ -233,9 +235,10 @@ def install_service(exe: str, args: list[str], data_dir: str, port: int, *, out=
     for cmd in service_commands(data_dir, port):
         rc, _o, err = run_isolated(cmd, timeout=60)
         if rc != 0:
-            # Servis RADI (WinSW install+start su uspjeli) — samo firewall/ACL
-            # korak nije prošao. Ne smije zvučati kao potpuni neuspjeh (review
-            # nalaz), inače pozivatelj (wizard) šalje pogrešnu poruku dalje.
+            # The service WORKS (WinSW install+start succeeded) — only the
+            # firewall/ACL step did not pass. It must not sound like a total
+            # failure (review finding), otherwise the caller (wizard) relays the
+            # wrong message onward.
             out(f"⚠ Servis {_SVC} RADI (WinSW), ali korak {' '.join(cmd[:3])}... nije "
                 f"prošao: {err[:200]} — postavi ručno (administratorski cmd/PowerShell).")
             out(bios_note)
@@ -252,8 +255,8 @@ def install_service(exe: str, args: list[str], data_dir: str, port: int, *, out=
 
 def uninstall_service(data_dir: str, *, out=print,
                        unit_path: str = "/etc/systemd/system/atlas.service") -> bool:
-    """Windows: atlas-service.exe stop + uninstall (ako exe postoji).
-    Ne-Windows: ispiši systemd naredbe za uklanjanje."""
+    """Windows: atlas-service.exe stop + uninstall (if the exe exists).
+    Non-Windows: print the systemd commands for removal."""
     if platform.system() != "Windows":
         out(f"Zaustavi i ukloni servis: sudo systemctl disable --now atlas "
             f"&& sudo rm {unit_path} && sudo systemctl daemon-reload")
@@ -275,10 +278,10 @@ def uninstall_service(data_dir: str, *, out=print,
 
 
 def service_status(*, out=print) -> str:
-    """Windows: 'sc.exe query ATLAS' parsiranje. Ne-Windows: 'systemctl
-    is-active atlas'. Vraća: running / stopped / inactive / not-installed.
-    START_PENDING broji se kao running, STOP_PENDING kao stopped — pozivatelj
-    (npr. launch_now) ne smije tretirati prijelazno stanje kao 'nema servisa'."""
+    """Windows: parsing 'sc.exe query ATLAS'. Non-Windows: 'systemctl
+    is-active atlas'. Returns: running / stopped / inactive / not-installed.
+    START_PENDING counts as running, STOP_PENDING as stopped — the caller
+    (e.g. launch_now) must not treat a transitional state as 'no service'."""
     if platform.system() != "Windows":
         rc, stdout, _err = run_isolated(["systemctl", "is-active", "atlas"], timeout=15)
         state = stdout.strip()

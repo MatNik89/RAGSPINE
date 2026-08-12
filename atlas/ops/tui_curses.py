@@ -1,9 +1,10 @@
-"""Curses UI za setup wizard — radiolist/checklist s numeriranim fallbackom.
+"""Curses UI for the setup wizard — radiolist/checklist with a numbered
+fallback.
 
-Port jezgre NousResearch/hermes-agent hermes_cli/curses_ui.py (dekodiranje
-ESC/CSI sekvenci, zajednički event loop, flush stdina); bez fuzzy searcha.
-Fallback (nema TTY-ja / nema cursesa / injektiran input_fn) je JEDINI put
-kojim idu testovi: deterministički, bez pravog stdina."""
+A port of the core of NousResearch/hermes-agent hermes_cli/curses_ui.py
+(decoding ESC/CSI sequences, the shared event loop, stdin flush); without
+fuzzy search. The fallback (no TTY / no curses / injected input_fn) is the
+ONLY path the tests take: deterministic, without real stdin."""
 import builtins
 import sys
 
@@ -18,9 +19,10 @@ _KEEP = object()
 
 
 def _decode_menu_key(stdscr, key) -> str:
-    """Normaliziraj pritisak u NAV_* akciju. Lone ESC = cancel; CSI/SS3
-    strelice (i split preko sporog PTY-ja — timeout 60 ms) se dekodiraju,
-    ostale sekvence se pojedu do terminatora da ne cure u sljedeći input()."""
+    """Normalize a keypress into a NAV_* action. Lone ESC = cancel; CSI/SS3
+    arrows (including a split over a slow PTY — 60 ms timeout) are decoded,
+    other sequences are consumed up to the terminator so they do not leak into
+    the next input()."""
     import curses
     if key in (curses.KEY_UP, ord("k")):
         return NAV_UP
@@ -39,14 +41,14 @@ def _decode_menu_key(stdscr, key) -> str:
         finally:
             stdscr.timeout(-1)
         if nxt == -1:
-            return NAV_CANCEL          # pravi, usamljeni ESC
+            return NAV_CANCEL          # a real, lone ESC
         if nxt in (ord("["), ord("O")):
             final = stdscr.getch()
             if final == ord("A"):
                 return NAV_UP
             if final == ord("B"):
                 return NAV_DOWN
-            while 0x20 <= final <= 0x3F:   # CSI parametarski bajtovi
+            while 0x20 <= final <= 0x3F:   # CSI parameter bytes
                 final = stdscr.getch()
             return NAV_NONE
         return NAV_NONE
@@ -54,24 +56,24 @@ def _decode_menu_key(stdscr, key) -> str:
 
 
 def _flush_stdin() -> None:
-    """Nakon cursesa isprazni OS input buffer — zaostali escape bajtovi bi
-    tiho pojeli/pokvarili sljedeći input() (hermes lekcija)."""
+    """After curses, empty the OS input buffer — leftover escape bytes would
+    silently eat/corrupt the next input() (hermes lesson)."""
     try:
         if not sys.stdin.isatty():
             return
         import termios
         termios.tcflush(sys.stdin, termios.TCIFLUSH)
     except Exception:
-        pass   # Windows / egzotični terminali: nema termios — preskoči
+        pass   # Windows / exotic terminals: no termios — skip
 
 
 def _use_curses(input_fn) -> bool:
-    """Curses SAMO s pravim builtins.input i pravim TTY-jem; svaki
-    injektirani input_fn (testovi, web-bridge) ide fallbackom."""
+    """Curses ONLY with the real builtins.input and a real TTY; any injected
+    input_fn (tests, web bridge) takes the fallback."""
     if input_fn is not builtins.input:
         return False
     try:
-        import curses  # noqa: F401  (na Windowsu treba windows-curses)
+        import curses  # noqa: F401  (on Windows windows-curses is required)
     except Exception:
         return False
     try:
@@ -82,9 +84,9 @@ def _use_curses(input_fn) -> bool:
 
 def _run_menu(*, title, header, item_count, initial_cursor, draw_row,
               on_action, cancel_value, hint):
-    """Zajednički curses event loop (poziva se tek IZA _use_curses provjere).
-    draw_row(stdscr, y, i, is_cursor, max_x); on_action(action, cursor) vrati
-    _KEEP za nastavak ili konačnu vrijednost."""
+    """Shared curses event loop (called only AFTER the _use_curses check).
+    draw_row(stdscr, y, i, is_cursor, max_x); on_action(action, cursor) returns
+    _KEEP to continue or a final value."""
     import curses
     result = [cancel_value]
     header_lines = header.splitlines() if header else []
@@ -143,16 +145,16 @@ def _run_menu(*, title, header, item_count, initial_cursor, draw_row,
     except KeyboardInterrupt:
         return cancel_value
     except Exception:
-        return None   # signal pozivatelju: curses pukao → on zove fallback
+        return None   # signal to the caller: curses crashed -> it calls the fallback
 
 
-# Sentinel: razlikuje "curses vratio None kao rezultat" od "curses pukao".
+# Sentinel: distinguishes "curses returned None as a result" from "curses crashed".
 _CURSES_FAILED = object()
 
 
 def radiolist(title, items, *, selected=0, header="", cancel_returns=None,
               input_fn=input, out=print):
-    """Jedan izbor. Vrati indeks stavke; ESC/q/odustao → cancel_returns."""
+    """Single choice. Returns the item index; ESC/q/cancelled -> cancel_returns."""
     if _use_curses(input_fn):
         chosen = _radiolist_curses(title, items, selected, header, cancel_returns)
         if chosen is not _CURSES_FAILED:
@@ -175,8 +177,8 @@ def _radiolist_curses(title, items, selected, header, cancel_returns):
         except curses.error:
             pass
 
-    sentinel = object()   # cancel_returns može biti None — ne smije se
-                          # pomiješati s None kojim _run_menu javlja pad cursesa
+    sentinel = object()   # cancel_returns can be None — must not be confused
+                          # with the None by which _run_menu reports a curses crash
 
     def _on_action(action, cursor):
         if action in (NAV_SELECT, NAV_TOGGLE):
@@ -189,7 +191,7 @@ def _radiolist_curses(title, items, selected, header, cancel_returns):
                     cancel_value=sentinel,
                     hint="  ↑↓ kretanje  Enter potvrda  ESC odustani")
     if got is None:
-        return _CURSES_FAILED   # curses pukao na pravom TTY-ju → fallback
+        return _CURSES_FAILED   # curses crashed on a real TTY -> fallback
     return cancel_returns if got is sentinel else got
 
 
@@ -216,7 +218,7 @@ def _radiolist_fallback(title, items, selected, header, cancel_returns,
 
 
 def checklist(title, items, selected, *, input_fn=input, out=print):
-    """Više izbora (razmaknica toggle). ESC vrati POČETNI selected."""
+    """Multiple choice (spacebar toggle). ESC returns the INITIAL selected."""
     initial = set(selected)
     if _use_curses(input_fn):
         got = _checklist_curses(title, items, initial)

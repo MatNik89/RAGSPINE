@@ -1,14 +1,14 @@
-"""Connector framework za vanjske izvore (mail, kanali poruka). Uzor: Onyx
-lifecycle + RAGFlow katalog. Ugovor: TIP/SHEMA → test(draft) PRIJE spremanja →
-atomski validate+save → status/logs. Izolacija kvara po konektoru (jedan pukne,
-ostali rade). OAuth/QR = status 'pending' dok autorizacija ne završi.
+"""Connector framework for external sources (mail, message channels). Model: Onyx
+lifecycle + RAGFlow catalog. Contract: TYPE/SCHEMA -> test(draft) BEFORE saving ->
+atomic validate+save -> status/logs. Fault isolation per connector (one breaks,
+the others keep working). OAuth/QR = status 'pending' until authorization completes.
 
-Adapteri se registriraju s poljima (shema za UI) i test funkcijom; stvarna
-logika slanja/primanja dolazi u zasebnim adapterima. Ovaj modul je samo okvir."""
+Adapters register with fields (schema for the UI) and a test function; the actual
+send/receive logic lives in separate adapters. This module is only the framework."""
 import json
 from dataclasses import dataclass, field
 
-# status: pending (OAuth/QR čeka), connected, error, disabled
+# status: pending (OAuth/QR waiting), connected, error, disabled
 STATUSES = ("pending", "connected", "error", "disabled")
 
 
@@ -18,8 +18,8 @@ class Field:
     label: str
     type: str = "text"        # text | password | select
     required: bool = True
-    secret: bool = False       # maskira se pri prikazu
-    options: list | None = None  # za select
+    secret: bool = False       # masked when displayed
+    options: list | None = None  # for select
 
 
 @dataclass
@@ -27,7 +27,7 @@ class ConnectorType:
     kind: str
     label: str
     fields: list
-    # test(config) -> (status, detail): status ∈ connected|pending|error
+    # test(config) -> (status, detail): status in connected|pending|error
     test: object = None
     category: str = "kanal"    # 'mail' | 'kanal'
 
@@ -44,14 +44,14 @@ def get_type(kind: str) -> ConnectorType | None:
 
 
 def list_types() -> list[dict]:
-    """Katalog 'Dostupno' za UI."""
+    """'Available' catalog for the UI."""
     return [{"kind": t.kind, "label": t.label, "category": t.category,
              "fields": [vars(f) for f in t.fields]} for t in _TYPES.values()]
 
 
 def _clean_config(ctype: ConnectorType, config: dict) -> dict:
-    """Zadrži SAMO deklarirana polja, svako kao string (Codex: config dopuštao
-    liste/dictove/nepoznate ključeve). Provjeri obavezna."""
+    """Keep ONLY the declared fields, each as a string (Codex: config allowed
+    lists/dicts/unknown keys). Check the required ones."""
     if not isinstance(config, dict):
         raise ValueError("config mora biti objekt")
     keys = {f.key for f in ctype.fields}
@@ -72,7 +72,7 @@ def _validate_config(ctype: ConnectorType, config: dict) -> None:
 
 
 def test_draft(kind: str, config: dict) -> dict:
-    """Testira konfiguraciju BEZ spremanja (Onyx: test draft prije save)."""
+    """Test the configuration WITHOUT saving (Onyx: test draft before save)."""
     ctype = get_type(kind)
     if ctype is None:
         raise ValueError(f"nepoznat tip konektora: {kind!r}")
@@ -81,14 +81,14 @@ def test_draft(kind: str, config: dict) -> dict:
         return {"status": "error", "detail": "adapter nema test funkciju"}
     try:
         status, detail = ctype.test(config)
-    except Exception as e:  # izolacija: greška adaptera ne ruši okvir
+    except Exception as e:  # isolation: an adapter error does not crash the framework
         return {"status": "error", "detail": f"greška testa: {e}"}
     return {"status": status, "detail": detail}
 
 
 def _mask(ctype: ConnectorType, config: dict) -> dict:
-    """Vrati SAMO deklarirana polja (Codex: nepoznati/ugniježđeni ključevi su
-    prije prolazili neredigirano); tajne → ••••."""
+    """Return ONLY the declared fields (Codex: unknown/nested keys used to
+    pass through unredacted); secrets -> ••••."""
     out = {}
     for f in ctype.fields:
         v = config.get(f.key, "")
@@ -106,7 +106,7 @@ def _row(spine, r) -> dict:
 
 
 def list_connectors(spine, org_id=None) -> list[dict]:
-    """'Konfigurirano' za UI — sa statusom, tajne maskirane, org-scopeano."""
+    """'Configured' list for the UI - with status, secrets masked, org-scoped."""
     if org_id is None:
         rows = spine.read().execute("SELECT * FROM connectors ORDER BY id").fetchall()
     else:
@@ -128,8 +128,8 @@ def _get_row(spine, cid: int, org_id=None):
 
 
 def config_for_adapter(spine, cid: int, cfg, org_id=None) -> tuple[str, dict] | None:
-    """(kind, dešifrirani config) za server-side adapter (spajanje). NIKAD se ne
-    izlaže rutom — tajne su ovdje u plaintextu samo u memoriji."""
+    """(kind, decrypted config) for the server-side adapter (connecting). NEVER
+    exposed via a route - secrets are here in plaintext only in memory."""
     from atlas.business import secretbox
     r = _get_row(spine, cid, org_id)
     if r is None:
@@ -144,8 +144,8 @@ def config_for_adapter(spine, cid: int, cfg, org_id=None) -> tuple[str, dict] | 
 
 
 def create(spine, kind: str, name: str, config: dict, cfg=None, org_id=None, user: str = "?") -> dict:
-    """Testira PA sprema s dobivenim statusom (Onyx: nikad ne spremi neprovjereno).
-    Tajne se ŠIFRIRAJU prije spremanja (secretbox, ključ iz jwt_secreta izvan DB-a)."""
+    """Test THEN save with the resulting status (Onyx: never save unverified).
+    Secrets are ENCRYPTED before saving (secretbox, key from jwt_secret outside the DB)."""
     from atlas.business import secretbox
     ctype = get_type(kind)
     if ctype is None:
@@ -155,7 +155,7 @@ def create(spine, kind: str, name: str, config: dict, cfg=None, org_id=None, use
     clean = _clean_config(ctype, config)
     res = test_draft(kind, clean)
     ok = res["status"] == "connected"
-    # šifriraj tajna polja prije spremanja
+    # encrypt secret fields before saving
     to_store = dict(clean)
     for f in ctype.fields:
         if f.secret and clean[f.key]:
@@ -178,7 +178,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-# admin smije samo uključiti/isključiti; connected/error postavlja adapter (Codex)
+# admin may only enable/disable; connected/error is set by the adapter (Codex)
 _ADMIN_STATUSES = ("disabled",)
 
 

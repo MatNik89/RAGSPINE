@@ -1,5 +1,5 @@
-# Multi-tenancy: organizacije, članstva (uloge), timovi. Substrat za dijeljenje
-# memorijskih sredstava po organizaciji i timu.
+# Multi-tenancy: organizations, memberships (roles), teams. Substrate for
+# sharing memory assets per organization and team.
 
 from atlas.business.acl import ROLE_RANK, Actor
 
@@ -61,8 +61,8 @@ def _team_ids(spine, org_id: int, user_id: int) -> set:
 
 
 def default_org_id(spine) -> int:
-    """ID zadane organizacije; ako nijedna ne postoji, kreira 'Ured' (bootstrap
-    jedno-uredske instalacije bez ikakvog setup koraka)."""
+    """ID of the default organization; if none exists, creates 'Ured' (bootstrap
+    of a single-office installation without any setup step)."""
     r = spine.read().execute("SELECT MIN(id) AS id FROM orgs").fetchone()
     if r is not None and r["id"] is not None:
         return r["id"]
@@ -71,8 +71,9 @@ def default_org_id(spine) -> int:
 
 
 def backfill_org(spine) -> None:
-    """Jednokratna aditivna migracija jedno-uredske instalacije: postojeći
-    dokumenti/znanje bez org_id pripadaju default organizaciji. Idempotentno."""
+    """One-time additive migration of a single-office installation: existing
+    documents/knowledge without org_id belong to the default organization.
+    Idempotent."""
     org_id = default_org_id(spine)
     with spine.write() as c:
         c.execute("UPDATE documents SET org_id=? WHERE org_id IS NULL", (org_id,))
@@ -80,8 +81,9 @@ def backfill_org(spine) -> None:
 
 
 def resolve_login_org(spine, user_id: int, sys_role: str = "") -> tuple[int, str]:
-    """(org_id, role) za login: prvo postojeće članstvo; inače upiši članstvo u
-    default org — prazan org → owner, sistemski admin → admin, inače member."""
+    """(org_id, role) for login: first an existing membership; otherwise write a
+    membership in the default org — empty org -> owner, system admin -> admin,
+    otherwise member."""
     m = spine.read().execute(
         "SELECT org_id, role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
         (user_id,)).fetchone()
@@ -96,7 +98,7 @@ def resolve_login_org(spine, user_id: int, sys_role: str = "") -> tuple[int, str
 
 
 def actor_for(spine, org_id: int, user_id: int) -> Actor | None:
-    """Actor s ulogom + timovima za trenutnog korisnika u org-u; None ako nije član."""
+    """Actor with role + teams for the current user in the org; None if not a member."""
     role = role_of(spine, org_id, user_id)
     if role is None:
         return None

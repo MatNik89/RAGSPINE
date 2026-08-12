@@ -1,6 +1,6 @@
-"""Terminal setup wizard. Jedan fiksni slijed, resume preko wizard_state.
-5 stranica: preduvjeti, operater, model, mreža/HTTPS/servis, gotovo.
-Mrežne mape se ne postavljaju ovdje — Postavke → Mrežne mape (web)."""
+"""Terminal setup wizard. One fixed sequence, resume via wizard_state.
+5 pages: prerequisites, operator, model, network/HTTPS/service, done.
+Network folders are not configured here — Settings -> Network folders (web)."""
 import dataclasses
 import ipaddress
 import os
@@ -19,11 +19,11 @@ from atlas.web import firstrun
 
 _MIN_PW = 8
 _BGE_M3 = "BAAI/bge-m3"
-_BGE_M3_GB = 1.2   # fp16, približno (ručno kurirano)
+_BGE_M3_GB = 1.2   # fp16, approximately (manually curated)
 
 
 def render_preflight(reqs, *, out=print) -> bool:
-    """Ispiši preduvjete s glyph+detalj; fix samo za warn/fail. Vrati True kad nema 'fail'."""
+    """Print prerequisites with glyph+detail; fix only for warn/fail. Return True when there is no 'fail'."""
     has_fail = False
     for r in reqs:
         g = tui.status_glyph(r["status"])
@@ -40,7 +40,7 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
     while True:
         reqs = preflight.requirements(cfg)
         ok = render_preflight(reqs, out=out)
-        # winget auto-install je Windows-only (drugdje ga wizard ne nudi — brief).
+        # winget auto-install is Windows-only (elsewhere the wizard does not offer it — brief).
         instalabilni = [r for r in reqs
                         if os.name == "nt" and r["key"] in preflight.WINGET_IDS
                         and r["status"] in ("fail", "warn")]
@@ -70,14 +70,14 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
             return False
         if isinstance(akcija, tuple):
             preflight.install_via_winget(akcija[1], out=out)
-        # "retry" i post-install: petlja ponovno provjerava
+        # "retry" and post-install: the loop checks again
 
 
 def page_operater(spine, *, input_fn=input, out=print) -> bool:
-    """Stranica 2: kreira prvog admina (operatera). Vrati True na uspjeh.
-    Ako admin već postoji (npr. kreiran preko web /setup/owner puta, ili je
-    prošli pokušaj pao između create_first_owner i set_stage), preskoči
-    prompt — inače resume nema izlaza (create_first_owner uvijek baca)."""
+    """Page 2: creates the first admin (operator). Return True on success.
+    If the admin already exists (e.g. created via the web /setup/owner path, or a
+    previous attempt failed between create_first_owner and set_stage), skip
+    the prompt — otherwise resume has no exit (create_first_owner always throws)."""
     if not firstrun.needs_onboarding(spine):
         out("Administrator već postoji — preskačem.")
         return True
@@ -107,7 +107,7 @@ def page_operater(spine, *, input_fn=input, out=print) -> bool:
 
 
 def _download_embed(cfg):
-    """Indirekcija radi testabilnosti (embed vuče fastembed tek pri pozivu)."""
+    """Indirection for testability (embed pulls in fastembed only when called)."""
     from atlas.rag import embed
     return embed.download_model(cfg)
 
@@ -116,8 +116,8 @@ _SELF_TEST_PROMPT = "Odgovori točno: OK ATLAS"
 
 
 def _llm_complete(spine, cfg, prompt: str):
-    """Indirekcija radi testabilnosti; LLMClient ima vlastiti timeout (120 s)
-    koji pokriva i cold-load većih modela."""
+    """Indirection for testability; LLMClient has its own timeout (120 s)
+    that also covers the cold-load of larger models."""
     from atlas.business import model_settings
     from atlas.core.llm import LLMClient
     return model_settings.build_llm(spine, cfg).complete(
@@ -125,8 +125,8 @@ def _llm_complete(spine, cfg, prompt: str):
 
 
 def self_test(spine, cfg, *, input_fn=input, out=print, retries: int = 3) -> bool:
-    """Kratki test odabranog modela. Uspjeh = ne-prazan odgovor unutar timeouta.
-    Regex "OK ATLAS" = soft-check (upozorenje). Kvar ne ruši setup."""
+    """Short test of the selected model. Success = non-empty response within the timeout.
+    Regex "OK ATLAS" = soft-check (warning). Failure does not break setup."""
     for attempt in range(1, retries + 1):
         out(f"Self-test modela (pokušaj {attempt}/{retries}; prvi odziv zna trajati i minutu)...")
         t0 = time.monotonic()
@@ -154,8 +154,8 @@ def self_test(spine, cfg, *, input_fn=input, out=print, retries: int = 3) -> boo
 
 
 def choose_embed_model(state: dict, default_model: str) -> str:
-    """bge-m3 kad KOMOTNO stane u RAM i kad ga fastembed stvarno podržava
-    (E2E: unsupported model ne smije u ponudu); inače mali default."""
+    """bge-m3 when it fits COMFORTABLY in RAM and when fastembed actually supports it
+    (E2E: an unsupported model must not appear in the offering); otherwise the small default."""
     total = state.get("ram_total_gb") or 0.0
     if preflight.fit_pill(_BGE_M3_GB, total) == "fits" and embed.supports(_BGE_M3):
         return _BGE_M3
@@ -163,10 +163,10 @@ def choose_embed_model(state: dict, default_model: str) -> str:
 
 
 def setup_embedding(spine, cfg, *, out=print) -> str | None:
-    """Odaberi embedding po RAM-u, skini i VERIFICIRAJ; na grešku fallback na
-    cfg.embed_model. Vrati ime verificiranog modela ili None (ne blokira setup)."""
+    """Choose the embedding by RAM, download and VERIFY it; on error fall back to
+    cfg.embed_model. Return the name of the verified model or None (does not block setup)."""
     chosen = choose_embed_model(preflight.system_state(cfg), cfg.embed_model)
-    for candidate in dict.fromkeys([chosen, cfg.embed_model]):   # bez duplikata
+    for candidate in dict.fromkeys([chosen, cfg.embed_model]):   # no duplicates
         out(f"Embedding model: {candidate} — skidam i provjeravam...")
         res = _download_embed(dataclasses.replace(cfg, embed_model=candidate))
         if res.get("ok"):
@@ -178,8 +178,8 @@ def setup_embedding(spine, cfg, *, out=print) -> str | None:
 
 
 def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 3: Ollama spremnost -> llmfit lista -> JEDAN model -> pull -> spremi
-    -> embedding -> self-test. Skip-grana vraća True (spec: ne zaglavi)."""
+    """Page 3: Ollama readiness -> llmfit list -> ONE model -> pull -> save
+    -> embedding -> self-test. The skip branch returns True (spec: do not get stuck)."""
     tui.print_header("3/5  Model (LLM)", out=out)
     url = getattr(cfg, "ollama_url", "http://127.0.0.1:11434")
 
@@ -203,7 +203,7 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     if not rows and not shutil.which("llmfit") and tui.prompt_yes_no(
             "llmfit nije pronađen (preporuke modela po hardveru). Pokušaj auto-instalaciju (pip)?",
             default=False, input_fn=input_fn, out=out):
-        preflight.install_llmfit(out=out)   # pip je cross-platform — bez os.name provjere
+        preflight.install_llmfit(out=out)   # pip is cross-platform — no os.name check
         rows = preflight.llmfit_models(cfg)
     if not rows:
         out("llmfit nije dostupan ili nema modela koji stanu — model postavi kasnije u Postavkama.")
@@ -219,7 +219,7 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     idx = tui_curses.radiolist(
         "Odaberi JEDAN model (🟢 komotno / 🟡 tijesno — RAM, ne disk):",
         items, selected=0, header=header,
-        cancel_returns=len(names),          # ESC = preskoči
+        cancel_returns=len(names),          # ESC = skip
         input_fn=input_fn, out=out)
     if idx == len(names):
         return True
@@ -263,12 +263,12 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 
 def _best_name(names: list[str], fallback_ip: str) -> str:
-    """Tanki alias — jedina implementacija je certs.best_display_host."""
+    """Thin alias — the only implementation is certs.best_display_host."""
     return certs.best_display_host(names, fallback_ip)
 
 
 def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 4: bind IP + port, cert/HTTPS, proxy, servis (preskočivo)."""
+    """Page 4: bind IP + port, cert/HTTPS, proxy, service (skippable)."""
     tui.print_header("4/5  Mreža + HTTPS + servis", out=out)
     lan = preflight.local_ip()
 
@@ -307,7 +307,7 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
             continue
         break
 
-    # 3) statička adresa (upozorenje, ne izvršavamo netsh set)
+    # 3) static address (warning, we do not run netsh set)
     if preflight.system_state(cfg).get("ip_mode") == "dhcp":
         out("⚠ Računalo je na DHCP-u — adresa se može promijeniti i klijenti gube vezu.")
         out("  Postavi statičku: netsh interface ip set address (ili rezervacija na routeru).")
@@ -333,7 +333,7 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     out("  Na OVOM računalu: atlas trust")
     out(f"  Radnici: nakon pokretanja servera otvore http://{best}:{bport}/postavi (bootstrap stranica)")
 
-    # 6) spremi net postavke
+    # 6) save net settings
     spine.set_override("net", "host", bind)
     spine.set_override("net", "port", str(port))
     spine.set_override("net", "cert_path", cert)
@@ -343,7 +343,7 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
     else:
         out(f"✓ Server će služiti na https://{cert_ip}:{port}")
 
-    # 7) servis (preskočivo; neuspjeh ne ruši stranicu)
+    # 7) service (skippable; failure does not break the page)
     if tui.prompt_yes_no("Instaliraj kao servis (autostart)?", default=False,
                          input_fn=input_fn, out=out):
         from atlas.business import folders
@@ -357,7 +357,7 @@ def page_mreza(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 
 def render_summary(spine, cfg, *, out=print) -> None:
-    """Sažetak stranica 1-4: konfigurirano / preskočeno + gdje dodati kasnije."""
+    """Summary of pages 1-4: configured / skipped + where to add it later."""
     from atlas.business import folders
     admin = "✓ kreiran" if not firstrun.needs_onboarding(spine) else "✗ nije kreiran"
     model = spine.get_override("model", "model") or ""
@@ -380,8 +380,8 @@ def render_summary(spine, cfg, *, out=print) -> None:
 
 
 def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Stranica 5: sažetak + konkretan backup/restore. Uvijek vraća True —
-    zadnja stranica ne smije blokirati dovršetak setupa."""
+    """Page 5: summary + concrete backup/restore. Always returns True —
+    the last page must not block completion of setup."""
     tui.print_header("5/5  Gotovo — sažetak i sigurnosne kopije", out=out)
     render_summary(spine, cfg, out=out)
     out("")
@@ -399,10 +399,10 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
         host = spine.get_override("net", "host") or "127.0.0.1"
         port = spine.get_override("net", "port") or "8443"
         url_host = preflight.local_ip() if host == "0.0.0.0" else host
-        # nalaz: display ime mora biti usklađeno sa SAN-om POSTOJEĆEG certa —
-        # stara instalacija može imati cert=[atlas.local, IP] dok friendly_names()
-        # vec nudi novije ime (npr. nick.fritz.box) -> browser warning i nakon
-        # instalacije certa jer taj naziv cert uopće ne pokriva.
+        # finding: the display name must be aligned with the SAN of the EXISTING cert —
+        # an old installation may have cert=[atlas.local, IP] while friendly_names()
+        # already offers a newer name (e.g. nick.fritz.box) -> browser warning even after
+        # installing the cert because the cert does not cover that name at all.
         name = certs.verified_display_host(cert_path, certs.friendly_names(), url_host)
         from atlas import config
         bport = config._env("BOOTSTRAP_PORT", "8080")
@@ -426,12 +426,12 @@ def page_gotovo(spine, cfg, *, input_fn=input, out=print) -> bool:
 
 
 def _detached_kwargs(data_dir: str | None = None) -> dict:
-    """Popen kwargs da dijete preživi zatvaranje wizard konzole (isti obrazac
-    kao preflight.start_ollama; getattr fallback za testove na Linuxu s
-    mockanim platform.system()). data_dir zadan (serve poziv) -> stdout/stderr
-    idu u <data_dir>/logs/serve.{out,err}.log (append) umjesto DEVNULL — tihi
-    crash servera inače ne ostavlja trag nigdje (E2E nalaz). Edge poziv nema
-    data_dir -> ostaje DEVNULL (nema što logirati)."""
+    """Popen kwargs so the child survives closing the wizard console (same pattern
+    as preflight.start_ollama; getattr fallback for tests on Linux with a
+    mocked platform.system()). data_dir given (serve call) -> stdout/stderr
+    go to <data_dir>/logs/serve.{out,err}.log (append) instead of DEVNULL — a silent
+    server crash otherwise leaves no trace anywhere (E2E finding). The Edge call has no
+    data_dir -> stays DEVNULL (nothing to log)."""
     if data_dir:
         logs = Path(data_dir) / "logs"
         logs.mkdir(parents=True, exist_ok=True)
@@ -450,13 +450,13 @@ def _detached_kwargs(data_dir: str | None = None) -> dict:
 
 
 def _open_edge(url: str, *, out, popen) -> None:
-    """Otvori Edge app-prozor (Windows); drugdje samo uputa. Edge ne treba
-    log — DEVNULL preko _detached_kwargs bez data_dir."""
+    """Open an Edge app window (Windows); elsewhere just an instruction. Edge needs no
+    log — DEVNULL via _detached_kwargs without data_dir."""
     if platform.system() != "Windows":
         out(f"Otvori u pregledniku: {url}")
         return
     try:
-        # start preko App Paths (msedge nije na PATH-u); "" = naslov prozora
+        # start via App Paths (msedge is not on PATH); "" = window title
         popen(["cmd", "/c", "start", "", "msedge", f"--app={url}"], **_detached_kwargs())
         out("Otvaram Edge app-prozor...")
     except OSError:
@@ -464,10 +464,10 @@ def _open_edge(url: str, *, out, popen) -> None:
 
 
 def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen) -> None:
-    """Ponudi start servera (detached) + Edge app-prozor. Poziva se IZA
-    mark_complete — nikakav kvar ovdje ne smije poništiti dovršeni setup.
-    Ako je pravi servis (winsvc) već pokrenut, ne diže se detached kopija —
-    samo prečac + Edge na postojeći servis (spec 2026-08-08, servis t.2)."""
+    """Offer to start the server (detached) + Edge app window. Called AFTER
+    mark_complete — no failure here may undo the completed setup.
+    If a real service (winsvc) is already running, no detached copy is spun up —
+    just a shortcut + Edge to the existing service (spec 2026-08-08, service t.2)."""
     host = spine.get_override("net", "host") or "127.0.0.1"
     port = spine.get_override("net", "port") or "8443"
     url_host = preflight.local_ip() if host == "0.0.0.0" else host
@@ -487,9 +487,9 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         return
     exe = shutil.which("atlas")
     cmd = [exe, "serve"] if exe else [sys.executable, "-m", "atlas", "serve"]
-    # folders je fail-closed bez mount_roots (v. business/folders._scoped) — bez ovoga
-    # bi mape registrirane kroz web Postavke → Mrežne mape na happy pathu tiho ne
-    # radile (upgrade instalacije mogu ih imati čak i bez ove wizard grane).
+    # folders is fail-closed without mount_roots (see business/folders._scoped) — without this
+    # folders registered through the web Settings -> Network folders would silently not
+    # work on the happy path (upgrade installations may have them even without this wizard branch).
     from atlas.business import folders
     roots = [m["path"] for m in folders.list_folders(spine)]
     env = None
@@ -505,9 +505,9 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
         out(f"⚠ Server nije pokrenut ({e}) — pokreni ručno: atlas serve")
         return
     finally:
-        # Popen (kad je pravi subprocess) duplicira fd u dijete — roditelj
-        # svoju kopiju log-datoteka mora zatvoriti i na uspjehu i na OSError
-        # putu, inače curi otvoreni file handle u wizard procesu.
+        # Popen (when it is a real subprocess) duplicates the fd into the child — the parent
+        # must close its own copy of the log files on both the success and the OSError
+        # path, otherwise an open file handle leaks in the wizard process.
         for key in ("stdout", "stderr"):
             fh = kwargs.get(key)
             if hasattr(fh, "close"):
@@ -517,15 +517,15 @@ def launch_now(spine, cfg, *, input_fn=input, out=print, popen=subprocess.Popen)
 
 
 def page_upgrade(spine, cfg, *, input_fn=input, out=print) -> bool:
-    """Postojeća baza bez setup_complete flaga (instalacija prije wizarda):
-    spec traži „detektiraj, ponudi migraciju, ne novi setup". Migracija =
-    preuzmi postojeću konfiguraciju (shema je ista, nema podataka za seljenje).
-    True = preuzeto (pozivatelj označava setup dovršenim), False = normalni wizard."""
+    """Existing database without a setup_complete flag (installation before the wizard):
+    the spec requires "detect, offer migration, not a new setup". Migration =
+    adopt the existing configuration (the schema is the same, no data to migrate).
+    True = adopted (the caller marks setup as complete), False = normal wizard."""
     tui.print_header("Postojeća baza otkrivena", out=out)
     render_summary(spine, cfg, out=out)
     out("")
-    # Default „da" samo za klasičnu legacy instalaciju (admin je okidač u run();
-    # model+host potvrđuju da je sustav bio konfiguriran, ne napola postavljen).
+    # Default "yes" only for a classic legacy installation (admin is the trigger in run();
+    # model+host confirm the system was configured, not half set up).
     default = bool(spine.get_override("model", "model")
                    and spine.get_override("net", "host"))
     return tui.prompt_yes_no(
@@ -538,12 +538,12 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
         out("Setup je već dovršen. Za ponovno: `atlas setup --reset`.")
         return
     stage = wizard_state.get_stage(spine)
-    # min(): legacy baza može imati stage=5 (stara 6-stranična numeracija) —
-    # prikaz ne smije obećati nepostojeći "korak 6".
+    # min(): a legacy database may have stage=5 (the old 6-page numbering) —
+    # the display must not promise a non-existent "step 6".
     out(f"ATLAS setup (nastavak od koraka {min(stage + 1, 5)}).")
     try:
-        # Upgrade grana (spec str.1): postojeća baza — korisnici postoje, a
-        # setup nikad nije dovršen. Resume (stage>0) nije upgrade slučaj.
+        # Upgrade branch (spec p.1): existing database — users exist, but
+        # setup was never completed. Resume (stage>0) is not an upgrade case.
         if stage == 0 and not firstrun.needs_onboarding(spine):
             if page_upgrade(spine, cfg, input_fn=input_fn, out=out):
                 wizard_state.mark_complete(spine)
@@ -570,20 +570,20 @@ def run(spine, cfg, *, input_fn=input, out=print) -> None:
                 out("Setup prekinut na mreži. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 4)
-        # <= ne < : legacy baza sa stage=5 (iz vremena 6 stranica — prošla staru
-        # stranicu mapa, ali NE i sažetak) mora još proći page_gotovo. Novi tok
-        # nikad ne resumira sa stage=5 bez complete flaga — set_stage(5) niže pa
-        # mark_complete izvrše se u istom pozivu, bez povratka između njih.
+        # <= not < : a legacy database with stage=5 (from the 6-page era — it passed the old
+        # folders page, but NOT the summary) must still pass page_gotovo. The new flow
+        # never resumes with stage=5 without the complete flag — set_stage(5) below then
+        # mark_complete execute in the same call, with no return between them.
         if stage <= 5:
             if not page_gotovo(spine, cfg, input_fn=input_fn, out=out):
                 out("Setup prekinut na sažetku. Pokreni ponovno za nastavak.")
                 return
             wizard_state.set_stage(spine, 5)
     except (EOFError, KeyboardInterrupt):
-        # non-TTY / piped stdin (npr. servis bez terminala) — bez tracebacka.
-        # ponytail: run() ostaje `-> None`; pozivatelj (_cmd_setup) ne detektira
-        # ovaj slučaj posebno pa CLI izlazi s 0. Upgrade path: vratiti bool/kod
-        # ako se pokaže da nešto ovisi o exit statusu.
+        # non-TTY / piped stdin (e.g. a service without a terminal) — no traceback.
+        # ponytail: run() stays `-> None`; the caller (_cmd_setup) does not detect
+        # this case specially so the CLI exits with 0. Upgrade path: return a bool/code
+        # if it turns out something depends on the exit status.
         out("")
         out("Setup zahtijeva interaktivni terminal. Pokreni `atlas setup` u terminalu; "
             "stanje je spremljeno — nastavlja gdje je stao.")

@@ -80,13 +80,14 @@ def learn_url(spine, cfg, url: str, user: str, fetch=None) -> dict:
     return {"url": url, "overrides_set": overrides, "doc_id": doc_id}
 
 
-_WRITE_ROLES = ("member", "admin", "owner")  # viewer ne smije mijenjati korpus/config
+_WRITE_ROLES = ("member", "admin", "owner")  # a viewer must not change the corpus/config
 
 
 def handle(spine, cfg, query: str, llm, fetch=None, actor=None) -> str:
-    # Side-effect lane: dohvat URL-a + upis prireza u config + ingest u korpus.
-    # Zato zahtijeva barem člansku ulogu — inače read-only viewer može trovati
-    # RAG korpus i mijenjati kalkulatorske stope (adversarial review, MEDIUM).
+    # Side-effect lane: fetch the URL + write surtax rates into config + ingest
+    # into the corpus. That is why it requires at least a member role — otherwise
+    # a read-only viewer could poison the RAG corpus and change calculator rates
+    # (adversarial review, MEDIUM).
     if actor is None or actor.role not in _WRITE_ROLES:
         return "Za učenje s weba potrebna je barem članska (member) uloga."
     m = _URL_RE.search(query)

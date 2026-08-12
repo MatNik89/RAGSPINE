@@ -20,9 +20,9 @@ def _tag(doc_type: str) -> str:
 
 
 def compose(query: str, hits: list, extra: str = "") -> tuple[str, list[dict]]:
-    # Kompakcija se NE radi ovdje: pozivatelj (verify.run) mora prompt,
-    # citation-verifikaciju i source-mapiranje graditi nad ISTIM skupom hitova —
-    # Codex nalaz: interna kompakcija je puštala citate na nevidljive izvore.
+    # Compaction is NOT done here: the caller (verify.run) must build the prompt,
+    # citation verification, and source mapping over the SAME set of hits --
+    # Codex finding: internal compaction was letting citations point to invisible sources.
     lines = [
         f"[{i}] ({_tag(h.doc_type)}) {h.title}: {h.text}"
         for i, h in enumerate(hits, start=1)

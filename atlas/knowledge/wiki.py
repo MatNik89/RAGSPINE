@@ -1,7 +1,7 @@
-# LLM-održavani Wiki (TIER 1) — ideja posuđena od Tencent memory-huba / Karpathy
-# "LLM Wiki", reimplementirano čisto i multi-tenant. Sirovi dokument → LLM sintetizira
-# tipizirane, međusobno povezane ([[wikilink]]) stranice. Sha-inkrementalno (re-LLM samo
-# promijenjeni izvor); 'locked' stranice (ručno uređene) se NIKAD ne gaze; sve org-scoped.
+# LLM-maintained Wiki (TIER 1) — idea borrowed from Tencent's memory hub / Karpathy's
+# "LLM Wiki", reimplemented cleanly and multi-tenant. Raw document -> LLM synthesizes
+# typed, interlinked ([[wikilink]]) pages. Sha-incremental (re-LLM only on a
+# changed source); 'locked' pages (manually edited) are NEVER overwritten; all org-scoped.
 
 import hashlib
 import json
@@ -39,7 +39,7 @@ def _sha(text: str) -> str:
 
 
 def _extract_json(raw: str):
-    """Robusno izvuci JSON niz iz LLM izlaza (podnosi ograde/fences)."""
+    """Robustly extract a JSON array from LLM output (tolerates fences/wrappers)."""
     a, b = raw.find("["), raw.rfind("]")
     if a != -1 and b > a:
         try:
@@ -69,13 +69,13 @@ def _link_slugs(body: str) -> set:
 
 
 def _upsert_page(spine, org_id: int, page: dict, owner_user_id: int, visibility: str) -> tuple[int, bool]:
-    """Vrati (page_id, upserted?). Locked stranica se ne dira."""
+    """Return (page_id, upserted?). A locked page is left untouched."""
     slug = _slug(page["type"], page["title"])
     with spine.write() as c:
         row = c.execute("SELECT id, locked, version FROM wiki_pages WHERE org_id=? AND slug=?",
                         (org_id, slug)).fetchone()
         if row and row["locked"]:
-            return row["id"], False  # ručno uređena — čuvamo
+            return row["id"], False  # manually edited — preserve it
         if row:
             pid = row["id"]
             c.execute("""UPDATE wiki_pages SET type=?, title=?, body=?, version=?, updated_at=datetime('now')
@@ -98,7 +98,7 @@ def _upsert_page(spine, org_id: int, page: dict, owner_user_id: int, visibility:
 
 def ingest_source(spine, org_id: int, source_key: str, text: str, llm,
                   owner_user_id: int = 0, visibility: str = "org") -> dict:
-    """Sintetiziraj/aktualiziraj wiki-stranice iz izvora. Sha-inkrementalno."""
+    """Synthesize/update wiki pages from a source. Sha-incremental."""
     sha = _sha(text)
     prev = spine.read().execute(
         "SELECT sha256 FROM wiki_sources WHERE org_id=? AND source_key=?",
@@ -137,7 +137,7 @@ def _page_by_slug(spine, org_id: int, slug: str) -> dict | None:
 
 
 def search(spine, org_id: int, query: str, k: int = 5) -> list[dict]:
-    """Org-scoped FTS (BM25, naslov važniji) + 1-hop širenje po [[wikilink]] grafu."""
+    """Org-scoped FTS (BM25, title weighted higher) + 1-hop expansion over the [[wikilink]] graph."""
     fts_q = retrieval._fts_query(query)
     if not fts_q:
         return []

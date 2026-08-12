@@ -72,7 +72,7 @@ def test_home_data_visibility_covers_calendar_stats_notifications(spine):
 
 
 def test_ntfy_target_dropped_from_allowlist():
-    from atlas.web import messaging
+    from atlas.business import messaging
     assert not messaging._target_scheme_ok("ntfy://127.0.0.1/topic")  # SSRF vektor izbačen
     assert messaging._target_scheme_ok("mailto://x@example.com")  # fiksni host ostaje
 
@@ -80,7 +80,7 @@ def test_ntfy_target_dropped_from_allowlist():
 # --- A1: mail na istek ----------------------------------------------------
 
 def test_send_expiry_reminder_no_consent_skipped(spine, cfg):
-    from atlas.web import messaging  # noqa: F401 (osigurava import path)
+    from atlas.business import messaging  # noqa: F401 (osigurava import path)
     cid = _client(spine)
     eid = expiry.add(spine, cid, "osobna_iskaznica", "Osobna", "2026-09-01")
     res = expiry.send_expiry_reminder(spine, cfg, eid)

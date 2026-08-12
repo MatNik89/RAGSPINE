@@ -1,4 +1,4 @@
-# Dnevnik bilješki po klijentu.
+# Per-client notes journal.
 
 
 def add(spine, client_id: int, author: str, body: str) -> int:

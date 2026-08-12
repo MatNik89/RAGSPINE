@@ -1,7 +1,7 @@
-"""Parkirane radnje: nenadzirani (autonomni) agent-run pripremi posao ali NE dira
-podatke — svaku write-radnju stavi u red za ODOBRENJE (OpenWorker inbox-park +
-MateClaw in_review). Vlasnik kasnije pregleda i odobri/odbije. Autonomija je u
-PRIPREMI (read/draft); gate ostaje na svakoj mutaciji. HIGH-rizik uvijek ovamo."""
+"""Parked actions: an unattended (autonomous) agent run prepares work but does NOT
+touch data — it queues every write action for APPROVAL (OpenWorker inbox-park +
+MateClaw in_review). The owner reviews and approves/rejects later. Autonomy is in the
+PREPARATION (read/draft); the gate stays on every mutation. HIGH-risk always goes here."""
 import json
 
 
@@ -15,9 +15,9 @@ def park(spine, org_id, source: str, tool: str, args: dict, summary: str, risk: 
 
 
 def list_pending(spine, org_id, limit: int = 100) -> list[dict]:
-    # vraća i ARGUMENTE (parsirane) da vlasnik VIDI što će se izvršiti prije
-    # odobrenja — npr. tijelo poruke klijentu koje je AI sastavio (Codex: inače
-    # slijepo odobrenje model-kontroliranog sadržaja)
+    # also returns the (parsed) ARGUMENTS so the owner SEES what will run before
+    # approving — e.g. the client message body the AI composed (Codex: otherwise a
+    # blind approval of model-controlled content)
     rows = spine.read().execute(
         "SELECT id, source, tool, summary, risk, args_json, created_at FROM parked_actions "
         "WHERE org_id=? AND status='pending' ORDER BY id DESC LIMIT ?",
@@ -34,8 +34,9 @@ def list_pending(spine, org_id, limit: int = 100) -> list[dict]:
 
 
 def approve(spine, cfg, park_id: int, actor) -> dict:
-    """Atomično preuzmi pending -> IZVRŠI kroz run_tool (svježa provjera ovlasti) ->
-    označi approved. Ovlast se provjerava kao za svaku radnju (approver = actor)."""
+    """Atomically claim the pending row -> EXECUTE through run_tool (fresh authorization
+    check) -> mark approved. Authorization is checked as for any action (approver = actor).
+    ValueError messages surface to the UI -> Croatian."""
     from atlas.rag import agent_tools
     with spine.write() as c:
         row = c.execute("SELECT tool, args_json FROM parked_actions "
@@ -50,7 +51,7 @@ def approve(spine, cfg, park_id: int, actor) -> dict:
         tool, args_json = row["tool"], row["args_json"]
     try:
         result = agent_tools.run_tool(spine, cfg, actor, tool, json.loads(args_json))
-    except Exception:  # BILO KOJI neuspjeh -> vrati na pending (ne ostane 'approving'; Codex)
+    except Exception:  # ANY failure -> back to pending (don't leave 'approving'; Codex)
         with spine.write() as c:
             c.execute("UPDATE parked_actions SET status='pending' WHERE id=?", (park_id,))
         raise

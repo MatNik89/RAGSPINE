@@ -1,8 +1,7 @@
-# Odlazne poruke klijentima (WhatsApp/Telegram/mail preko apprise) —
-# uvijek uz PRISTANAK klijenta (messaging_consent) i uvijek DRY-RUN dok se
-# eksplicitno ne zatraži stvarno slanje. Zrcali sigurnosni obrazac iz
-# ops/digest.py: nikad ne logirati str(e) ni apprise URL (mogu sadržavati
-# kredencijale), samo type(e).__name__.
+# Outbound messages to clients (WhatsApp/Telegram/mail via apprise) — always with
+# client CONSENT (messaging_consent) and always DRY-RUN until a real send is
+# explicitly requested. Mirrors the security pattern from ops/digest.py: never log
+# str(e) or the apprise URL (may contain credentials), only type(e).__name__.
 import logging
 import socket
 
@@ -15,8 +14,8 @@ logger = logging.getLogger(__name__)
 # fixed endpoint (mail relay, chat-bot API), not a generic webhook-to-anywhere.
 # Operator can extend this set later if a new provider is needed.
 ALLOWED_TARGET_SCHEMES = {
-    # SAMO sheme s FIKSNIM provider-hostom. 'ntfy' izbačen: ntfy://<host>/topic
-    # dopušta proizvoljan host (self-hosted) -> SSRF na loopback/LAN (Codex nalaz).
+    # ONLY schemes with a FIXED provider host. 'ntfy' excluded: ntfy://<host>/topic
+    # allows an arbitrary host (self-hosted) -> SSRF to loopback/LAN (Codex finding).
     "mailto", "mailtos", "tgram", "discord", "slack", "twilio", "pover", "pushover",
 }
 
@@ -27,10 +26,10 @@ def _target_scheme_ok(target: str) -> bool:
 
 
 def _mail_host_ok(target: str) -> bool:
-    """Za mailto/mailtos: efektivni SMTP host ne smije biti interni/loopback.
-    apprise dopušta 'mailto://user:pass@host?smtp=<drugi-host>' — bez ovoga bi
-    autenticirani korisnik preusmjerio slanje na 169.254/127.0.0.1/LAN (SSRF;
-    Codex nalaz). Ostale sheme imaju fiksni provider-host pa ne trebaju ovo."""
+    """For mailto/mailtos: the effective SMTP host must not be internal/loopback.
+    apprise allows 'mailto://user:pass@host?smtp=<other-host>' — without this an
+    authenticated user could redirect the send to 169.254/127.0.0.1/LAN (SSRF;
+    Codex finding). Other schemes have a fixed provider host so don't need this."""
     import urllib.parse
 
     from atlas.core.net import _is_blocked_addr
@@ -39,10 +38,10 @@ def _mail_host_ok(target: str) -> bool:
     if scheme not in ("mailto", "mailtos"):
         return True
     p = urllib.parse.urlparse(target)
-    # apprise 'smtp=' nadjačava host. Parser differential (Codex): ključ je
-    # case-insensitive, a apprise uzima ZADNJI — pa skupljamo SVE 'smtp' vrijednosti
-    # (bilo koje velike/male) i ODBIJAMO na duplikat ili ako BILO KOJA (uklj. netloc)
-    # razrješava na interni host. ';' se tretira kao razdvajač uz '&'.
+    # apprise 'smtp=' overrides the host. Parser differential (Codex): the key is
+    # case-insensitive and apprise takes the LAST one — so we gather ALL 'smtp' values
+    # (any case) and REJECT on a duplicate or if ANY (incl. netloc) resolves to an
+    # internal host. ';' is treated as a separator alongside '&'.
     smtp_vals = []
     for k, vals in urllib.parse.parse_qs(p.query, separator="&").items():
         if k.strip().lower() == "smtp":
@@ -52,10 +51,10 @@ def _mail_host_ok(target: str) -> bool:
             smtp_vals.extend(vals)
     smtp_vals = [s.strip() for s in smtp_vals if s.strip()]
     if len(set(smtp_vals)) > 1:
-        return False  # višeznačan smtp= -> ne riskiraj (apprise last-wins)
+        return False  # ambiguous smtp= -> don't risk it (apprise last-wins)
     hosts = [h for h in (smtp_vals or []) + [p.hostname or ""] if h]
     if not hosts:
-        return False  # nema odredišta -> ne šalji
+        return False  # no destination -> don't send
     for host in hosts:
         try:
             addrs = socket.getaddrinfo(host, None)
@@ -86,8 +85,8 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
     from atlas.business import secretbox
     row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     channel = row["messaging_channel"] if row else ""
-    # target sadrži lozinku (mailto://user:pass@host) — u bazi je šifriran; dešifriraj
-    # tek ovdje za korištenje. secretbox podnosi stare plaintext zapise (fallback).
+    # target contains a password (mailto://user:pass@host) — stored encrypted in the
+    # DB; decrypt only here for use. secretbox tolerates old plaintext records (fallback).
     target = secretbox.decrypt(row["messaging_target"], cfg) if row else ""
 
     if row is None or not row["messaging_consent"] or not target:
@@ -96,8 +95,8 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
         return {"status": status, "client_id": client_id}
 
     if not _target_scheme_ok(target):
-        # SSRF guard: proizvoljna shema (http/json) natjerala bi apprise na izlaz
-        # prema bilo kojem hostu (zaobilazi egress). Shema je jeftina, bez mreže.
+        # SSRF guard: an arbitrary scheme (http/json) would force apprise to reach
+        # any host (bypassing egress). The scheme check is cheap, no network.
         status = "skipped_bad_target"
         logger.warning("messaging target rejected: disallowed scheme (client %s)", client_id)
         _log(spine, client_id, channel, status, subject, body)
@@ -108,8 +107,8 @@ def send_to_client(spine, cfg, client_id: int, subject: str, body: str, dry_run:
         _log(spine, client_id, channel, status, subject, body)
         return {"status": status, "client_id": client_id}
 
-    if not _mail_host_ok(target):  # tek pred stvarno slanje (razrješava host -> mreža)
-        # mailto sa smtp=interni-host / loopback = SSRF (Codex fold)
+    if not _mail_host_ok(target):  # only right before a real send (resolves host -> network)
+        # mailto with smtp=internal-host / loopback = SSRF (Codex fold)
         status = "skipped_bad_target"
         logger.warning("messaging target rejected: internal SMTP host (client %s)", client_id)
         _log(spine, client_id, channel, status, subject, body)
@@ -157,7 +156,7 @@ def build_audience(spine, filt: str, **kw) -> list[int]:
         rows = spine.read().execute("SELECT id FROM clients WHERE active=1").fetchall()
         return [r["id"] for r in rows]
 
-    raise ValueError(f"nepoznat filter: {filt!r}")
+    raise ValueError(f"unknown filter: {filt!r}")
 
 
 def send_to_filter(spine, cfg, filt: str, subject: str, body: str, dry_run: bool = True, **kw) -> dict:

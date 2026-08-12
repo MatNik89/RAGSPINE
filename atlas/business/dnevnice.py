@@ -1,9 +1,9 @@
-# Dnevnice (per-diem) za službena putovanja u inozemstvo — 34 države.
+# Per-diem allowances (dnevnice) for official travel abroad - 34 countries.
 #
-# ponytail: RATES su približni default iznosi (EUR), ne službena tablica NN.
-# Stvarne iznose održava operater kroz spine.set_override("dnevnica", country, iznos)
-# ili learn/watchlist prati Odluku i predlaže override. Upgrade path: seed RATES
-# iz službenog izvora + watchlist za promjene.
+# ponytail: RATES are approximate default amounts (EUR), not the official NN table.
+# The operator maintains the real amounts via spine.set_override("dnevnica", country, iznos)
+# or learn/watchlist follows the Decree and proposes an override. Upgrade path: seed RATES
+# from an official source + a watchlist for changes.
 
 SOURCE = "Odluka o visini dnevnice za službena putovanja u inozemstvo, NN"
 
@@ -36,7 +36,7 @@ RATES: dict[str, float] = {
     "Slovenija": 60.0,
     "Španjolska": 65.0,
     "Švedska": 80.0,
-    # ostalo
+    # other
     "UK": 75.0,
     "Švicarska": 100.0,
     "Norveška": 90.0,

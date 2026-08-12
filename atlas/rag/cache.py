@@ -8,7 +8,7 @@ def _norm(query: str) -> str:
 
 
 def _hash(query: str, org_id=None) -> str:
-    # org je dio ključa — isti upit u dvije organizacije NIKAD ne dijeli odgovor
+    # org is part of the key -- the same query in two organizations NEVER shares an answer
     key = f"{'' if org_id is None else org_id}|{_norm(query)}"
     return hashlib.sha256(key.encode()).hexdigest()
 

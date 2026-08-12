@@ -1,9 +1,9 @@
-"""Faza 4: napajanje (UPS/NUT) — config + stroj stanja + gašenje redom.
+"""Phase 4: power (UPS/NUT) — config + state machine + orderly shutdown.
 
-Ovaj modul drži config napajanja (T1) i, u T2, stroj stanja koji na održivom
-nestanku struje gasi uređaje po `caps.shutdown_order` iz faze 2. Gašenje je
-DESTRUKTIVNO: default `armed=False` (samo alarm), izvršenje tek kad korisnik
-izričito naoruža.
+This module holds the power config (T1) and, in T2, a state machine that on a
+sustained power outage shuts down devices by `caps.shutdown_order` from phase 2.
+Shutdown is DESTRUCTIVE: default `armed=False` (alarm only), executed only once
+the user explicitly arms it.
 """
 import sys
 
@@ -13,7 +13,7 @@ from atlas.core import subproc
 from atlas.core.ups import read_status
 
 _MODULE = "napajanje"
-_STATE = "napajanje_state"  # runtime stanje stroja (odvojeno od config-a)
+_STATE = "napajanje_state"  # runtime machine state (separate from config)
 
 _DEFAULTS = {
     "enabled": False,
@@ -21,7 +21,7 @@ _DEFAULTS = {
     "nut_port": 3493,
     "ups_name": "ups",
     "on_battery_seconds": 120,
-    "armed": False,  # nikad auto-gašenje dok korisnik ne uključi
+    "armed": False,  # never auto-shutdown until the user turns it on
 }
 _BOOL_FIELDS = ("enabled", "armed")
 _INT_FIELDS = ("nut_port", "on_battery_seconds")
@@ -36,8 +36,8 @@ def get_config(spine) -> dict:
         if key in _BOOL_FIELDS:
             out[key] = raw in ("1", "true", "True", True)
         elif key in _INT_FIELDS:
-            # read boundary drži isti invariant kao save (fail-safe za
-            # destruktivnu putanju): pokvaren red -> default, ne procuri
+            # the read boundary holds the same invariant as save (fail-safe for
+            # the destructive path): a corrupted row -> default, do not leak through
             try:
                 val = int(raw)
             except (ValueError, TypeError):
@@ -61,7 +61,7 @@ def save_config(spine, **fields) -> dict:
         host = (fields["nut_host"] or "").strip()
         if host:
             try:
-                lan.assert_lan_host(host, 0)  # samo LAN UPS/NUT server (anti-SSRF)
+                lan.assert_lan_host(host, 0)  # LAN-only UPS/NUT server (anti-SSRF)
             except Exception as e:
                 raise ValueError(f"NUT host mora biti na LAN-u: {e}") from e
         fields["nut_host"] = host
@@ -87,7 +87,7 @@ def save_config(spine, **fields) -> dict:
     return get_config(spine)
 
 
-# --- T2: stroj stanja + gašenje redom --------------------------------------
+# --- T2: state machine + orderly shutdown ----------------------------------
 
 def _local_shutdown_cmd() -> list[str]:
     if sys.platform.startswith("win"):
@@ -96,17 +96,19 @@ def _local_shutdown_cmd() -> list[str]:
 
 
 def _ssh_safe(token: str) -> bool:
-    # ssh SAM tumači argv koji počinje s '-' kao OPCIJU (npr. -oProxyCommand=...),
-    # pa arg-lista NE štiti od injection preko user/host — vodeći '-' = RCE na
-    # serveru. Dopusti samo miran skup znakova za hostname/username.
+    # ssh ITSELF interprets an argv that starts with '-' as an OPTION (e.g.
+    # -oProxyCommand=...), so the arg-list does NOT protect against injection via
+    # user/host — a leading '-' = RCE on the server. Allow only a tame set of
+    # characters for hostname/username.
     return bool(token) and not token.startswith("-") and all(
         ch.isalnum() or ch in ".-_:" for ch in token)
 
 
 def ssh_shutdown_cmd(device: dict) -> list[str]:
-    """Argv za gašenje udaljenog uređaja preko sustavnog ssh. NIKAD shell.
-    Odbija user/host koji bi ssh protumačio kao opciju (vodeći '-') ili sadrži
-    neočekivane znakove (@, razmak, '=') — inače ProxyCommand injection = RCE."""
+    """Argv to shut down a remote device via the system ssh. NEVER a shell.
+    Rejects a user/host that ssh would interpret as an option (leading '-') or
+    that contains unexpected characters (@, space, '=') — otherwise ProxyCommand
+    injection = RCE."""
     user = (device.get("worker_username") or "root").strip()
     host = (device.get("host") or "").strip()
     if not _ssh_safe(user) or not _ssh_safe(host):
@@ -116,9 +118,9 @@ def ssh_shutdown_cmd(device: dict) -> list[str]:
 
 
 def shutdown_plan(spine) -> dict:
-    """Uređaji s caps.shutdown_order (ne-None) uzlazno (radnici prvo), server
-    kao sintetički zadnji korak. Uređaj bez hosta se ne može ugasiti bez agenta
-    (faza 5) -> u 'skipped'."""
+    """Devices with caps.shutdown_order (non-None) in ascending order (workers
+    first), the server as a synthetic last step. A device without a host cannot
+    be shut down without an agent (phase 5) -> goes to 'skipped'."""
     steps, skipped = [], []
     cand = [d for d in devices.list_devices(spine)
             if d.get("caps", {}).get("shutdown_order") is not None]
@@ -130,7 +132,7 @@ def shutdown_plan(spine) -> dict:
         steps.append({"name": d["name"], "host": d["host"],
                       "worker_username": d.get("worker_username"),
                       "order": d["caps"]["shutdown_order"], "method": "ssh"})
-    steps.append({"name": "server", "method": "local"})  # server uvijek zadnji
+    steps.append({"name": "server", "method": "local"})  # server always last
     return {"steps": steps, "skipped": skipped}
 
 
@@ -151,9 +153,10 @@ def _cur_state(status: dict) -> str:
 
 
 def evaluate(spine, cfg, now, reader=read_status, runner=None, notifier=None) -> dict:
-    """Jedan tik stroja stanja. Injektabilno (reader/runner/notifier/now) za
-    testove. `now` = epoch sekunde. Gasi SAMO kad armed I (održivo OB > prag
-    ILI LB), jednom (idempotentno do povratka struje). ok=False NE gasi."""
+    """One tick of the state machine. Injectable (reader/runner/notifier/now)
+    for tests. `now` = epoch seconds. Shuts down ONLY when armed AND (sustained
+    OB > threshold OR LB), once (idempotent until power returns). ok=False does
+    NOT shut down."""
     pc = get_config(spine)
     notifier = notifier or _default_notifier(spine)
     runner = runner or _default_runner
@@ -162,8 +165,9 @@ def evaluate(spine, cfg, now, reader=read_status, runner=None, notifier=None) ->
 
     st = reader(pc["nut_host"], pc["nut_port"], pc["ups_name"])
     if not st.get("ok"):
-        # NE gasi na nepoznato stanje; alarmiraj SAMO na prijelaz (inače bi svaki
-        # 30s tik spamao istu obavijest dok je UPS nedostupan)
+        # do NOT shut down on an unknown state; alarm ONLY on a transition
+        # (otherwise every 30s tick would spam the same notification while the
+        # UPS is unreachable)
         if prev != "unknown":
             notifier("napajanje", f"UPS nedostupan: {st.get('error', '?')}")
         spine.set_override(_STATE, "last_state", "unknown")
@@ -183,7 +187,7 @@ def evaluate(spine, cfg, now, reader=read_status, runner=None, notifier=None) ->
     if cur == "OL":
         since = None
     elif prev in ("OL", "unknown") or since_raw is None:
-        since = float(now)  # tek ušao na bateriju (ili iz nepoznatog stanja)
+        since = float(now)  # just went onto battery (or out of the unknown state)
     else:
         since = float(since_raw)
 
@@ -203,13 +207,13 @@ def evaluate(spine, cfg, now, reader=read_status, runner=None, notifier=None) ->
                 runner(step)
                 spine.audit("napajanje", "power_shutdown", step["name"], step["method"])
                 executed.append(step["name"])
-            except Exception as e:  # jedan pad ne smije zaustaviti ostatak reda
+            except Exception as e:  # one failure must not stop the rest of the sequence
                 spine.audit("napajanje", "power_shutdown_fail", step["name"], str(e))
         spine.set_override(_STATE, "shutdown_done", "1")
 
     spine.set_override(_STATE, "last_state", cur)
     spine.set_override(_STATE, "on_battery_since", "" if since is None else str(since))
     if cur == "OL":
-        spine.set_override(_STATE, "shutdown_done", "0")  # reset za idući nestanak
+        spine.set_override(_STATE, "shutdown_done", "0")  # reset for the next outage
 
     return {"status": cur, "shutdown": bool(executed), "executed": executed}

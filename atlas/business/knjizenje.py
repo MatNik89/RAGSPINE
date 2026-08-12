@@ -1,8 +1,8 @@
-# Knjiženje: prijedlog konta + porezna priznatost, s učenjem iz ispravki.
+# Posting (knjizenje): account suggestion + tax deductibility, with learning from corrections.
 #
-# Prioritet: (1) naučeno iz konto_corrections, (2) regex pravilo iz
-# kategorizacija.RULES, (3) pretraga kontnog plana po ključnim riječima,
-# (4) generički fallback.
+# Priority: (1) learned from konto_corrections, (2) regex rule from
+# kategorizacija.RULES, (3) search of the chart of accounts by keywords,
+# (4) generic fallback.
 import re
 
 from atlas.business import feedback_learn, kategorizacija

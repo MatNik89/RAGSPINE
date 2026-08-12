@@ -1,6 +1,6 @@
-# Karton klijenta (Client-360) — jedan agregatni fetch za GET /clients/{id}/karton.json.
-# Svaka sekcija je best-effort: pad jedne (npr. checklist baci iznimku) ne
-# smije srušiti cijeli karton — degradira na prazan/default rezultat.
+# Client card (Client-360) - a single aggregate fetch for GET /clients/{id}/karton.json.
+# Each section is best-effort: the failure of one (e.g. checklist throws an exception) must
+# not crash the whole card - it degrades to an empty/default result.
 from datetime import date
 
 from atlas.business import checklist, cjenik, notes, obveze

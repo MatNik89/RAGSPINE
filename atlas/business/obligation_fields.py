@@ -1,13 +1,13 @@
-"""User-defined polja obveza. Admin/owner definira "stupce" iz Postavki; core
-stupci su ZAKLJUČANI (ne mogu se definirati kao custom). Vrijednosti žive u JSON
-`meta` na obligations — nema DDL u letu (ni AI ni UI ne mijenjaju strukturu).
+"""User-defined obligation fields. An admin/owner defines "columns" from Settings;
+core columns are LOCKED (cannot be defined as custom). Values live in the JSON
+`meta` on obligations — no DDL on the fly (neither AI nor UI changes the structure).
 """
 import json
 import math
 import re
 from datetime import date
 
-# Rezervirani/core ključevi — ne smiju se definirati kao user-defined polje
+# Reserved/core keys — must not be defined as a user-defined field
 CORE_KEYS = frozenset({
     "id", "obligation_id", "client_id", "client", "kind", "period",
     "sent", "sent_by", "sent_at", "meta",
@@ -56,13 +56,13 @@ def remove_field(spine, key: str, user: str = "?") -> None:
 
 
 def _coerce(type: str, value):
-    """Provjeri + pretvori vrijednost prema tipu polja. Baca ValueError."""
+    """Validate + convert a value according to the field type. Raises ValueError."""
     if type == "number":
         try:
             f = float(value)
         except (TypeError, ValueError):
             raise ValueError("vrijednost mora biti broj") from None
-        if not math.isfinite(f):  # NaN/Infinity bi otrovao red i srušio JSON odgovor
+        if not math.isfinite(f):  # NaN/Infinity would poison the row and crash the JSON response
             raise ValueError("broj mora biti konačan")
         return f
     if type == "bool":

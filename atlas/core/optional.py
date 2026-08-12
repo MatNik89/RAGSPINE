@@ -1,4 +1,4 @@
-"""Optional import + registar nedostajućih featurea."""
+"""Optional import + registry of missing features."""
 import importlib
 _missing: dict[str, str] = {}
 

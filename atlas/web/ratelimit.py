@@ -1,6 +1,6 @@
-"""Sliding-window rate-limit (TIER 2). In-memory po app instanci — dovoljno za
-single-process deploy; ponytail: multi-worker/multi-node upgrade path je isti
-API nad Redis/SQLite backendom."""
+"""Sliding-window rate-limit (TIER 2). In-memory per app instance — enough for a
+single-process deploy; ponytail: the multi-worker/multi-node upgrade path is the
+same API over a Redis/SQLite backend."""
 import threading
 import time
 from collections import deque
@@ -29,12 +29,12 @@ class RateLimiter:
             return True
 
     def _evict(self, now: float) -> None:
-        """Codex nalazi (2 runde): (1) hladni ključevi se sami nikad ne isprazne —
-        sweep SVIH ključeva po najvećem viđenom prozoru; (2) sweep sam nije CAP —
-        sa samim svježim (napadačkim) ključevima ne briše ništa, pa se preko capa
-        dodatno izbacuju najstarije-aktivni ključevi do 90% capa. Legitimni
-        aktivni korisnici su nedavno aktivni pa preživljavaju; 10% histereze
-        amortizira O(n log n) na rijetke pozive."""
+        """Codex findings (2 rounds): (1) cold keys never drain on their own —
+        sweep ALL keys by the largest seen window; (2) the sweep alone is not a CAP —
+        with only fresh (attacker) keys it deletes nothing, so above the cap the
+        oldest-active keys are additionally evicted down to 90% of the cap. Legitimate
+        active users are recently active and thus survive; the 10% hysteresis
+        amortizes the O(n log n) over rare calls."""
         dead = []
         for k, dq in self._events.items():
             while dq and now - dq[0] > self._max_window:

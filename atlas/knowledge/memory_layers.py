@@ -1,7 +1,7 @@
-# Slojevita memorija L0→L3 (TIER 1) — ideja iz Tencent memory-huba, reimplementirano
-# čisto + multi-tenant. L0 sirovi razgovor → L1 atomi (činjenice/preferencije/odluke,
-# LLM izvlači, dedup) → L3 persona (dugoročni profil). Retrieval slojevit + budžetiran
-# (broj stavki + znakovi), da memorija ne preplavi kontekst. Org+korisnik scoped.
+# Layered memory L0->L3 (TIER 1) — idea from the Tencent memory hub, reimplemented
+# cleanly + multi-tenant. L0 raw conversation -> L1 atoms (facts/preferences/decisions,
+# LLM extracts, dedup) -> L3 persona (long-term profile). Retrieval is layered + budgeted
+# (item count + characters), so memory does not flood the context. Org+user scoped.
 
 import json
 import re
@@ -61,7 +61,7 @@ def _is_dup(content: str, existing: list[dict], thresh: float = 0.6) -> bool:
 
 
 def distill(spine, org_id: int, user_id: int, llm) -> dict:
-    """L0 → L1: izvuci atome iz nedestiliranih replika, dedup, spremi; označi L0."""
+    """L0 -> L1: extract atoms from undistilled turns, dedup, store; mark L0."""
     if llm is None:
         return {"atoms": 0, "skipped": True}
     rows = spine.read().execute(
@@ -94,7 +94,7 @@ def distill(spine, org_id: int, user_id: int, llm) -> dict:
 
 
 def build_persona(spine, org_id: int, user_id: int, llm) -> str | None:
-    """L1 → L3: sažmi atome u dugoročni profil (persona). Vrati tekst ili None."""
+    """L1 -> L3: condense atoms into a long-term profile (persona). Return text or None."""
     if llm is None:
         return None
     atoms = _existing_atoms(spine, org_id, user_id)
@@ -116,24 +116,24 @@ def build_persona(spine, org_id: int, user_id: int, llm) -> str | None:
 
 def recall(spine, org_id: int, user_id: int, query: str,
            max_items: int = 6, max_chars: int = 1200) -> dict:
-    """Slojevit dohvat: L3 persona (brzi bootstrap) + top L1 atomi za upit, budžetirano.
-    Recall-tracking (MateClaw): atomi koji se STVARNO dohvate dobiju recall_count +
-    -> na izjednačenom preklapanju rangiraju se više ('zaslužni' izbiju gore).
-    Petlja koja mjeri što se koristi i promovira korisno."""
+    """Layered retrieval: L3 persona (fast bootstrap) + top L1 atoms for the query, budgeted.
+    Recall-tracking (MateClaw): atoms that are ACTUALLY retrieved get recall_count +
+    -> on tied overlap they rank higher ('deserving' ones rise to the top).
+    A loop that measures what gets used and promotes what is useful."""
     p = spine.read().execute(
         "SELECT persona FROM mem_l3 WHERE org_id=? AND user_id=?", (org_id, user_id)).fetchone()
     persona = (p["persona"] if p else "") or ""
     qt = _tokens(query)
     scored = []
-    # recency (Paperclip decay-tier): atomi dohvaćeni/nastali nedavno rangiraju više na
-    # izjednačenom preklapanju; stari tonu ali se NE brišu (reheat na idući recall).
-    # sidro = zadnji recall ili, ako ga nema, vrijeme nastanka (svjež atom nije hladan).
+    # recency (Paperclip decay-tier): atoms retrieved/created recently rank higher on
+    # tied overlap; old ones sink but are NOT deleted (reheat on the next recall).
+    # anchor = last recall or, if absent, creation time (a fresh atom is not cold).
     for a in spine.read().execute(
             "SELECT id, content, recall_count, "
             "CAST(julianday('now') - julianday(COALESCE(last_recalled_at, at)) AS REAL) AS age_days "
             "FROM mem_l1 WHERE org_id=? AND user_id=?", (org_id, user_id)).fetchall():
         overlap = len(qt & _tokens(a["content"]))
-        if overlap:  # rang: preklapanje > recency-tier > recall_count (zaslužni/svježi gore)
+        if overlap:  # rank: overlap > recency-tier > recall_count (deserving/fresh on top)
             age = a["age_days"] if a["age_days"] is not None else 999
             recency = 2 if age <= 7 else (1 if age <= 30 else 0)  # hot/warm/cold
             scored.append((overlap, recency, a["recall_count"] or 0, a["id"], a["content"]))
@@ -143,7 +143,7 @@ def recall(spine, org_id: int, user_id: int, query: str,
         if len(atoms) >= max_items or used + len(content) > max_chars:
             break
         atoms.append(content); used += len(content); hit_ids.append(aid)
-    if hit_ids:  # promoviraj STVARNO dohvaćene atome
+    if hit_ids:  # promote the atoms that were ACTUALLY retrieved
         ph = ",".join("?" * len(hit_ids))
         with spine.write() as c:
             c.execute(f"UPDATE mem_l1 SET recall_count=COALESCE(recall_count,0)+1, "

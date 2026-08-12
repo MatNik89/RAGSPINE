@@ -1,4 +1,4 @@
-# Agregatni brojčani pregled za početnu stranicu.
+# Aggregate numeric overview for the home page.
 
 from datetime import date, timedelta
 
@@ -10,8 +10,8 @@ def _today() -> date:
 
 
 def _urgency(due_str: str, today: date) -> str:
-    """kasni (past due) -> bad; uskoro (<=7 dana) -> warn; else -> ok.
-    Matches business/karton.py._urgency + .sdd/ui-DESIGN.md (uskoro(<=7d))."""
+    """past due -> bad; soon (<=7 days) -> warn; else -> ok.
+    Matches business/karton.py._urgency + .sdd/ui-DESIGN.md (soon(<=7d))."""
     delta = (date.fromisoformat(due_str) - today).days
     if delta < 0:
         return "bad"
@@ -82,7 +82,7 @@ def _month_events(spine, today: date, visible=None) -> dict:
         (start, end),
     ).fetchall():
         if visible is not None and r["client_id"] not in visible:
-            continue  # skriveni klijent ne curi u kalendar
+            continue  # a hidden client does not leak into the calendar
         _add(r["expires"], "istek", r["label"])
     return {"year": today.year, "month": today.month, "today": today.day, "events": events}
 
@@ -140,15 +140,15 @@ def stats(spine, visible=None) -> dict:
         "SELECT COUNT(*) AS n FROM clients WHERE active=1"
     ).fetchone()["n"]
     deadlines_this_week = len(kalendar.upcoming(spine, days=7))
-    # ponytail: interactions nema client_id (nema atribucije klijentu), pa
-    # "top klijenti" računamo po broju bilješki — jedini dostupan signal.
-    # Upgrade path: dodati clients.id atribuciju na interactions kad zatreba.
+    # ponytail: interactions has no client_id (no client attribution), so we
+    # compute "top clients" by note count - the only available signal.
+    # Upgrade path: add clients.id attribution to interactions when needed.
     top_all = spine.read().execute(
         """SELECT c.id AS id, c.name AS name, COUNT(*) AS cnt FROM notes n
            JOIN clients c ON c.id = n.client_id
            GROUP BY c.id ORDER BY cnt DESC, c.name"""
     ).fetchall()
-    # restringiran radnik ne vidi imena skrivenih klijenata (Codex nalaz)
+    # a restricted worker does not see the names of hidden clients (Codex finding)
     top_rows = [r for r in top_all if visible is None or r["id"] in visible][:5]
     unseen_notifications = spine.read().execute(
         "SELECT COUNT(*) AS n FROM notifications WHERE seen=0"
@@ -167,7 +167,7 @@ def stats(spine, visible=None) -> dict:
 
 
 def _vis(rows: list, visible) -> list:
-    """Zadrži samo retke vidljivih klijenata (client_id IS NULL = uredski, ostaje)."""
+    """Keep only rows of visible clients (client_id IS NULL = office-level, stays)."""
     if visible is None:
         return rows
     return [r for r in rows if r.get("client_id") is None or r.get("client_id") in visible]
@@ -175,8 +175,8 @@ def _vis(rows: list, visible) -> list:
 
 def home_data(spine, cap: int = 8, visible=None) -> dict:
     """Aggregated payload for the dashboard screen (GET /dashboard.json).
-    `visible` = set vidljivih client_id ili None (sve) — restringiran radnik ne
-    vidi obveze/istek/fali-dokumente tuđih klijenata."""
+    `visible` = set of visible client_id or None (all) - a restricted worker does
+    not see obligations/expiry/missing-documents of other clients."""
     from atlas.business import doc_completeness
     today = _today()
     st = stats(spine, visible=visible)
@@ -198,8 +198,8 @@ def home_data(spine, cap: int = 8, visible=None) -> dict:
     expiring_rows = _vis([dict(r) for r in expiry.expiring(spine, days=30)], visible)
     expiring = [_with_state(r, "expires", today) for r in expiring_rows][:cap]
 
-    # over-fetch pa filtriraj po vidljivosti prije capa — inače skriveni redovi
-    # izguraju vidljive ispod LIMIT-a, ili procure (Codex nalaz)
+    # over-fetch then filter by visibility before the cap - otherwise hidden rows
+    # push visible ones below the LIMIT, or leak (Codex finding)
     notif_rows = spine.read().execute(
         """SELECT id, kind, body, client_id, seen, at FROM notifications
            WHERE seen=0 ORDER BY at DESC LIMIT ?""",

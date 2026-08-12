@@ -1,6 +1,7 @@
-"""Prečac na radnoj površini (E2E: korisnik zatvorio app-prozor i nije se
-znao vratiti). Windows .lnk (app-prozor) s .url fallbackom, Linux .desktop,
-macOS .webloc. Subprocess injektabilan — testovi bez pravih procesa."""
+"""Desktop shortcut (E2E: user closed the app window and could not find
+their way back). Windows .lnk (app window) with a .url fallback, Linux
+.desktop, macOS .webloc. Subprocess is injectable — tests run without real
+processes."""
 import os
 import platform
 import plistlib
@@ -16,7 +17,7 @@ _BROWSERS = [
 
 
 def _browser_exe() -> str | None:
-    """Puni put do Edge/Chrome za --app prozor (nisu na PATH-u)."""
+    """Full path to Edge/Chrome for the --app window (they are not on PATH)."""
     for p in _BROWSERS:
         if os.path.isfile(p):
             return p
@@ -24,9 +25,9 @@ def _browser_exe() -> str | None:
 
 
 def _desktop_dir() -> str | None:
-    """Radna površina: XDG_DESKTOP_DIR → USERPROFILE\\Desktop → ~/Desktop.
-    None kad ne postoji (OneDrive preusmjerenja i sl. — bolje preskočiti
-    nego pogađati)."""
+    """Desktop: XDG_DESKTOP_DIR -> USERPROFILE\\Desktop -> ~/Desktop.
+    None when it does not exist (OneDrive redirections and the like — better
+    to skip than to guess)."""
     xdg = os.environ.get("XDG_DESKTOP_DIR")
     if xdg and os.path.isdir(xdg):
         return xdg
@@ -45,10 +46,10 @@ def _write_url_file(path: str, url: str) -> None:
 
 def create_desktop_shortcut(url: str, *, name: str = "ATLAS", out=print,
                             run=None, system=platform.system) -> bool:
-    """Napravi prečac na radnoj površini. True = napravljen (bilo koja
-    varijanta), False = nema radne površine ili upis pao."""
+    """Create a desktop shortcut. True = created (any variant), False = no
+    desktop or the write failed."""
     if run is None:
-        run = lambda cmd: subprocess.call(  # pragma: no cover - tanki omot
+        run = lambda cmd: subprocess.call(  # pragma: no cover - thin wrapper
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     desk = _desktop_dir()
     if not desk:
@@ -78,9 +79,9 @@ def create_desktop_shortcut(url: str, *, name: str = "ATLAS", out=print,
 
 
 def _windows_shortcut(desk: str, url: str, name: str, out, run) -> bool:
-    """`.lnk` s app-prozorom (WScript.Shell preko PowerShella); browser
-    nenađen ili PS pao → `.url` (zadani preglednik). Start Menu kopija uz
-    .lnk — korisnik ga nađe i preko Start pretrage."""
+    """`.lnk` with an app window (WScript.Shell via PowerShell); browser not
+    found or PS failed -> `.url` (default browser). A Start Menu copy alongside
+    the .lnk — the user can also find it through Start search."""
     browser = _browser_exe()
     if browser:
         lnk = os.path.join(desk, f"{name}.lnk")

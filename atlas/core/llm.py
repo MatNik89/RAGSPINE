@@ -13,15 +13,15 @@ class LLMUnavailable(Exception):
 
 
 class LLMError(Exception):
-    status: int | None = None          # HTTP status (429/401/…) ako je poznat
-    retry_after_ms: int | None = None  # provider-navedeni prozor (Retry-After)
+    status: int | None = None          # HTTP status (429/401/...) if known
+    retry_after_ms: int | None = None  # provider-stated window (Retry-After)
 
 
-_MAX_RETRY_AFTER_MS = 2 * 60 * 60 * 1000  # 2h gornja granica (anti apsurd)
+_MAX_RETRY_AFTER_MS = 2 * 60 * 60 * 1000  # 2h upper bound (anti-absurd)
 
 
 def _parse_retry_after(val: str | None) -> int | None:
-    """Retry-After: sekunde ili HTTP-datum -> ms (clamp 1s..2h)."""
+    """Retry-After: seconds or an HTTP-date -> ms (clamp 1s..2h)."""
     if not val:
         return None
     val = val.strip()
@@ -41,11 +41,12 @@ def _parse_retry_after(val: str | None) -> int | None:
 
 
 class ProviderHealthTracker:
-    """Parkiranje palog providera na cooldown pa ga fallback ne proba svaki upit
-    (moj lanac je inače slijepo retry-ao mrtvog). Uzastopne greške >= prag ->
-    park cooldown_ms; provider-naveden Retry-After parkira ODMAH (ne skraćuje
-    aktivni cooldown). Lijeni istek (bez threada). Process-lokalno; `clock`
-    injektabilan (ms) za testove. MateClaw ProviderHealthTracker obrazac."""
+    """Parks a failed provider on a cooldown so the fallback does not try it on
+    every request (the chain otherwise blindly retried a dead one). Consecutive
+    failures >= threshold -> park for cooldown_ms; a provider-stated Retry-After
+    parks IMMEDIATELY (never shortens an active cooldown). Lazy expiry (no
+    thread). Process-local; `clock` is injectable (ms) for tests. MateClaw
+    ProviderHealthTracker pattern."""
     def __init__(self, threshold: int = 3, cooldown_ms: int = 300_000, clock=None):
         import threading
         self.threshold = max(1, threshold)
@@ -53,14 +54,14 @@ class ProviderHealthTracker:
         self._clock = clock or (lambda: time.monotonic() * 1000)
         self._fails: dict[str, int] = {}
         self._until: dict[str, float] = {}
-        self._lock = threading.Lock()  # FastAPI rute vrte u nitima -> zaključaj mape (Codex)
+        self._lock = threading.Lock()  # FastAPI routes run in threads -> lock the maps (Codex)
 
     def is_in_cooldown(self, key: str) -> bool:
         with self._lock:
             until = self._until.get(key)
             if until is None:
                 return False
-            if self._clock() >= until:  # istekao -> očisti, sljedeći poziv proba
+            if self._clock() >= until:  # expired -> clear, the next call tries
                 self._until.pop(key, None)
                 self._fails.pop(key, None)
                 return False
@@ -68,13 +69,13 @@ class ProviderHealthTracker:
 
     def record_failure(self, key: str, retry_after_ms: int | None = None) -> None:
         with self._lock:
-            if retry_after_ms:  # provider rekao kad -> park odmah, nikad ne skraćuj
+            if retry_after_ms:  # provider said when -> park now, never shorten
                 self._until[key] = max(self._until.get(key, 0),
                                        self._clock() + min(retry_after_ms, _MAX_RETRY_AFTER_MS))
                 return
             n = self._fails.get(key, 0) + 1
             self._fails[key] = n
-            if n >= self.threshold:  # max() -> ne skrati dulji aktivni cooldown (Codex)
+            if n >= self.threshold:  # max() -> do not shorten a longer active cooldown (Codex)
                 self._until[key] = max(self._until.get(key, 0), self._clock() + self.cooldown_ms)
 
     def record_success(self, key: str) -> None:
@@ -83,7 +84,7 @@ class ProviderHealthTracker:
             self._until.pop(key, None)
 
 
-_health = ProviderHealthTracker()  # dijeljeni singleton (park preživi turnove)
+_health = ProviderHealthTracker()  # shared singleton (park survives turns)
 
 
 @dataclass
@@ -156,9 +157,9 @@ def _default_transport(url: str, headers: dict, body: dict) -> dict:
 
 
 def _provider_key(cfg) -> str:
-    """Stabilan identitet providera za health-tracker: provider+endpoint+path+model
-    + KRATKI hash ključa (dva profila s razl. ključem/računom ne dijele cooldown;
-    ne stavljamo sirovi ključ u mapu; Codex)."""
+    """Stable provider identity for the health-tracker: provider+endpoint+path+model
+    + a SHORT hash of the key (two profiles with different key/account do not share
+    a cooldown; we never put the raw key in the map; Codex)."""
     if cfg is None:
         return "none"
     prov = getattr(cfg, "llm_provider", "") or ""
@@ -171,9 +172,10 @@ def _provider_key(cfg) -> str:
 
 
 def _counts_health(e) -> bool:
-    """Broji li greška prema cooldownu. Request-specifičan 4xx (loš upit/predug/
-    nepoznat model) NIJE provider-kvar -> ne parkiraj zdravog providera (Codex).
-    Timeout/mreža (OSError, LLMUnavailable) i 429/5xx/auth broje."""
+    """Whether an error counts toward the cooldown. A request-specific 4xx (bad
+    request/too long/unknown model) is NOT a provider failure -> do not park a
+    healthy provider (Codex). Timeout/network (OSError, LLMUnavailable) and
+    429/5xx/auth do count."""
     st = getattr(e, "status", None)
     if isinstance(e, LLMError) and st in (400, 404, 413, 422):
         return False
@@ -181,10 +183,10 @@ def _counts_health(e) -> bool:
 
 
 class FallbackLLM:
-    """Lanac providera: pokušava redom, na LLMUnavailable/LLMError prelazi na
-    sljedeći; digne zadnju grešku ako svi padnu. Sučelje isto kao LLMClient
-    (supports_tools/complete) pa ga pozivatelji ne razlikuju. `last_used` pamti
-    indeks providera koji je uspio (za dijagnostiku)."""
+    """Provider chain: tries in order, on LLMUnavailable/LLMError moves to the
+    next; raises the last error if all fail. Same interface as LLMClient
+    (supports_tools/complete) so callers cannot tell them apart. `last_used`
+    remembers the index of the provider that succeeded (for diagnostics)."""
     def __init__(self, cfgs: list, transport=None, health=None):
         self._clients = [LLMClient(c, transport) for c in (cfgs or [])]
         self._keys = [_provider_key(c) for c in (cfgs or [])]
@@ -199,7 +201,7 @@ class FallbackLLM:
         res = self._clients[i].complete(**kwargs)
         self._health.record_success(key)
         self.last_used = i
-        if i > 0:  # vidljivost: upit otišao na ZAMJENSKOG providera (data-residency)
+        if i > 0:  # visibility: the request went to a FALLBACK provider (data-residency)
             import logging
             logging.getLogger(__name__).warning(
                 "LLM fallback: primarni pao/na cooldownu, poslužio provider #%d", i)
@@ -213,14 +215,14 @@ class FallbackLLM:
         tried = False
         for i in range(len(self._clients)):
             if self._health.is_in_cooldown(self._keys[i]):
-                continue  # parkiran provider -> preskoči (ne troši uzalud)
+                continue  # parked provider -> skip (do not waste effort)
             tried = True
             try:
                 return self._try(i, kwargs)
             except (LLMUnavailable, LLMError, OSError) as e:
                 (_counts_health(e) and self._health.record_failure(self._keys[i], getattr(e, "retry_after_ms", None)))
                 last_err = e
-        # svi parkirani -> zadnja šansa: probaj ih ignorirajući cooldown (ne visi bez LLM-a)
+        # all parked -> last chance: try them ignoring the cooldown (do not hang without an LLM)
         if not tried:
             for i in range(len(self._clients)):
                 try:
@@ -239,8 +241,9 @@ class LLMClient:
     def _resolve(self):
         """Returns (provider, base_url, key, is_oauth)."""
         cfg = self.cfg
-        # Eksplicitni odabir (Postavke → Model) ima prednost pred URL-heuristikom:
-        # custom proxy bez "anthropic" u imenu inače bi krivo išao OpenAI formatom.
+        # An explicit choice (Settings -> Model) takes precedence over the URL
+        # heuristic: a custom proxy without "anthropic" in its name would
+        # otherwise wrongly go via the OpenAI format.
         prov = getattr(cfg, "llm_provider", "")
         if prov == "ollama":
             return "ollama", cfg.ollama_url, None, False
@@ -261,9 +264,9 @@ class LLMClient:
         raise LLMUnavailable("no LLM provider configured: no base_url/key, Ollama unreachable, no OAuth token")
 
     def supports_tools(self) -> bool:
-        # ponytail: ollama ovisi o modelu — agent hvata grešku/degradira, pa
-        # umjesto probe-poziva ovdje samo javljamo "pokušaj" (True). Upgrade
-        # path: cache-irati stvarni ishod prvog pokušaja po modelu.
+        # ponytail: ollama depends on the model — the agent catches the error/
+        # degrades, so instead of a probe call here we just report "try" (True).
+        # Upgrade path: cache the actual outcome of the first attempt per model.
         return True
 
     def complete(self, messages: list[dict], system: str | None = None,
@@ -301,14 +304,14 @@ class LLMClient:
                               for b in blocks if b.get("type") == "tool_use"]
                 text = text_block["text"] if text_block is not None else ""
                 if text_block is None and not tool_calls:
-                    text = blocks[0]["text"]  # ni text ni tool_use: čuvaj staro (moguće) rušenje
+                    text = blocks[0]["text"]  # neither text nor tool_use: keep the old (possible) crash
             except (KeyError, IndexError, TypeError):
                 raise LLMError(f"malformed provider response: {resp}") from None
             return LLMResult(text=text, model=resp.get("model", model or ""),
                               usage=resp.get("usage", {}), tool_calls=tool_calls)
 
-        # B10: put iza base_url dolazi iz kataloga (business/model_settings.py PROVIDER_CATALOG),
-        # koji apply() upiše u cfg.llm_path po odabranom provideru; prazno/zadano = staro ponašanje.
+        # B10: the path after base_url comes from the catalog (business/model_settings.py PROVIDER_CATALOG),
+        # which apply() writes into cfg.llm_path per selected provider; empty/default = old behavior.
         path = getattr(cfg, "llm_path", "") or "/v1/chat/completions"
         url = f"{base.rstrip('/')}{path}"
         headers = {"content-type": "application/json"}

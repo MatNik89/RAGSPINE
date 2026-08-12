@@ -82,9 +82,9 @@ RULES: list[tuple[re.Pattern, str]] = [
     _rule(r"kontiranje", "knjizenje"),
     _rule(r"temeljnic", "knjizenje"),
 
-    # --- arhitektura: dogovor o strukturi mapa — SAMO eksplicitni intenti;
-    # široki substringovi ("struktura mape kontnog plana", "dogovor uredskog
-    # najma", "koje su mape po klijentu oporezive") ne smiju oteti chat ---
+    # --- arhitektura: agreement on folder structure — ONLY explicit intents;
+    # broad substrings ("struktura mape kontnog plana", "dogovor uredskog
+    # najma", "koje su mape po klijentu oporezive") must not hijack chat ---
     _rule(r"dogovor\s+map[ae]\s+po\s+klijentu", "arhitektura"),
     _rule(r"dogovor\s+uredsk\w*\s+map", "arhitektura"),
     _rule(r"arhitektur\w*\s+map", "arhitektura"),
@@ -96,7 +96,7 @@ RULES: list[tuple[re.Pattern, str]] = [
     _rule(r"odnos (klijenta|dobavljaca)", "graph"),
     _rule(r"mreza (klijenata|veza)", "graph"),
 
-    # --- flota: pokreni program na radnikovoj stanici ---
+    # --- flota: launch a program on the worker's station ---
     _rule(r"kod\s+\S+\s+otvori\s+\S", "flota"),
 
     # --- no_retrieval: small talk, no lookup needed ---

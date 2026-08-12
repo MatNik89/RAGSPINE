@@ -118,20 +118,20 @@ def _norm_sha(text: str) -> str:
     return hashlib.sha256(re.sub(r"\s+", " ", text.strip()).encode("utf-8")).hexdigest()
 
 
-# Codex nalaz: prefiks je OBAVEZAN — gola brojka ("2024", "1000") ili "12/2024"
-# je legitiman sadržaj (godina, iznos, obračunski period), ne paginacija.
+# Codex finding: the prefix is MANDATORY — a bare number ("2024", "1000") or "12/2024"
+# is legitimate content (year, amount, accounting period), not pagination.
 _PAGENO_RE = re.compile(r"^\s*(?:str(?:anica)?\.?|page)\s*\d{1,4}\s*(?:/|od|of)?\s*\d{0,4}\s*$",
                         re.IGNORECASE)
 _HAS_LETTER_RE = re.compile(r"[^\W\d_]")
 
 
 def _boiler_key(line: str) -> str | None:
-    """Ključ za repeat-collapse SAMO za linije koje liče na header/footer:
-    15-80 znakova, sadrže slova i NEMAJU znamenke. Kratke oznake ('Članak'),
-    numeričke tablične linije ('0,00 0,00') i fakturne stavke s iznosima
-    ('Usluga savjetovanja 100,00') se NE diraju — Codex nalazi 2 runde:
-    kolaps im mijenja značenje. Header s brojem (adresa, OIB) time preživi
-    u indeksu — svjesna cijena, bolje šum nego izgubljen sadržaj."""
+    """Key for repeat-collapse ONLY for lines that look like a header/footer:
+    15-80 characters, contain letters and have NO digits. Short labels ('Clanak'),
+    numeric table lines ('0,00 0,00') and invoice items with amounts
+    ('Usluga savjetovanja 100,00') are NOT touched — Codex findings over 2 rounds:
+    collapsing them changes their meaning. A header with a number (address, OIB) thus
+    survives in the index — a deliberate cost, better noise than lost content."""
     key = " ".join(line.split()).lower()
     if 15 <= len(key) < 80 and _HAS_LETTER_RE.search(key) and not any(c.isdigit() for c in key):
         return key
@@ -139,9 +139,9 @@ def _boiler_key(line: str) -> str | None:
 
 
 def clean_noise(text: str) -> str:
-    """Čišćenje šuma prije indeksa (TIER 2): eksplicitne paginacijske linije
-    ('Stranica 2/3') van; header/footer linija koja se ponavlja ≥3× ostaje
-    samo prvi put."""
+    """Noise cleanup before indexing (TIER 2): explicit pagination lines
+    ('Stranica 2/3') removed; a header/footer line that repeats >=3 times is kept
+    only the first time."""
     lines = text.splitlines()
     freq: dict[str, int] = {}
     for ln in lines:
@@ -179,7 +179,7 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
         return None
     dtype = doc_type or detect_doc_type(text, path or title)
     if org_id is None:
-        org_id = tenancy.default_org_id(spine)  # svaki insert je uvijek stampan
+        org_id = tenancy.default_org_id(spine)  # every insert is always stamped
     with spine.write() as c:
         try:
             doc_id = c.execute(
@@ -190,7 +190,7 @@ def ingest_text(spine, text: str, title: str, doc_type: str | None = None,
             # lost a dedup race: another writer inserted the same sha256 first
             return None
         ids = []
-        seen_chunks: set[str] = set()  # dedup-ljestvica, zadnja prečka: identičan chunk unutar dokumenta
+        seen_chunks: set[str] = set()  # dedup ladder, last rung: identical chunk within the document
         seq = 0
         for chunk in chunk_text(clean_noise(text)):
             csha = _norm_sha(chunk)

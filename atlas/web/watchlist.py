@@ -9,7 +9,7 @@ from atlas.core.net import safe_fetch
 from atlas.docs.ingest import ingest_text
 from atlas.web.learn import HR_GRADOVI as CITIES
 
-_PRIREZ_MAX_PCT = 30.0  # HR povijesni max ~18% (Zagreb); glava iznad = bogus/napad
+_PRIREZ_MAX_PCT = 30.0  # HR historical max ~18% (Zagreb); anything above = bogus/attack
 
 INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "ugostiteljstvo": ["ugostitelj", "restoran", "kafic", "hrana", "pice", "turisticka pristojba"],
@@ -22,20 +22,20 @@ INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "proizvodnja": ["proizvodnja", "industrija", "tvornica", "pogon", "prerada"],
 }
 
-# Narodne novine ne nudi klasični RSS feed — objavljuje kroz HTML/RDF/JSON-LD
-# (provjereno 2026-08-01: nema rss.aspx endpointa). Zato nema default rss izvora;
-# službeni/međunarodni/oglasni dio prate se kao 'page' hash-diff izvori (vidi
-# ops/seeds.py NN_LISTINGS). Industry-keyword RSS matching (check_rss) ostaje
-# dostupan za bilo koji pravi RSS koji radnik doda kroz /watchlist/sources kind='rss'.
-# ponytail: ako NN jednom uvede RSS, dodaj ga ovdje i seeds.watch_defaults ga pokupi.
+# Narodne novine does not offer a classic RSS feed -- it publishes through HTML/RDF/JSON-LD
+# (verified 2026-08-01: there is no rss.aspx endpoint). Hence there are no default rss sources;
+# the official/international/announcements sections are tracked as 'page' hash-diff sources (see
+# ops/seeds.py NN_LISTINGS). Industry-keyword RSS matching (check_rss) remains
+# available for any real RSS that a worker adds through /watchlist/sources kind='rss'.
+# ponytail: if NN ever introduces RSS, add it here and seeds.watch_defaults will pick it up.
 DEFAULT_RSS: list[tuple[str, str]] = []
 
 _DIACRITICS = str.maketrans("čćžšđ", "cczsd")
 
 
 def _normalize(text: str) -> str:
-    # NFKD + strip combining marks: dekomponirani Unicode ("c" + U+030C) mora
-    # matchati isto kao prekomponirani "č"
+    # NFKD + strip combining marks: decomposed Unicode ("c" + U+030C) must
+    # match the same as the precomposed "c-caron"
     import unicodedata
     text = "".join(ch for ch in unicodedata.normalize("NFKD", text)
                    if not unicodedata.combining(ch))
@@ -169,8 +169,8 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
 
     diff = law_diff(state["last_content"] or "", text)
     for city, rate in extract_rates(text).items():
-        # zdravorazumska granica: prirez u HR je 0–~18%; zlonamjeran/MITM-an izvor
-        # ne smije live postaviti npr. 999% u kalkulator. Izvan granica → preskoči.
+        # common-sense bound: the surtax in HR is 0-~18%; a malicious/MITM'd source
+        # must not live-set e.g. 999% into the calculator. Out of bounds -> skip.
         try:
             if not 0 <= float(rate) <= _PRIREZ_MAX_PCT:
                 continue
@@ -200,8 +200,8 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
             except Exception:
                 pass
 
-    # G: pogodak vlastite ključne riječi ureda u PROMJENI (diff, ne cijelom
-    # tekstu) -> zasebna, glasnija obavijest
+    # G: a hit on the office's own keyword in the CHANGE (diff, not the whole
+    # text) -> a separate, louder notification
     hits = match_keywords(spine, " ".join(diff) if diff else text)
 
     with spine.write() as c:
@@ -347,7 +347,7 @@ def mark_stale(spine) -> int:
         return cur.rowcount
 
 
-# --- G: vlastite ključne riječi ureda (data-driven, ne hardkod) ---------------
+# --- G: the office's own keywords (data-driven, not hardcoded) ----------------
 
 def get_keywords(spine) -> list[str]:
     raw = spine.get_override("watchlist", "keywords", "")
@@ -383,15 +383,15 @@ def match_keywords(spine, text: str) -> list[str]:
     return [w for w in get_keywords(spine) if _normalize(w) in t]
 
 
-# --- G: Excel izvoz praćenja (openpyxl je optional [full] ovisnost) -----------
+# --- G: Excel export of the watchlist (openpyxl is an optional [full] dependency) ---
 
 _FORMULA_LEAD = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
 def _cell(v):
-    """Anti formula-injection: vrijednost s praćenih stranica koja počinje
-    s = + - @ (ili vodećim TAB/CR/LF — OWASP CSV-injection) bi mogla postati
-    IZVRŠNA formula — prefiks ' je neutralizira."""
+    """Anti formula-injection: a value from watched pages that starts
+    with = + - @ (or a leading TAB/CR/LF -- OWASP CSV-injection) could become
+    an EXECUTABLE formula -- the ' prefix neutralizes it."""
     if isinstance(v, str) and v[:1] in _FORMULA_LEAD:
         return "'" + v
     return v

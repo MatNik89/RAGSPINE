@@ -40,7 +40,7 @@ def test_run_due_fires_on_matching_day_and_dedupes(spine, cfg, monkeypatch):
     org = _org(spine)
     st.create_task(spine, org, "PDV", "kampanja_obveza", {"kind": "PDV"}, 20, 8)
     calls = []
-    monkeypatch.setattr("atlas.web.messaging.send_to_filter",
+    monkeypatch.setattr("atlas.business.messaging.send_to_filter",
                         lambda *a, **k: calls.append(1) or {"audience": 0, "results": {}})
     # prije sata -> ne fira
     assert st.run_due(spine, cfg, now=datetime(2026, 8, 20, 7, 0)) == []
@@ -54,7 +54,7 @@ def test_run_due_fires_on_matching_day_and_dedupes(spine, cfg, monkeypatch):
 
 def test_run_due_skips_wrong_day(spine, cfg, monkeypatch):
     st.create_task(spine, _org(spine), "PDV", "kampanja_obveza", {"kind": "PDV"}, 20, 8)
-    monkeypatch.setattr("atlas.web.messaging.send_to_filter", lambda *a, **k: {})
+    monkeypatch.setattr("atlas.business.messaging.send_to_filter", lambda *a, **k: {})
     assert st.run_due(spine, cfg, now=datetime(2026, 8, 21, 9, 0)) == []
 
 
@@ -63,7 +63,7 @@ def test_run_due_error_deadletters_and_advances(spine, cfg, monkeypatch):
 
     def boom(*a, **k):
         raise RuntimeError("puklo")
-    monkeypatch.setattr("atlas.web.messaging.send_to_filter", boom)
+    monkeypatch.setattr("atlas.business.messaging.send_to_filter", boom)
     fired = st.run_due(spine, cfg, now=datetime(2026, 8, 15, 9, 0))
     assert fired[0]["status"] == "error"
     # obavijest zapisana, last_run postavljen (bez retry-buke istog dana)
@@ -104,7 +104,7 @@ def test_endpoints_owner_only(spine, cfg):
 def test_day_clamps_to_month_end(spine, cfg, monkeypatch):
     # zadatak na 31. mora firati zadnji dan veljače (28.), ne "nikad"
     st.create_task(spine, _org(spine), "kraj mj", "kampanja_obveza", {"kind": "PDV"}, 31, 8)
-    monkeypatch.setattr("atlas.web.messaging.send_to_filter", lambda *a, **k: {})
+    monkeypatch.setattr("atlas.business.messaging.send_to_filter", lambda *a, **k: {})
     assert st.run_due(spine, cfg, now=datetime(2026, 2, 28, 9, 0))  # 28. veljače = zadnji
     # a ne fira 27.
     st.set_enabled(spine, st.list_tasks(spine, _org(spine))[0]["id"], _org(spine), True)
@@ -113,7 +113,7 @@ def test_day_clamps_to_month_end(spine, cfg, monkeypatch):
 def test_atomic_claim_prevents_double_fire(spine, cfg, monkeypatch):
     st.create_task(spine, _org(spine), "PDV", "kampanja_obveza", {"kind": "PDV"}, None, 8)
     calls = []
-    monkeypatch.setattr("atlas.web.messaging.send_to_filter",
+    monkeypatch.setattr("atlas.business.messaging.send_to_filter",
                         lambda *a, **k: calls.append(1) or {})
     now = datetime(2026, 8, 15, 9, 0)
     st.run_due(spine, cfg, now=now)

@@ -1,16 +1,16 @@
-"""Tablica modela za stranicu 3 wizarda: disk procjena iz kvantizacije,
-rangirane namjene po obitelji modela, poravnanje stupaca. Čisti modul —
-bez I/O-a, potpuno unit-testabilan."""
+"""Model table for wizard page 3: disk estimate from quantization,
+ranked purposes per model family, column alignment. Pure module —
+no I/O, fully unit-testable."""
 
-# bita po težini za GGUF kvantizacije (K-kvantovi imaju mješovite blokove pa
-# su efektivno malo iznad nominale); ručno kurirano, gruba procjena je cilj
+# bits per weight for GGUF quantizations (K-quants have mixed blocks so
+# they are effectively slightly above nominal); hand-curated, a rough estimate is the goal
 _QUANT_BITS = [
     ("q2", 2.6), ("q3", 3.4), ("q4", 4.6), ("q5", 5.6), ("q6", 6.6),
     ("q8", 8.5), ("f16", 16.0), ("fp16", 16.0), ("bf16", 16.0), ("f32", 32.0),
 ]
 
-# Rangirane namjene po obitelji (1. najjača). Ključ = substring ollama imena;
-# redoslijed bitan (coder prije qwen). llmfit use_case je fallback.
+# Ranked purposes per family (1st = strongest). Key = substring of ollama name;
+# order matters (coder before qwen). llmfit use_case is the fallback.
 _NAMJENE = [
     ("deepseek-r1", ["reasoning", "kod", "chat"]),
     ("qwen2.5-coder", ["kod", "chat"]),
@@ -31,7 +31,7 @@ _PILL = {"Good": "🟢", "Marginal": "🟡"}
 
 
 def _params_b(params: str) -> float:
-    """'7B' / '3.8B' / '135M' → milijarde parametara; 0.0 = nepoznato."""
+    """'7B' / '3.8B' / '135M' -> billions of parameters; 0.0 = unknown."""
     s = str(params).strip().upper()
     try:
         if s.endswith("M"):
@@ -42,9 +42,9 @@ def _params_b(params: str) -> float:
 
 
 def disk_gb(params: str, quant: str) -> float:
-    """Procjena GGUF datoteke na disku: params × bita/8 × 1.08 režije.
-    0.0 kad procjena nije moguća (prikaz '?'). RAM ≠ disk — llmfit-ov
-    memory_gb uključuje KV cache/režiju, ovo je download/pohrana."""
+    """Estimate of the GGUF file on disk: params x bits/8 x 1.08 overhead.
+    0.0 when an estimate is not possible (shown as '?'). RAM != disk — llmfit's
+    memory_gb includes KV cache/overhead, this is download/storage."""
     b = _params_b(params)
     q = str(quant).lower()
     bits = next((v for prefix, v in _QUANT_BITS if q.startswith(prefix)), 0.0)
@@ -54,7 +54,7 @@ def disk_gb(params: str, quant: str) -> float:
 
 
 def namjene(ollama_name: str, use_case: str = "") -> str:
-    """Rangirani prikaz namjena ('kod › chat'); fallback llmfit use_case."""
+    """Ranked display of purposes ('kod > chat'); fallback llmfit use_case."""
     name = (ollama_name or "").lower()
     for key, uses in _NAMJENE:
         if key in name:
@@ -63,8 +63,8 @@ def namjene(ollama_name: str, use_case: str = "") -> str:
 
 
 def table_rows(rows) -> tuple[str, list[str]]:
-    """(zaglavlje, poravnati retci) za radiolist; red i odgovara rows[i].
-    Prvi red (najbolji llmfit score) nosi ⭐ preporuku."""
+    """(header, aligned rows) for the radiolist; row i corresponds to rows[i].
+    The first row (best llmfit score) carries the ⭐ recommendation."""
     data = []
     for i, r in enumerate(rows):
         d = disk_gb(r.get("params", ""), r.get("best_quant", ""))

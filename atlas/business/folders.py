@@ -1,13 +1,13 @@
-# Registar mrežnih mapa: ATLAS vidi montirane korijene, izlista podmape,
-# korisnik svakoj mapi dodijeli ulogu. Sve read-only i putanjski scoped ispod
-# cfg.mount_roots (realpath+commonpath — simlink ne zaobilazi granicu).
+# Network folder registry: ATLAS sees the mounted roots, lists subfolders,
+# the user assigns a role to each folder. Everything is read-only and path-scoped under
+# cfg.mount_roots (realpath+commonpath - a symlink does not bypass the boundary).
 
 import os
 
 from atlas.core import security
 
-# Prijedlog uloga (role je slobodan string — dodaje se po potrebi, kao vrste obveza).
-# 'propisi' = jedna glavna mapa; podmape (Zakoni/Pravilnici/Uredbe...) daju vrstu+autoritet.
+# Suggested roles (role is a free-form string - added as needed, like obligation types).
+# 'propisi' = one main folder; subfolders (Zakoni/Pravilnici/Uredbe...) provide the type+authority.
 ROLES = ("propisi", "klijenti", "ostalo", "skener", "program")
 
 
@@ -19,8 +19,8 @@ def _under_a_root(rp: str, roots: list[str]) -> bool:
 
 
 def _scoped(cfg, path: str) -> str:
-    """realpath(path) koji mora biti jednak nekom mount_root ili ispod njega.
-    Prazan mount_roots => sve odbij. Inače ValueError."""
+    """realpath(path) which must equal some mount_root or be below it.
+    Empty mount_roots => reject everything. Otherwise ValueError."""
     roots = cfg.mount_roots or []
     if not roots:
         raise ValueError("nema konfiguriranih mrežnih korijena (ATLAS_MOUNT_ROOTS)")
@@ -31,7 +31,7 @@ def _scoped(cfg, path: str) -> str:
 
 
 def browse(cfg, path: str | None = None) -> dict:
-    """Bez path-a: vrati dostupne korijene. S path-om (scoped): podmape te mape."""
+    """Without a path: return the available roots. With a path (scoped): the subfolders of that folder."""
     roots = cfg.mount_roots or []
     if not path:
         return {"path": None, "parent": None, "roots": roots, "dirs": []}
@@ -49,7 +49,7 @@ def browse(cfg, path: str | None = None) -> dict:
     dirs.sort(key=str.lower)
     parent = os.path.dirname(rp)
     if not _under_a_root(parent, roots):
-        parent = None  # ne daj izlaz iznad korijena
+        parent = None  # do not allow escaping above the root
     return {"path": rp, "parent": parent, "roots": roots, "dirs": dirs}
 
 
@@ -101,5 +101,5 @@ def remove(spine, folder_id: int, user: str = "?") -> None:
     with spine.write() as c:
         if c.execute("SELECT 1 FROM folders WHERE id=?", (folder_id,)).fetchone() is None:
             raise ValueError(f"nepoznata mapa: {folder_id}")
-        c.execute("DELETE FROM folders WHERE id=?", (folder_id,))  # ne dira disk
+        c.execute("DELETE FROM folders WHERE id=?", (folder_id,))  # does not touch disk
     spine.audit(user, "folder_remove", f"folder:{folder_id}")

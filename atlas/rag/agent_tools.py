@@ -1,15 +1,16 @@
-# Registar alata za agentski chat sloj (Faza 3). Svaki alat zove POSTOJEĆI
-# business sloj — ovaj modul samo: opisuje shemu za LLM, validira argumente,
-# provjeri ovlasti (rola + vidljivost klijenta) i prosljeđuje poziv.
+# Tool registry for the agentic chat layer (Phase 3). Each tool calls the
+# EXISTING business layer — this module only: describes the schema for the LLM,
+# validates arguments, checks permissions (role + client visibility) and forwards
+# the call.
 #
-# LLM izlaz je NEPOVJERLJIV: alat popis je fiksan (allowlist), argumenti se
-# validiraju kodom PRIJE svakog poziva, nepoznat/nedopušten alat -> ValueError.
+# LLM output is UNTRUSTED: the tool list is fixed (allowlist), arguments are
+# validated in code BEFORE every call, unknown/disallowed tool -> ValueError.
 #
-# ponytail: pretrazi() ne prima llm (run_tool ga ne prosljeđuje) pa ne zove
-# pipeline.answer (koji bez llm-a na chat lane vraća "LLM nedostupan") —
-# vraća sirove pogotke (retrieval.search + websearch.ddg) koje agentska
-# petlja (T3) daje LLM-u da sroči odgovor. Upgrade path: proslijedi llm kroz
-# run_tool ako se pretrazi ikad treba sam sročiti sažetak.
+# ponytail: pretrazi() does not receive an llm (run_tool does not forward one) so
+# it does not call pipeline.answer (which without an llm on the chat lane returns
+# "LLM nedostupan") — it returns raw hits (retrieval.search + websearch.ddg) which
+# the agentic loop (T3) hands to the LLM to compose an answer. Upgrade path: forward
+# llm through run_tool if pretrazi ever needs to compose a summary itself.
 import re
 from dataclasses import dataclass
 from datetime import date
@@ -36,7 +37,7 @@ class Tool:
     run: Callable  # (spine, cfg, actor, args) -> dict
 
 
-# --- pomoćno: klijent po ključu (oib > id > naziv) ------------------------
+# --- helper: client by key (oib > id > name) ------------------------
 
 def _resolve_client(spine, kljuc: str) -> dict | None:
     kljuc = (kljuc or "").strip()
@@ -55,16 +56,16 @@ def _resolve_client(spine, kljuc: str) -> dict | None:
 
 
 def _resolve_visible(spine, actor, kljuc: str) -> dict:
-    """Resolve + vidljivost u jednom koraku. Nepoznat ILI nevidljiv klijent
-    daju ISTU grešku — restringiranom radniku se ne otkriva ni postojanje
-    tuđeg klijenta."""
+    """Resolve + visibility in one step. An unknown OR invisible client
+    yield the SAME error — a restricted worker is not told even of the
+    existence of someone else's client."""
     row = _resolve_client(spine, kljuc)
     if row is None or not client_visibility.can_see(spine, actor.user_id, row["id"], actor.role):
         raise ValueError(f"nepoznat klijent: {kljuc!r}")
     return row
 
 
-# --- readonly alati --------------------------------------------------------
+# --- readonly tools --------------------------------------------------------
 
 def _run_pretrazi(spine, cfg, actor, args) -> dict:
     upit = args["upit"]
@@ -101,7 +102,7 @@ def _run_stanje_klijenta(spine, cfg, actor, args) -> dict:
     return karton.karton_data(spine, cfg, row["id"])
 
 
-# --- write alati -------------------------------------------------------
+# --- write tools -------------------------------------------------------
 
 def _run_dodaj_klijenta(spine, cfg, actor, args) -> dict:
     data = {
@@ -114,7 +115,7 @@ def _run_dodaj_klijenta(spine, cfg, actor, args) -> dict:
         "pdv_freq": args.get("pdv_ucestalost") or "monthly",
     }
     result = onboarding.create_client(spine, cfg, data, actor.username)
-    # restringirani kreator inače ne bi vidio vlastito djelo (isto kao POST /clients)
+    # a restricted creator would otherwise not see their own work (same as POST /clients)
     if client_visibility.visible_ids(spine, actor.user_id, actor.role) is not None:
         client_visibility.grant(spine, actor.user_id, result["id"], actor.username)
     return result
@@ -165,7 +166,7 @@ def _run_zapisi_belesku(spine, cfg, actor, args) -> dict:
     return {"id": note_id, "client_id": row["id"]}
 
 
-# --- Faza 2: promocija — više business sposobnosti kao alati --------------
+# --- Phase 2: promotion — more business capabilities as tools --------------
 
 def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
     kind = obveze.upsert_type(
@@ -217,7 +218,7 @@ def _run_kompletnost_klijenta(spine, cfg, actor, args) -> dict:
 
 
 def _run_posalji_poruku_klijentu(spine, cfg, actor, args) -> dict:
-    from atlas.web import messaging
+    from atlas.business import messaging
     row = _resolve_visible(spine, actor, args["klijent"])
     return messaging.send_to_client(spine, cfg, row["id"], args["naslov"], args["tekst"],
                                     dry_run=False)
@@ -227,7 +228,7 @@ def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
     from atlas.business import excel_export
     sto, period = args.get("sto"), args.get("period")
     pitanja = excel_export.clarify(sto, period)
-    if pitanja:  # nedostaje info -> AI postavi ova pitanja korisniku (ne izvozi)
+    if pitanja:  # info missing -> AI asks the user these questions (does not export)
         return {"pitanja": pitanja}
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
     token, rows = excel_export.build(spine, cfg, sto, period, visible)
@@ -235,27 +236,29 @@ def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
 
 
 def _run_ucitaj_vjestinu(spine, cfg, actor, args) -> dict:
-    """Učitaj pune KORAKE jedne vještine (procedure ureda) na zahtjev. Progresivno
-    otkrivanje nad postojećim skills-registrom: agentu je unaprijed u promptu samo
-    katalog (ime+opis), pune korake povlači tek kad zatreba. Org-scoped."""
+    """Load the full STEPS of a single skill (office procedure) on demand. Progressive
+    disclosure over the existing skills registry: the agent has only the catalog
+    (name+description) in the prompt up front, and pulls the full steps only when
+    needed. Org-scoped."""
     from atlas.knowledge import skills as skills_mod
     ime = (args.get("ime") or "").strip().lower()
-    # readable: samo vještine koje OVAJ actor smije vidjeti (private/team gate; Codex)
+    # readable: only skills THIS actor is allowed to see (private/team gate; Codex)
     aktivne = skills_mod.readable(
         skills_mod.list_skills(spine, actor.org_id, status="active"), actor)
     match = next((s for s in aktivne if (s["name"] or "").strip().lower() == ime), None)
     if match is None:
         return {"greska": f"nepoznata vještina: {args.get('ime')!r}",
                 "dostupne": [s["name"] for s in aktivne]}
-    skills_mod.mark_used(spine, match["id"])  # use_count za skill-health (mrtve/žive)
+    skills_mod.mark_used(spine, match["id"])  # use_count for skill-health (dead/alive)
     return {"ime": match["name"], "koraci": match["steps"],
             "validacija": match.get("validation") or ""}
 
 
 def _run_povezanost(spine, cfg, actor, args) -> dict:
-    """Graf povezanosti: entiteti iz upita -> povezani dokumenti -> sažetak. Read-only,
-    vidljivost klijenata se poštuje (skriveni dokumenti se ne uključuju). Alat sam
-    gradi LLM klijenta (registar alata ne prima llm); bez LLM-a vrati listu entiteta."""
+    """Connectivity graph: entities from the query -> related documents -> summary.
+    Read-only, client visibility is respected (hidden documents are not included). The
+    tool builds the LLM client itself (the tool registry does not receive an llm);
+    without an LLM it returns a list of entities."""
     from atlas.business import model_settings
     from atlas.core.llm import LLMClient
     from atlas.rag import graphrag
@@ -269,19 +272,19 @@ def _run_povezanost(spine, cfg, actor, args) -> dict:
 
 
 def _run_rokovi_isteka(spine, cfg, actor, args) -> dict:
-    """Nadolazeći rokovi ISTEKA (osobne, dozvole, certifikati) — filtrirano po
-    vidljivosti klijenata (skriveni klijent ne curi)."""
+    """Upcoming EXPIRY deadlines (ID cards, permits, certificates) — filtered by
+    client visibility (a hidden client does not leak)."""
     dana = int(args.get("dana", 60))
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
     rows = [dict(r) for r in expiry.expiring(spine, days=dana)]
-    if visible is not None:  # None = vidi sve; inače filtriraj
+    if visible is not None:  # None = sees all; otherwise filter
         rows = [r for r in rows if r["client_id"] in visible]
     return {"rokovi": rows}
 
 
 def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
-    """Dokumenti u dosjeu klijenta (naziv, vrsta, valjanost) — AI vidi što ured
-    ima. Vidljivost klijenta se provjerava kroz _resolve_visible."""
+    """Documents in the client's file (name, type, validity) — the AI sees what the
+    office has. Client visibility is checked through _resolve_visible."""
     row = _resolve_visible(spine, actor, args["klijent"])
     docs = spine.read().execute(
         "SELECT id, title, doc_type, valid_from, valid_until, stale "
@@ -290,10 +293,10 @@ def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
 
 
 def _run_predlozi_vjestinu(spine, cfg, actor, args) -> dict:
-    """Self-evolving skills (Abu): spremi ponovljivu proceduru kao DRAFT vještinu
-    (owner=predlagatelj, org-scoped, private). Draft ne ulazi u prompt-katalog dok
-    ga ured ne aktivira. Ide kroz propose->confirm kao svaki write (LLM ne kreira
-    tiho — korisnik potvrdi)."""
+    """Self-evolving skills (Abu): save a repeatable procedure as a DRAFT skill
+    (owner=proposer, org-scoped, private). A draft does not enter the prompt catalog
+    until the office activates it. Goes through propose->confirm like every write (the
+    LLM does not create silently — the user confirms)."""
     from atlas.knowledge import skills as skills_mod
     sid = skills_mod.create_skill(
         spine, actor.org_id, args["ime"], description=args.get("opis") or "",
@@ -304,8 +307,8 @@ def _run_predlozi_vjestinu(spine, cfg, actor, args) -> dict:
 
 
 def _run_probudi_racunalo(spine, cfg, actor, args) -> dict:
-    """Probudi radnikovu radnu stanicu preko mreže (Wake-on-LAN). Admin+, pandan
-    alatu pokreni_program."""
+    """Wake the worker's workstation over the network (Wake-on-LAN). Admin+, counterpart
+    to the pokreni_program tool."""
     from atlas.business import fleet
     res = fleet.wake_worker(spine, args["radnik"], actor_role=actor.role)
     if not res.get("ok"):
@@ -313,7 +316,7 @@ def _run_probudi_racunalo(spine, cfg, actor, args) -> dict:
     return res
 
 
-# --- registar ---------------------------------------------------------
+# --- registry ---------------------------------------------------------
 
 TOOLS: dict[str, Tool] = {
     "pretrazi": Tool(
@@ -511,9 +514,9 @@ _TYPE_MAP = {"string": str, "boolean": bool, "object": dict, "number": (int, flo
 
 
 def validate(name: str, args: dict) -> tuple[bool, str | None]:
-    """Čista provjera (bez spine): shema (obavezna polja, tipovi) + domenska
-    (OIB format, ISO datum, dozvoljena polja za uredi_klijenta). Postojanje
-    klijenta se provjerava u run_tool (treba spine)."""
+    """Pure validation (no spine): schema (required fields, types) + domain
+    (OIB format, ISO date, allowed fields for uredi_klijenta). Client existence
+    is checked in run_tool (needs spine)."""
     tool = TOOLS.get(name)
     if tool is None:
         return False, f"nepoznat alat: {name!r}"
@@ -530,8 +533,8 @@ def validate(name: str, args: dict) -> tuple[bool, str | None]:
         if spec is None:
             continue
         expected = _TYPE_MAP.get(spec.get("type"))
-        # bool je podklasa int-a u Pythonu — ne dopusti da "number"/"integer"
-        # provjera tiho progleda kroz True/False.
+        # bool is a subclass of int in Python — do not let the "number"/"integer"
+        # check silently see through True/False.
         if expected and (not isinstance(v, expected) or
                          (expected is not bool and isinstance(v, bool))):
             return False, f"polje {k!r} mora biti tipa {spec['type']}"
@@ -552,23 +555,26 @@ def validate(name: str, args: dict) -> tuple[bool, str | None]:
     return True, None
 
 
-# Vanjska nuspojava izvan ureda (poruka klijentu, pokretanje/buđenje radne
-# stanice, dohvat s weba) — najviši tier. Ostali write pišu u bazu ureda (med),
-# readonly samo čitaju (low). OpenWorker "tier consequential actions" obrazac.
+# External side effect outside the office (message to a client, starting/waking a
+# workstation, fetching from the web) — the highest tier. Other writes write to the
+# office database (med), readonly ones only read (low). OpenWorker "tier consequential
+# actions" pattern.
 _HIGH_RISK = frozenset({"posalji_poruku_klijentu", "pokreni_program",
                         "probudi_racunalo", "nauci_izvor"})
 
 
 def risk(name: str) -> str:
-    """Rizik alata: 'low' (čita), 'med' (piše u bazu ureda), 'high' (vanjska
-    nuspojava). Nepoznat alat -> 'high' (fail-safe: neklasificirano = najoprezniji
-    tier). Čista funkcija — UI/potvrda prikažu jačinu, high traži jaču potvrdu.
+    """Tool risk: 'low' (reads), 'med' (writes to the office database), 'high'
+    (external side effect). Unknown tool -> 'high' (fail-safe: unclassified = most
+    cautious tier). Pure function — the UI/confirmation shows the severity, high
+    requires a stronger confirmation.
 
-    SAVJETODAVNO (Codex): ovo je LABEL za prikaz, ne gate — write alati ionako idu
-    kroz propose->confirm. Neki readonly alati imaju uzgredne efekte koje ovaj
-    label NE hvata: `pretrazi` (web=True/auto) šalje upit van LAN-a, `popis_obveza`/
-    `izvezi_excel` okidaju ensure_period (materijalizacija obveza). To su
-    pre-postojeća ponašanja; egress-uz-potvrdu je zaseban širi zahvat."""
+    ADVISORY (Codex): this is a LABEL for display, not a gate — write tools go through
+    propose->confirm anyway. Some readonly tools have incidental effects this label
+    does NOT capture: `pretrazi` (web=True/auto) sends the query outside the LAN,
+    `popis_obveza`/`izvezi_excel` trigger ensure_period (materialization of
+    obligations). These are pre-existing behaviors; egress-with-confirmation is a
+    separate broader change."""
     tool = TOOLS.get(name)
     if tool is None or name in _HIGH_RISK:
         return "high"
@@ -576,7 +582,7 @@ def risk(name: str) -> str:
 
 
 def allowed(actor, tool) -> bool:
-    """min_role gate. `tool` može biti Tool ili ime alata."""
+    """min_role gate. `tool` can be a Tool or a tool name."""
     if isinstance(tool, str):
         tool = TOOLS.get(tool)
         if tool is None:

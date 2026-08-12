@@ -47,9 +47,10 @@ def _decode_web(request: Request) -> dict:
 
 
 def _actor_from_payload(request: Request, payload: dict) -> Actor:
-    """Actor iz JWT pokazivača (uid, org_id). Uloga se NE čita iz tokena nego
-    svježa iz memberships — promjena/revokacija uloge vrijedi odmah. Stari
-    token bez claimova (24h prijelaz) razrješava se po username-u."""
+    """Actor from the JWT pointers (uid, org_id). The role is NOT read from the
+    token but freshly from memberships — a role change/revocation takes effect
+    immediately. An old token without claims (24h transition) is resolved by
+    username."""
     spine = request.app.state.spine
     uid, org_id = payload.get("uid"), payload.get("org_id")
     if uid is None or org_id is None:
@@ -58,8 +59,8 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
         if row is None:
             raise HTTPException(401, "nepoznat korisnik")
         uid = row["id"]
-        # read-only fallback: NE stvara membership (to radi samo login) —
-        # stari token korisnika bez članstva znači ponovnu prijavu, ne upis.
+        # read-only fallback: does NOT create a membership (only login does that) —
+        # an old token for a user without membership means re-login, not a write.
         m = spine.read().execute(
             "SELECT org_id FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
             (uid,)).fetchone()
@@ -70,9 +71,9 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
     if actor is None:
         raise HTTPException(403, "niste član organizacije")
     actor.username = payload["sub"]
-    # Impersonacija: ceiling se provjerava SVAKI zahtjev (ne samo pri loginu) —
-    # inače kasnija promocija cilja diže spremljeni token iznad impersonatora
-    # (Codex HIGH). Impersonator mora i dalje postojati i STROGO nadmašivati cilj.
+    # Impersonation: the ceiling is checked on EVERY request (not only at login) —
+    # otherwise a later promotion of the target lifts the stored token above the
+    # impersonator (Codex HIGH). The impersonator must still exist and STRICTLY outrank the target.
     imp_uid = payload.get("imp_uid")
     if imp_uid is not None:
         from atlas.business.acl import ROLE_RANK
@@ -85,12 +86,12 @@ def _actor_from_payload(request: Request, payload: dict) -> Actor:
 
 
 def require_actor_web(request: Request) -> Actor:
-    """Org-svjesna varijanta require_user_web: vraća Actor za ACL odluke."""
+    """Org-aware variant of require_user_web: returns an Actor for ACL decisions."""
     return _actor_from_payload(request, _decode_web(request))
 
 
 def require_actor(request: Request) -> Actor:
-    """Org-svjesna varijanta require_user (samo Bearer, za API klijente)."""
+    """Org-aware variant of require_user (Bearer only, for API clients)."""
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(401, "missing bearer token")

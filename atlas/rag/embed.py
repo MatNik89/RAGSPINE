@@ -11,9 +11,10 @@ log = logging.getLogger(__name__)
 
 
 def _cache_dir(cfg) -> str:
-    """ATLAS-vlastiti TRAJNI cache modela pod data_dir. Bez ovoga fastembed
-    piše u /tmp/fastembed_cache koji reboot/tmpreaper čisti — pa se skinuti
-    model 'izgubi' i vektorska tiho padne na FTS. Izolirano od drugih alata."""
+    """ATLAS's own PERSISTENT model cache under data_dir. Without this, fastembed
+    writes to /tmp/fastembed_cache, which reboot/tmpreaper clears — so the
+    downloaded model gets 'lost' and vector search silently falls back to FTS.
+    Isolated from other tools."""
     d = Path(cfg.data_dir) / "fastembed"
     d.mkdir(parents=True, exist_ok=True)
     return str(d)
@@ -54,15 +55,15 @@ def _get_model():
 
 
 def _text_embedding_cls():
-    """Indirekcija radi testabilnosti (fastembed je optional dep)."""
+    """Indirection for testability (fastembed is an optional dep)."""
     from fastembed import TextEmbedding
     return TextEmbedding
 
 
 def supports(model_name: str) -> bool:
-    """Podržava li instalirani fastembed model (E2E: bge-m3 u ponudi, a
-    TextEmbedding ga ne zna → ne nuditi). False na SVAKU grešku — sigurni
-    default je mali model."""
+    """Whether the installed fastembed supports this model (E2E: bge-m3 is
+    offered, but TextEmbedding doesn't know it -> don't offer it). False on ANY
+    error — the safe default is the small model."""
     try:
         models = _text_embedding_cls().list_supported_models()
         return any((m.get("model") if isinstance(m, dict) else str(m)) == model_name
@@ -72,9 +73,9 @@ def supports(model_name: str) -> bool:
 
 
 def download_model(cfg=None) -> dict:
-    """Eksplicitni warmup: povuci embedding model (jednom, svjesno) da vektorska
-    pretraga proradi. Bez ovoga _get_model radi local_files_only i tiho no-op-a.
-    Vraća {ok, model, dim} ili {ok:False, error}."""
+    """Explicit warmup: pull the embedding model (once, deliberately) so that
+    vector search works. Without this, _get_model runs local_files_only and
+    silently no-ops. Returns {ok, model, dim} or {ok:False, error}."""
     import warnings
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     if not available():
@@ -84,10 +85,10 @@ def download_model(cfg=None) -> dict:
     global _model, _model_failed
     try:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")   # mean-pooling/symlink šum pri downloadu/loadu
+            warnings.simplefilter("ignore")   # mean-pooling/symlink noise during download/load
             from fastembed import TextEmbedding
             _model = TextEmbedding(cfg.embed_model, cache_dir=_cache_dir(cfg),
-                                   local_files_only=False)  # dozvoli download
+                                   local_files_only=False)  # allow download
             _model_failed = False
             dim = len(next(iter(_model.embed(["query: test"]))))
     except Exception as e:
@@ -103,8 +104,8 @@ def _load_vec(conn):
 
 
 def _is_e5(model_name: str) -> bool:
-    """e5 obitelj traži 'query: '/'passage: ' prefikse; drugi modeli (MiniLM,
-    mpnet…) ih tretiraju kao doslovni tekst i to im kvari kvalitetu."""
+    """The e5 family requires 'query: '/'passage: ' prefixes; other models
+    (MiniLM, mpnet...) treat them as literal text, which hurts their quality."""
     return "e5" in (model_name or "").lower()
 
 
@@ -117,9 +118,9 @@ def _query_text(text: str, cfg) -> str:
 
 
 def model_dim(cfg) -> int | None:
-    """Stvarna dimenzija aktivnog modela (jedan probe-embedding). None ako model
-    nije dostupan. Bez ovoga vec tablica bi bila fiksna na 1024 i pucala čim se
-    promijeni embed model."""
+    """Actual dimension of the active model (one probe embedding). None if the
+    model is unavailable. Without this, the vec table would be fixed at 1024 and
+    break as soon as the embed model changes."""
     m = _get_model()
     if m is None:
         return None
@@ -133,8 +134,8 @@ def ensure_vec_table(spine):
     dim = model_dim(cfg)
     if dim is None:
         return
-    # Ako je model (i time dimenzija) promijenjen, stara vec_chunks tablica ne
-    # odgovara — presloži je (vektori su re-indeksabilni iz chunks).
+    # If the model (and thus the dimension) has changed, the old vec_chunks table
+    # no longer matches — rebuild it (vectors are re-indexable from chunks).
     stored = spine.get_override("embed", "vec_dim")
     with spine.write() as c:
         _load_vec(c)

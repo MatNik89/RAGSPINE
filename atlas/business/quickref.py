@@ -1,9 +1,9 @@
-# Quickref — 24 brzo-pretraživih brojki (pragovi, stope, rokovi) s izvorom.
+# Quickref — 24 quickly-searchable figures (thresholds, rates, deadlines) with a source.
 #
-# ponytail: SEED vrijednosti su plauzibilni defaulti za HR 2026, ne
-# garantirano ažurni. Operater ih drži svježima kroz
-# spine.set_override("quickref", key, vrijednost); watchlist može predložiti
-# promjenu kad izvor (NN/Porezna) objavi novu brojku.
+# ponytail: the SEED values are plausible defaults for HR 2026, not guaranteed
+# up to date. The operator keeps them fresh via
+# spine.set_override("quickref", key, value); the watchlist can propose a change
+# when the source (NN/Tax Administration) publishes a new figure.
 
 _DIACRITICS = str.maketrans("čćžšđČĆŽŠĐ", "cczsdCCZSD")
 
@@ -73,9 +73,10 @@ SEED: list[dict] = [
      "unit": "EUR/god", "category": "obrt",
      "source": "Pravilnik o paušalnom oporezivanju (NN 1/2024, 16/2025)",
      "keywords": "pausal obrt prag prihod gornja granica"},
-    # ranija tri "pausal_razred_*" ključa maknuta: 80000 nije postojeći razred
-    # (pravilnik završava na 60000), a granice svih sedam razreda ovdje NE
-    # hardkodiramo — samo siguran gornji prag; detalji idu iz propisa (RAG).
+    # the earlier three "pausal_razred_*" keys were removed: 80000 is not an
+    # existing bracket (the regulation ends at 60000), and we do NOT hardcode the
+    # limits of all seven brackets here — only a safe upper threshold; the details
+    # come from the regulations (RAG).
     {"key": "joppd_rok", "label": "Rok predaje JOPPD obrasca", "value": "isplata + 1 radni dan",
      "unit": "rok", "category": "rokovi", "source": "Pravilnik o poreznom postupku",
      "keywords": "joppd rok predaje obrazac"},
@@ -91,7 +92,7 @@ SEED: list[dict] = [
 def seed(spine) -> int:
     n = 0
     with spine.write() as c:
-        # netočni ključevi iz starijeg seeda — počisti i na već postavljenim bazama
+        # incorrect keys from an older seed — clean them up on already-provisioned databases too
         c.execute("DELETE FROM quickref WHERE key IN "
                   "('pausal_razred_1','pausal_razred_2','pausal_razred_3')")
         for item in SEED:

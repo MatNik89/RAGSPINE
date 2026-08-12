@@ -1,6 +1,6 @@
-"""Self-signed SAN certifikat za LAN HTTPS. Koristi postojeću `cryptography`
-dependenciju. Javni cert (cert.pem) smije se dijeliti klijentima; key.pem NIKAD.
-Napomena: ako ured ima AD CS/GPO, preferiraj domenski cert (backlog)."""
+"""Self-signed SAN certificate for LAN HTTPS. Uses the existing `cryptography`
+dependency. The public cert (cert.pem) may be shared with clients; key.pem NEVER.
+Note: if the office has AD CS/GPO, prefer a domain certificate (backlog)."""
 import ipaddress
 import os
 import socket
@@ -14,10 +14,10 @@ from cryptography.x509.oid import NameOID
 
 
 def friendly_names() -> list[str]:
-    """Prijateljska imena za SAN certifikata: hostname, FQDN (DNS sufiks
-    poput fritz.box) ako postoji, hostname.local (mDNS), uvijek + atlas.local
-    (kompatibilnost s već izdanim uputama). Čisti stdlib, bez mreže; bilo
-    koja greška vraća barem ["atlas.local"]."""
+    """Friendly names for the certificate SAN: hostname, FQDN (a DNS suffix
+    like fritz.box) if present, hostname.local (mDNS), always + atlas.local
+    (compatibility with already-issued instructions). Pure stdlib, no network;
+    any error returns at least ["atlas.local"]."""
     names: list[str] = []
     try:
         host = socket.gethostname().lower()
@@ -44,8 +44,8 @@ def friendly_names() -> list[str]:
 
 
 def _warn_if_san_stale(cert_p: Path, ips: list[str], *, out=print) -> None:
-    """Upozori (ne regeneriraj — trust je možda već instaliran na klijentima)
-    kad postojeći cert ne pokriva traženi IP (stroj je promijenio adresu)."""
+    """Warn (do not regenerate — trust may already be installed on clients)
+    when the existing cert does not cover the requested IP (the machine changed address)."""
     try:
         cert = x509.load_pem_x509_certificate(cert_p.read_bytes())
         san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
@@ -62,7 +62,7 @@ def _warn_if_san_stale(cert_p: Path, ips: list[str], *, out=print) -> None:
 def generate_self_signed(out_dir: str, ips: list[str],
                          hostnames: list[str] | None = None,
                          days: int = 3650, *, out=print) -> tuple[str, str]:
-    """Generiraj (ili vrati postojeći) cert.pem + key.pem sa SAN unosima."""
+    """Generate (or return the existing) cert.pem + key.pem with SAN entries."""
     out_dir_p = Path(out_dir)
     out_dir_p.mkdir(parents=True, exist_ok=True)
     cert_p, key_p = out_dir_p / "cert.pem", out_dir_p / "key.pem"
@@ -88,10 +88,10 @@ def generate_self_signed(out_dir: str, ips: list[str],
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .sign(key, hashes.SHA256())
     )
-    # Kreiraj key.pem s 0600 dozvolama od početka — bez prozora gdje je dostupan drugima.
-    # O_EXCL traži postojeću datoteku; ako se pojavi u međuvremenu, ponytail:
-    # pretpostavljamo single-writer (setup wizard/CLI nije paralelno).
-    # Ako cert.pem nedostaje, key je siročad od prethodnog crasha → obriši i pokušaj ponovno.
+    # Create key.pem with 0600 permissions from the start — no window where it is readable by others.
+    # O_EXCL fails on an existing file; if one appears in the meantime, ponytail:
+    # we assume a single writer (the setup wizard/CLI does not run in parallel).
+    # If cert.pem is missing, the key is orphaned from a previous crash -> delete it and retry.
     key_bytes = key.private_bytes(
         serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8,
@@ -101,31 +101,31 @@ def generate_self_signed(out_dir: str, ips: list[str],
             fd = os.open(str(key_p), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "wb") as f:
                 f.write(key_bytes)
-            break  # Ključ je uspješno kreiran
+            break  # Key created successfully
         except FileExistsError:
             if cert_p.exists():
-                # Oba fajla se pojavio između check-a i kreiranja — vrati postojeće.
+                # Both files appeared between the check and creation — return the existing ones.
                 return str(cert_p), str(key_p)
-            # Siročad: key bez certa od prethodnog crasha. Obriši i pokušaj ponovno.
+            # Orphan: a key without a cert from a previous crash. Delete it and retry.
             if attempt == 0:
                 key_p.unlink(missing_ok=True)
                 continue
-            raise  # Drugi pokušaj neuspješan
+            raise  # Second attempt failed
     cert_p.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
     return str(cert_p), str(key_p)
 
 
 def fingerprint_sha256(cert_path: str) -> str:
-    """SHA256 fingerprint certa, formatiran AA:BB:..."""
+    """SHA256 fingerprint of the cert, formatted AA:BB:..."""
     cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
     raw = cert.fingerprint(hashes.SHA256()).hex().upper()
     return ":".join(raw[i:i + 2] for i in range(0, len(raw), 2))
 
 
 def san_dns_names(cert_path: str) -> list[str]:
-    """DNS imena iz SAN ekstenzije POSTOJEĆEG certa (isto x509 parsanje kao
-    _warn_if_san_stale). [] na bilo koju grešku (ne postoji/nečitljiv/bez SAN-a)
-    — pozivatelj tada pada na IP fallback."""
+    """DNS names from the SAN extension of the EXISTING cert (same x509 parsing as
+    _warn_if_san_stale). [] on any error (missing/unreadable/no SAN)
+    — the caller then falls back to the IP."""
     try:
         cert = x509.load_pem_x509_certificate(Path(cert_path).read_bytes())
         san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
@@ -135,10 +135,10 @@ def san_dns_names(cert_path: str) -> list[str]:
 
 
 def best_display_host(names: list[str], fallback: str) -> str:
-    """Najbolje ime za prikaz klijentima: prava FQDN (točka, nije
-    atlas.local/.local), pa hostname.local, pa fallback (obično IP).
-    Jedna implementacija — wizard._best_name i bootstrap_http.best_display_host
-    su tanki aliasi na ovu."""
+    """Best name to display to clients: a real FQDN (has a dot, not
+    atlas.local/.local), then hostname.local, then fallback (usually the IP).
+    Single implementation — wizard._best_name and bootstrap_http.best_display_host
+    are thin aliases over this one."""
     for n in names:
         if "." in n and n != "atlas.local" and not n.endswith(".local"):
             return n
@@ -149,10 +149,10 @@ def best_display_host(names: list[str], fallback: str) -> str:
 
 
 def verified_display_host(cert_path: str, names: list[str], fallback: str) -> str:
-    """best_display_host, ali samo nad imenima koja SAN POSTOJEĆEG certa
-    stvarno pokriva (nalaz: stara instalacija može imati cert=[atlas.local, IP]
-    dok uputa nudi novije ime iz friendly_names() -> browser warning i nakon
-    instalacije certa). Prazan presjek (ili necitljiv cert) -> fallback (IP)."""
+    """best_display_host, but only over names the SAN of the EXISTING cert
+    actually covers (finding: an old install may have cert=[atlas.local, IP]
+    while the instructions offer a newer name from friendly_names() -> browser
+    warning even after installing the cert). Empty intersection (or unreadable cert) -> fallback (IP)."""
     san = san_dns_names(cert_path)
     candidates = [n for n in names if n in san]
     return best_display_host(candidates, candidates[0] if candidates else fallback)

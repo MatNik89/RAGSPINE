@@ -9,7 +9,7 @@ def _home() -> str:
 
 
 def _env(name: str, default: str = "") -> str:
-    """ATLAS_<name> primarno; RAGSPINE_<name> je trajni compat alias."""
+    """ATLAS_<name> primarily; RAGSPINE_<name> is a permanent compat alias."""
     v = os.environ.get(f"ATLAS_{name}")
     if v is None:
         v = os.environ.get(f"RAGSPINE_{name}")  # compat: ragspine env alias
@@ -17,7 +17,7 @@ def _env(name: str, default: str = "") -> str:
 
 
 def default_data_dir() -> str:
-    """~/.atlas; ako ne postoji a stari ~/.ragspine (compat) postoji — koristi stari."""
+    """~/.atlas; if it does not exist but the old ~/.ragspine (compat) exists — use the old one."""
     new = os.path.join(_home(), ".atlas")
     legacy = os.path.join(_home(), ".ragspine")  # compat: ragspine data dir
     if not os.path.exists(new) and os.path.isdir(legacy):
@@ -51,14 +51,14 @@ class Config:
     apprise_urls: list[str]
     mount_roots: list[str]
     digest_hour: int
-    llm_path: str = ""  # OpenAI-kompat put iza base_url (B10); "" = /v1/chat/completions
+    llm_path: str = ""  # OpenAI-compat path behind base_url (B10); "" = /v1/chat/completions
 
     @classmethod
     def from_env(cls) -> "Config":
         e = _env
         data_dir = os.path.normpath(os.path.expanduser(e("DATA_DIR") or default_data_dir()))
         Path(data_dir).mkdir(parents=True, exist_ok=True)
-        # data_dir drži DB (PII), secret i modele — 0700 (no-op na Windowsu)
+        # data_dir holds the DB (PII), secret and models — 0700 (no-op on Windows)
         try:
             os.chmod(data_dir, 0o700)
         except OSError:
@@ -73,7 +73,7 @@ class Config:
                 sf.touch(mode=0o600)
                 sf.write_text(secret)
         default_db = Path(data_dir) / "atlas.db"
-        legacy_db = Path(data_dir) / "ragspine.db"  # compat: ragspine db ime
+        legacy_db = Path(data_dir) / "ragspine.db"  # compat: ragspine db name
         if not default_db.exists() and legacy_db.exists():
             default_db = legacy_db
         return cls(
@@ -83,13 +83,13 @@ class Config:
             llm_base_url=e("LLM_BASE_URL", ""), llm_api_key=e("LLM_API_KEY", ""),
             llm_model=e("LLM_MODEL", ""),
             llm_provider=e("LLM_PROVIDER", ""),
-            llm_path=e("LLM_PATH", ""),  # B10: env-only put uz LLM_BASE_URL (npr. Gemini)
+            llm_path=e("LLM_PATH", ""),  # B10: env-only path alongside LLM_BASE_URL (e.g. Gemini)
             anthropic_base_url=e("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
             ollama_url=e("OLLAMA_URL", "http://127.0.0.1:11434"),
-            # Default = mali multilingual (220MB, dim 384, hrvatski OK) — pouzdano
-            # se skida i na slabijoj mreži. Za bolju kvalitetu na jačem hardveru:
-            # ATLAS_EMBED_MODEL=intfloat/multilingual-e5-large (2.24GB, dim 1024).
-            # embed kod je model-agnostičan (dim iz modela, e5-prefiks uvjetno).
+            # Default = small multilingual (220MB, dim 384, Croatian OK) — downloads
+            # reliably even on a weaker network. For better quality on stronger
+            # hardware: ATLAS_EMBED_MODEL=intfloat/multilingual-e5-large (2.24GB, dim 1024).
+            # The embed code is model-agnostic (dim from the model, e5 prefix conditional).
             ocr_url=e("OCR_URL", ""),
             ocr_langs=e("OCR_LANGS", "hrv+eng"),
             embed_model=e("EMBED_MODEL",
@@ -100,8 +100,8 @@ class Config:
             https_only=e("HTTPS_ONLY", "0") == "1",
             egress_allow=[h for h in e("EGRESS_ALLOW", "").split(",") if h],
             apprise_urls=[u for u in e("APPRISE_URLS", "").split(",") if u],
-            # Dozvoljeni korijeni mrežnih mapa (SMB mount točke); samo mape ispod
-            # ovih smiju se registrirati/čitati. realpath da simlink ne zaobiđe scoping.
+            # Allowed roots of network shares (SMB mount points); only folders below
+            # these may be registered/read. realpath so a symlink cannot bypass the scoping.
             mount_roots=[os.path.realpath(os.path.expanduser(p))
                          for p in e("MOUNT_ROOTS", "").split(",") if p.strip()],
             digest_hour=int(e("DIGEST_HOUR", "7")))

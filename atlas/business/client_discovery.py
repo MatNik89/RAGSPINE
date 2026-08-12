@@ -1,5 +1,5 @@
-"""Otkrivanje klijenata iz naziva podmapa KLIJENTI mape (bez OIB-a). Predloži pa
-potvrdi; upsert clients po nas_folder-u (idempotentno). Ne dira datoteke na disku."""
+"""Discover clients from the names of subfolders in the CLIENTS folder (without OIB).
+Suggest then confirm; upsert clients by nas_folder (idempotent). Does not touch files on disk."""
 import os
 import re
 
@@ -14,8 +14,8 @@ def _guess_type(name: str) -> str:
 
 
 def _norm(name: str) -> str:
-    """Normaliziran ključ za podudaranje: fold dijakritika + redoslijed riječi nebitan
-    (prezime/ime vs ime/prezime)."""
+    """Normalized key for matching: fold diacritics + word order irrelevant
+    (surname/first-name vs first-name/surname)."""
     n = (name or "").lower()
     for a, b in zip("čćžšđ", "cczsd"):
         n = n.replace(a, b)
@@ -50,9 +50,9 @@ def commit(spine, cfg, folder_id: int, items: list[dict]) -> dict:
             if it.get("action") == "skip":
                 skipped += 1
                 continue
-            # apsolutni realpath podmape = stabilan, jedinstven identifikator veze mapa↔klijent.
-            # subdir iz requesta: samo basename, STROGO ispod base i stvarno
-            # postojeća podmapa — '.'/'..'/tuđi path ne prolazi (fail-closed).
+            # absolute realpath of the subfolder = stable, unique identifier of the folder<->client link.
+            # subdir from the request: basename only, STRICTLY under base and an
+            # actually existing subfolder — '.'/'..'/foreign path do not pass (fail-closed).
             sub = os.path.basename((it.get("subdir") or "").strip())
             if not sub or sub in (".", ".."):
                 raise ValueError(f"neispravna podmapa: {it.get('subdir')!r}")

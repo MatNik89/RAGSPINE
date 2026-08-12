@@ -1,15 +1,15 @@
-# Registar vrsta dokumenata (doc_types) — data-driven kao obligation_types.
+# Registry of document types (doc_types) - data-driven like obligation_types.
 #
-# Svaka vrsta nosi polja za ekstrakciju (C3 regex+LLM): [{key,label,kind,expiry}].
-# kind ∈ text|date; expiry=True smije samo na date polju — taj datum ide u
-# rok-alert (7 dana prije isteka). Brisanja nema, deaktivacija preko active=0.
+# Each type carries fields for extraction (C3 regex+LLM): [{key,label,kind,expiry}].
+# kind in text|date; expiry=True is allowed only on a date field - that date feeds
+# the deadline alert (7 days before expiry). There is no deletion, deactivation via active=0.
 
 import json
 import re
 
 FIELD_KINDS = ("text", "date")
 
-# (key, label, fields, sort) — seed lijeno INSERT OR IGNORE, admin-izmjene ostaju.
+# (key, label, fields, sort) - seeded lazily via INSERT OR IGNORE, admin edits persist.
 DEFAULT_TYPES = [
     ("osobna_iskaznica", "Osobna iskaznica", [
         {"key": "broj", "label": "Broj", "kind": "text", "expiry": False},
@@ -21,7 +21,7 @@ DEFAULT_TYPES = [
 
 
 def _norm_key(key: str) -> str:
-    """snake_case ključ: mala slova, dijakritika foldana, ostalo -> _."""
+    """snake_case key: lowercase, diacritics folded, everything else -> _."""
     if not isinstance(key, str):
         raise ValueError(f"key mora biti string, ne {type(key).__name__}")
     k = key.strip().lower()
@@ -86,7 +86,7 @@ def list_types(spine, active_only: bool = False) -> list[dict]:
 
 def upsert(spine, key: str, label: str, fields, active: bool = True,
            sort: int = 100, user: str = "?") -> str:
-    """Kreira ili uređuje vrstu dokumenta. Vraća normalizirani key."""
+    """Creates or edits a document type. Returns the normalized key."""
     key = _norm_key(key)
     fields = _validate_fields(fields)
     _ensure_seeded(spine)
@@ -105,5 +105,5 @@ def upsert(spine, key: str, label: str, fields, active: bool = True,
 
 
 def export_json(spine) -> dict:
-    """Cijeli registar kao JSON — backup / dijeljenje između ureda."""
+    """The whole registry as JSON - backup / sharing between offices."""
     return {"version": 1, "doc_types": list_types(spine)}

@@ -1,5 +1,5 @@
-# Mjesečni pregled — "što sve moram ovaj mjesec" agregator preko
-# kalendara, obveza, isteka dokumenata, promjena propisa i bilješki.
+# Monthly overview — a "what all do I have to do this month" aggregator across
+# the calendar, obligations, document expiries, regulation changes and notes.
 
 import re
 from datetime import date
@@ -26,7 +26,7 @@ def _period_bounds(period: str) -> tuple[str, str]:
 
 
 def _vis(rows: list, visible) -> list:
-    """Zadrži retke uredske (client_id IS NULL) i vidljive klijente; None = sve."""
+    """Keep office rows (client_id IS NULL) and visible clients; None = all."""
     if visible is None:
         return rows
     return [r for r in rows if r.get("client_id") is None or r.get("client_id") in visible]
@@ -73,7 +73,7 @@ def overview(spine, period: str, visible=None) -> dict:
 
     return {
         "period": period,
-        "deadlines": deadlines,  # uredski rokovi (bez client_id) — svima
+        "deadlines": deadlines,  # office deadlines (no client_id) — for everyone
         "unsent": _vis(unsent, visible),
         "expiring": _vis(expiring, visible),
         "watch_changes": _vis(watch_changes, visible),
