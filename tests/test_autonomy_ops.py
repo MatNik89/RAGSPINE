@@ -96,6 +96,19 @@ def test_permanent_error_no_retry_dead_letters(spine, monkeypatch):
     assert n == 1                                       # dead-letter
 
 
+def test_future_retry_not_fired_early(spine, monkeypatch):
+    """Retry zakazan u BUDUĆNOSTI se NE fira prije vremena (Codex: claim ponavlja due-uvjet)."""
+    def boom(*a):
+        raise LLMError("503")
+    sid = _task(spine, monkeypatch, boom)
+    scheduler_tasks.run_due(spine, None, now=datetime(2026, 1, 15, 9))  # zakaže +2min (budući)
+    r0 = _row(spine, sid)
+    assert r0["retry_at"] is not None
+    fired = scheduler_tasks.run_due(spine, None, now=datetime(2026, 1, 15, 9))  # odmah opet
+    assert all(f["id"] != sid for f in fired)          # budući retry NIJE pokupljen
+    assert _row(spine, sid)["retry_attempt"] == 1      # nepromijenjeno
+
+
 def test_retry_exhausts_then_dead_letters(spine, monkeypatch):
     def boom(*a):
         raise LLMError("503")

@@ -4,6 +4,7 @@ ovlasti/consent/vidljivosti vrijede PONOVNO (isti gate kao svaka radnja). Owner-
 audit-irano kao 'replay'. Ne troši budžet (ljudska radnja, ne autonomni runaway).
 Reuse audit_log — bez nove tablice."""
 import json
+import threading
 import time
 
 # samo zapisi gdje je entity=čisto ime alata, detail=args_json (agent confirm / auto-grant).
@@ -16,22 +17,25 @@ _REPLAYABLE = ("agent_execute", "agent_auto_grant")
 # klijentski idempotency-token ako ikad bude više procesa.
 _DEBOUNCE_S = 10.0
 _recent: dict = {}  # (user_id, audit_id) -> monotonic ts
+_recent_lock = threading.Lock()  # check-then-set mora biti atomičan (Codex: 2 istovremena zahtjeva)
 
 
 def _debounce_claim(user_id: int, audit_id: int) -> bool:
     """True ako je ovo prvi (dopušten) poziv; False ako je duplikat unutar prozora.
-    Claim se postavlja PRIJE izvršenja da spriječi istovremeni dvoklik."""
-    now = time.monotonic()
-    if len(_recent) > 256:  # povremeno očisti zastarjele (bez rasta)
-        for k, ts in list(_recent.items()):
-            if now - ts >= _DEBOUNCE_S:
-                _recent.pop(k, None)
-    key = (user_id, audit_id)
-    prev = _recent.get(key)
-    if prev is not None and now - prev < _DEBOUNCE_S:
-        return False
-    _recent[key] = now
-    return True
+    Claim se postavlja PRIJE izvršenja da spriječi istovremeni dvoklik. Cijela
+    provjeri-pa-postavi je pod lockom (inače bi dva paralelna zahtjeva oba prošla)."""
+    with _recent_lock:
+        now = time.monotonic()
+        if len(_recent) > 256:  # povremeno očisti zastarjele (bez rasta)
+            for k, ts in list(_recent.items()):
+                if now - ts >= _DEBOUNCE_S:
+                    _recent.pop(k, None)
+        key = (user_id, audit_id)
+        prev = _recent.get(key)
+        if prev is not None and now - prev < _DEBOUNCE_S:
+            return False
+        _recent[key] = now
+        return True
 
 
 def list_replayable(spine, limit: int = 50) -> list[dict]:

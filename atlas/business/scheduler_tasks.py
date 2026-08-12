@@ -237,8 +237,10 @@ def run_due(spine, cfg, now: datetime | None = None) -> list[dict]:
         "AND retry_at <= datetime('now')").fetchall()
     for r in rrows:
         with spine.write() as c:  # claim retry: makni retry_at da ga drugi poller ne pokupi
-            claim = c.execute("UPDATE scheduled_tasks SET retry_at=NULL "
-                              "WHERE id=? AND retry_at IS NOT NULL", (r["id"],))
+            # Codex: claim MORA ponoviti due-uvjet (retry_at<=now) — inače bi drugi poller,
+            # ako je _execute u međuvremenu reschedulao BUDUĆI retry, claimao i firao ga rano
+            claim = c.execute("UPDATE scheduled_tasks SET retry_at=NULL WHERE id=? "
+                              "AND retry_at IS NOT NULL AND retry_at <= datetime('now')", (r["id"],))
             if claim.rowcount != 1:
                 continue
         _execute(spine, cfg, r, fired)  # r još nosi retry_attempt (nije nuliran)
