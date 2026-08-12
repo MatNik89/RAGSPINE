@@ -82,6 +82,44 @@ def list_skills(spine, org_id: int, status: str | None = None) -> list[dict]:
     return [dict(r) for r in spine.read().execute(q, args).fetchall()]
 
 
+def mark_used(spine, skill_id: int) -> None:
+    """Zabilježi da je vještina UČITANA (agent povukao korake). use_count hrani
+    skill-health (mrtve vs žive procedure). Simetrično memorijskom recall_count."""
+    with spine.write() as c:
+        c.execute("UPDATE skills SET use_count=COALESCE(use_count,0)+1, "
+                  "last_used_at=datetime('now') WHERE id=?", (skill_id,))
+
+
+def _jaccard(a: str, b: str) -> float:
+    ta, tb = _tokens(a), _tokens(b)
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def health(spine, org_id: int, dup_thresh: float = 0.7) -> dict:
+    """Izvještaj o zdravlju kataloga vještina — SAMO uvid, NE automatsko brisanje
+    (vještine su ljudske uredske procedure; auto-prune bi mogao izgubiti korisno).
+    Flagira: mrtve (aktivne, use_count=0), skoro-duplikate (naziv+opis Jaccard),
+    manjkave (aktivne bez koraka / prekratki koraci). Owner odlučuje."""
+    rows = [dict(r) for r in spine.read().execute(
+        "SELECT id, name, description, steps, use_count FROM skills "
+        "WHERE org_id=? AND status='active' ORDER BY name COLLATE NOCASE", (org_id,)).fetchall()]
+    dead = [{"id": s["id"], "name": s["name"]} for s in rows if not (s.get("use_count") or 0)]
+    malformed = [{"id": s["id"], "name": s["name"]}
+                 for s in rows if len((s.get("steps") or "").strip()) < 10]
+    dups = []
+    for i in range(len(rows)):
+        for j in range(i + 1, len(rows)):
+            a, b = rows[i], rows[j]
+            score = _jaccard(f"{a['name']} {a['description']}", f"{b['name']} {b['description']}")
+            if score >= dup_thresh:
+                dups.append({"a": {"id": a["id"], "name": a["name"]},
+                             "b": {"id": b["id"], "name": b["name"]},
+                             "slicnost": round(score, 2)})
+    return {"aktivnih": len(rows), "mrtve": dead, "duplikati": dups, "manjkave": malformed}
+
+
 def readable(rows: list[dict], actor) -> list[dict]:
     """Vidljivost-filtar preko ACL fast patha (private/team/org + owner/admin).
     ponytail: 'restricted' skill bez učitanog ACL-a ostaje skriven — upgrade

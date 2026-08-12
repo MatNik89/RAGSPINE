@@ -93,6 +93,10 @@ class UredPravilaBody(BaseModel):
     pravila: str = ""
 
 
+class BudgetBody(BaseModel):
+    caps: dict[str, int] = {}    # {llm|tokens|writes: plafon}; 0 = bez granice
+
+
 class ScheduledTaskBody(BaseModel):
     title: str = ""
     action_key: str
@@ -1084,6 +1088,13 @@ def create_app(spine, cfg) -> FastAPI:
     def skills_list(status: str | None = None, actor: Actor = Depends(require_actor_web)):
         return skills_mod.readable(skills_mod.list_skills(spine, actor.org_id, status), actor)
 
+    @app.get("/skills/health")
+    def skills_health(actor: Actor = Depends(require_actor_web)):
+        # uvid u zdravlje kataloga (mrtve/duplikati/manjkave) — SAMO izvještaj, ne
+        # automatsko brisanje; admin odlučuje. Vještine su ljudske procedure.
+        _require_admin(actor)
+        return skills_mod.health(spine, actor.org_id)
+
     @app.post("/skills")
     def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
         # vještina = procedura ureda; viewer (samo-čitač) je ne smije autorirati
@@ -1329,6 +1340,39 @@ def create_app(spine, cfg) -> FastAPI:
         _require_owner(actor)
         agent.set_ured_pravila(spine, body.pravila, user=actor.username)
         return {"ok": True}
+
+    # --- Budžet-štit agenta (dnevni plafon; štiti od cost-runawaya autonomnih runova) ---
+    @app.get("/budget")
+    def budget_get(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_budget
+        _require_admin(actor)  # potrošnja = operativni uvid (admin)
+        return {"budget": agent_budget.usage_today(spine)}
+
+    @app.post("/budget")
+    def budget_set(body: BudgetBody, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_budget
+        _require_owner(actor)  # plafoni = konfiguracija ureda (owner)
+        for k, v in body.caps.items():
+            if k in agent_budget.DEFAULTS:
+                spine.set_override("agent", f"budget_{k}", max(0, int(v)))
+        spine.audit(actor.username, "budget_set", "agent")
+        return {"ok": True, "budget": agent_budget.usage_today(spine)}
+
+    # --- Replay: ponovi ranije izvršenu agent-radnju iz audit-traga (owner) ---
+    @app.get("/replay")
+    def replay_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import replay
+        _require_owner(actor)  # ponavljanje radnji = vlasnička operacija
+        return {"radnje": replay.list_replayable(spine)}
+
+    @app.post("/replay/{audit_id}")
+    def replay_run(audit_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import replay
+        _require_owner(actor)
+        try:
+            return replay.replay(spine, cfg, audit_id, actor)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
 
     # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
     @app.get("/zakazano")
