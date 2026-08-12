@@ -124,6 +124,18 @@ def redact_secrets(text: str) -> str:
     return text
 
 
+def redact_secret_values(text: str, values) -> str:
+    """Ukloni TOČNE vrijednosti tajni iz teksta (npr. token koji alat vrati u
+    error-stringu) — komplement redact_secrets (koja radi po IMENU polja). Longest-first
+    da duža vrijednost ne ostane djelomično vidljiva kad joj je kraća prefiks (Paperclip).
+    Prag 6 znakova (kraće bi lažno maskiralo obične riječi)."""
+    if not text:
+        return text
+    for v in sorted({str(x) for x in values if x and len(str(x)) >= 6}, key=len, reverse=True):
+        text = text.replace(v, "[REDACTED]")
+    return text
+
+
 def chain_append(spine, event: str) -> str:
     # BEGIN IMMEDIATE takes the SQLite write lock up front, so the
     # read-last-hash + insert is atomic across processes (not just

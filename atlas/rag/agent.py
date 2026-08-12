@@ -183,6 +183,15 @@ def _skills_catalog_text(spine, actor) -> str:
 # radu (izvezi_excel piše datoteke; nauci_izvor je ionako write/high)
 _UNATTENDED_DENY_READONLY = frozenset({"izvezi_excel"})
 
+# trust-taint (Paperclip low-trust): alati koji u kontekst donesu SLOBODNI TEKST /
+# sadržaj dokumenata (mogući prompt-injection nosač). Kad ih run pozove, kontekst
+# postaje "tainted" -> auto-grant se degradira na ručno + samo-modifikacijski alati
+# se odbijaju (untrusted sadržaj NE smije mijenjati konfiguraciju/vještine).
+# ponytail: gruba granulacija (svaki pretrazi tainta); upgrade = source_trust stupac
+# po dokumentu (samo izvana-uneseni dokumenti taintaju, čuva grant-udobnost internih runova).
+_TAINTING_TOOLS = frozenset({"pretrazi"})
+_TAINT_BLOCKED_WRITES = frozenset({"nauci_izvor", "predlozi_vjestinu"})
+
 
 def run_unattended(spine, cfg, query: str, actor, llm, source: str, max_steps: int = 6) -> dict:
     """Autonomni (nenadzirani) run: agent AUTONOMNO odradi read/draft; svaku
@@ -211,8 +220,16 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
     seen_calls: set = set()  # potpisi USPJEŠNIH readonly poziva (loop-guard)
     parkirano: list = []     # id-evi parkiranih radnji (unattended)
     izvrseno: list = []      # alati auto-izvršeni po grantu (unattended)
+    run_writes: set = set()  # različite write-radnje u OVOM pokretanju (blast-radius cap)
+    tainted = False          # je li run konzumirao slobodni tekst/dokumente (trust-taint)
+
+    # točne vrijednosti tajni koje bi mogle procuriti u error/odgovor (value-based
+    # redakcija; komplement redakciji-po-imenu u auditu). Skupljeno jednom po runu.
+    from atlas.core import security
+    _secret_vals = [getattr(cfg, k, "") for k in ("imap_pass", "llm_api_key", "jwt_secret")]
 
     def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
+        text = security.redact_secret_values(text, _secret_vals)  # ne procuri tajnu u odgovor
         out = {"text": agent_guards.append_evidence_caution(
             text, agent_guards.unverified_oibs(text, observed_oibs)),
             "sources": sources, "pending": None}
@@ -273,15 +290,27 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
                 tool_result = agent_tools.run_tool(spine, cfg, actor, name, args)
             except ValueError as e:
                 messages.append({"role": "assistant", "content": _echo(result.text, name)})
-                messages.append({"role": "user", "content": f"Greška pri pozivu alata {name}: {e}"})
+                messages.append({"role": "user", "content": f"Greška pri pozivu alata {name}: "
+                                 f"{security.redact_secret_values(str(e), _secret_vals)}"})
                 continue
             seen_calls.add(lk)  # uspješan readonly -> zabilježi (neuspjeh se smije ponoviti)
+            if name in _TAINTING_TOOLS:  # trust-taint: run je vidio slobodni tekst/dokumente
+                tainted = True           # (mogući injection-nosač) -> pooštri kasnije write-e
             _accumulate_sources(sources, name, tool_result)
             payload = json.dumps(tool_result, ensure_ascii=False, default=str)
             observed_oibs |= agent_guards.observed_oibs(payload)  # evidence (samo OIB-ovi)
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
                               f"Rezultat alata {name}: {agent_guards.truncate_structured(payload)}"})
+            continue
+
+        # trust-taint: untrusted (dokument/web) sadržaj NE smije voditi samo-modifikaciju
+        # (učenje izvora / stvaranje vještine) — odbij potpuno, ni ne parkiraj
+        if tainted and name in _TAINT_BLOCKED_WRITES:
+            messages.append({"role": "assistant", "content": _echo(result.text, name)})
+            messages.append({"role": "user", "content":
+                              f"Alat {name} nije dopušten nakon čitanja dokumenata/weba "
+                              f"(zaštita od injektiranja). Nastavi bez njega."})
             continue
 
         # write alat: NE izvršavaj — samo validiraj i predloži (čeka potvrdu)
@@ -296,12 +325,24 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
                               f"Nevažeći argumenti za {name}: {err}. Ispravi i pokušaj ponovno."})
             continue
 
+        # blast-radius cap: jedan (nenadzirani) run smije dirnuti najviše N RAZLIČITIH
+        # write-radnji (Paperclip cross-issue-influence-limit) — budžet stopira volumen,
+        # ovo stopira rasap po knjizi. Bije samo u unattended (interaktivni staje na 1.).
+        wkey = agent_guards.loop_key(name, args)
+        cap = agent_budget.run_write_cap(spine)
+        if unattended and cap > 0 and wkey not in run_writes and len(run_writes) >= cap:
+            return _finish((last_text or "")
+                           + f"\n\n[Zaustavljeno: dosegnut limit izmjena po pokretanju ({cap})]")
+        run_writes.add(wkey)
+
         summary = summarize_action(name, args)
         risk = agent_tools.risk(name)
         # perzistentni grant: "potvrdi jednom, zapamti" -> auto-izvrši (SAMO low/med;
         # high nikad, safety-floor u can_auto_approve). Inače normalni propose->confirm.
         from atlas.business import agent_grants
-        auto = agent_grants.can_auto_approve(spine, actor, name, args)
+        # tainted kontekst NE smije auto-izvršiti po grantu — injektirani dokument mogao
+        # bi okinuti zapamćeno pravilo; degradiraj na ručno (parkiraj/predloži)
+        auto = agent_grants.can_auto_approve(spine, actor, name, args) and not tainted
         if auto:
             try:
                 agent_budget.consume(spine, "writes", 1)  # dnevni plafon auto-write-a
