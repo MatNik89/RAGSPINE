@@ -206,9 +206,9 @@ def _run_pokreni_program(spine, cfg, actor, args) -> dict:
 
 
 def _run_porezni_rokovi(spine, cfg, actor, args) -> dict:
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     dana = int(args.get("dana", 14))
-    return {"rokovi": [dict(r) for r in kalendar.upcoming(spine, days=dana)]}
+    return {"rokovi": [dict(r) for r in deadline_calendar.upcoming(spine, days=dana)]}
 
 
 def _run_kompletnost_klijenta(spine, cfg, actor, args) -> dict:

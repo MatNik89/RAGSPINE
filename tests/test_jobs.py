@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from atlas.business import expiry, kalendar, obveze
+from atlas.business import expiry, deadline_calendar, obveze
 from atlas.ops import jobs
 from atlas.ops.scheduler import Scheduler
 
@@ -14,8 +14,8 @@ def _client(spine, name="Alfa", pdv=""):
 
 
 def test_deadlines_job_creates_notifications_and_dedupes(spine, cfg, monkeypatch):
-    kalendar.seed(spine, 2026)
-    monkeypatch.setattr(kalendar, "_today", lambda: date(2026, 2, 25))
+    deadline_calendar.seed(spine, 2026)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: date(2026, 2, 25))
 
     jobs.deadlines_job(spine, cfg)
     rows = spine.read().execute("SELECT * FROM notifications WHERE kind='deadline'").fetchall()

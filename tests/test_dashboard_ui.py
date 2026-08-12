@@ -2,7 +2,7 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from atlas.business import dashboard, kalendar, expiry as expiry_mod
+from atlas.business import dashboard, deadline_calendar, expiry as expiry_mod
 from atlas.web.api import create_app
 from atlas.web.deps import add_user
 from tests.conftest import complete_setup
@@ -108,7 +108,7 @@ def test_dashboard_json_has_expected_keys(spine, cfg):
 
 def test_dashboard_json_seeded_data_and_urgency(spine, cfg, monkeypatch):
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(expiry_mod, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
 
@@ -196,7 +196,7 @@ def test_dashboard_json_xss_safe_client_name(spine, cfg):
 
 def test_dashboard_calendar_events_pinned_to_day(spine, cfg, monkeypatch):
     today = date(2026, 8, 2)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(expiry_mod, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     with spine.write() as c:
@@ -244,7 +244,7 @@ def test_dashboard_unsent_no_employees_only_pdv(spine, cfg):
 
 def test_dashboard_kpi_totals_uncapped(spine, cfg, monkeypatch):
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     for i in range(12):  # 12 PDV obligors -> rows capped at 8, total must stay 12
         _seed_client(spine, name=f"K{i}", oib=str(10000000000 + i))
@@ -269,7 +269,7 @@ def test_dashboard_survives_malformed_expiry_date(spine, cfg, monkeypatch):
 
 def test_dashboard_json_lists_are_capped(spine, cfg, monkeypatch):
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     for i in range(12):
         _seed_client(spine, name=f"Klijent{i}", oib=str(10000000000 + i))
     from atlas.business import obveze

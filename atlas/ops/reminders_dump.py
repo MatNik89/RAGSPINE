@@ -4,7 +4,7 @@ import json
 import os
 from datetime import date, timedelta
 
-from atlas.business import expiry, kalendar
+from atlas.business import expiry, deadline_calendar
 
 _WINDOW_DAYS = 30
 
@@ -17,7 +17,7 @@ def dump(spine, cfg, now_fn=None) -> dict:
         "SELECT id, user, body, due FROM reminders WHERE done=0 AND due BETWEEN ? AND ? ORDER BY due",
         (today.isoformat(), end.isoformat()),
     ).fetchall()
-    rokovi = kalendar.upcoming(spine, days=_WINDOW_DAYS)
+    rokovi = deadline_calendar.upcoming(spine, days=_WINDOW_DAYS)
     istek = expiry.expiring(spine, days=_WINDOW_DAYS)
 
     payload = {

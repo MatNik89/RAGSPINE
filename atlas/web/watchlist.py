@@ -404,7 +404,7 @@ def export_xlsx(spine) -> bytes:
         raise ValueError("openpyxl nije instaliran (pip install atlas[full])")
     import io
 
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     wb = openpyxl.Workbook()
 
     ws = wb.active
@@ -418,7 +418,7 @@ def export_xlsx(spine) -> bytes:
 
     ws2 = wb.create_sheet("Rokovi")
     ws2.append(["Rok", "Vrsta", "Opis"])
-    for r in kalendar.upcoming(spine, days=60):
+    for r in deadline_calendar.upcoming(spine, days=60):
         ws2.append([_cell(r["due"]), _cell(r["kind"]), _cell(r["description"])])
 
     ws3 = wb.create_sheet("Izvori")

@@ -36,7 +36,7 @@ def overview(spine, period: str, visible=None) -> dict:
     start, end = _period_bounds(period)
 
     # ponytail: query deadline_dates directly for the requested period instead
-    # of kalendar.upcoming() — upcoming() is anchored to today's 31-day window,
+    # of deadline_calendar.upcoming() — upcoming() is anchored to today's 31-day window,
     # which is wrong for an arbitrary ?period= that isn't the current month.
     deadline_rows = spine.read().execute(
         """SELECT dd.id, dd.kind, dd.due, dd.year, d.description

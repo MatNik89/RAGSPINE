@@ -2,7 +2,7 @@ import json
 import os
 from datetime import date, timedelta
 
-from atlas.business import expiry, kalendar
+from atlas.business import expiry, deadline_calendar
 from atlas.ops import jobs, reminders_dump
 from atlas.ops.scheduler import Scheduler
 
@@ -16,7 +16,7 @@ def _client(spine, name="Alfa"):
 
 
 def _seed(spine, monkeypatch):
-    monkeypatch.setattr(kalendar, "_today", lambda: _TODAY)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: _TODAY)
     monkeypatch.setattr(expiry, "_today", lambda: _TODAY)
     with spine.write() as c:
         c.execute(

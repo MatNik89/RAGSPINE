@@ -277,9 +277,9 @@ def test_doc_generate_flow_still_works(spine, cfg):
 # ---------- 5E: dashboard urgency threshold ≤7d ----------
 
 def test_dashboard_deadline_in_5_days_is_warn(spine, cfg, monkeypatch):
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     with spine.write() as conn:
         conn.execute("INSERT INTO deadlines(kind, rule, description) VALUES('Q','monthly:1','Rok')")
@@ -297,9 +297,9 @@ def test_dashboard_deadline_in_5_days_is_warn(spine, cfg, monkeypatch):
 
 
 def test_dashboard_deadline_past_still_bad(spine, cfg, monkeypatch):
-    from atlas.business import kalendar
+    from atlas.business import deadline_calendar
     today = date(2026, 7, 10)
-    monkeypatch.setattr(kalendar, "_today", lambda: today)
+    monkeypatch.setattr(deadline_calendar, "_today", lambda: today)
     monkeypatch.setattr(dashboard, "_today", lambda: today)
     with spine.write() as conn:
         conn.execute("INSERT INTO deadlines(kind, rule, description) VALUES('R','monthly:1','Rok')")

@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date
 
-from atlas.business import deadlines, expiry, folder_sync, kalendar, obveze, power
+from atlas.business import deadlines, expiry, folder_sync, deadline_calendar, obveze, power
 from atlas.core import memory
 from atlas.docs import imap_fetch
 from atlas.ops import digest, health, reminders_dump
@@ -56,7 +56,7 @@ def imap_job(spine, cfg) -> None:
 
 
 def deadlines_job(spine, cfg) -> None:
-    for row in kalendar.upcoming(spine, days=7):
+    for row in deadline_calendar.upcoming(spine, days=7):
         _notify_once(spine, "deadline", f"{row['description']} — rok {row['due']}")
 
 

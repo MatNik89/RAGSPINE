@@ -20,7 +20,7 @@ from atlas.business import dashboard
 from atlas.business import expiry as expiry_mod
 from atlas.business import feedback_learn
 from atlas.business import folders as folders_mod
-from atlas.business import kalendar
+from atlas.business import deadline_calendar
 from atlas.business import karton as karton_mod
 from atlas.business import bookkeeping  # noqa: F401 — register bookkeeping lane handler
 from atlas.business import model_settings
@@ -2506,7 +2506,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/kalendar")
     def kalendar_upcoming(days: int = 14, user: str = Depends(require_user_web)):
-        return [dict(r) for r in kalendar.upcoming(spine, days)]
+        return [dict(r) for r in deadline_calendar.upcoming(spine, days)]
 
     @app.get("/expiry")
     def expiry_expiring(days: int = 60, actor: Actor = Depends(require_actor_web)):
