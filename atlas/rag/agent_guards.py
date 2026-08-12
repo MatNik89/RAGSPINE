@@ -1,23 +1,25 @@
-"""Zaštite agentske petlje (MateClaw obrasci, prilagođeni ATLAS-ovom jednostavnom
-loopu): (1) StructuredTruncator — rez tool-rezultata na JSON-granici + fidelity-nota
-(da model ne "popravi"/izmisli odsječeno); (2) evidence-guard — OIB u odgovoru koji
-NIJEDAN alat nije stvarno vidio = neprovjeren (anti-halucinacija za računovodstvo);
-(3) loop-guard ključ (isti alat+argumenti ponovljen = bez napretka)."""
+"""Agent-loop guards (MateClaw patterns, adapted to ATLAS's simple loop):
+(1) StructuredTruncator — cut tool results at a JSON boundary + a fidelity note (so the
+model does not "fix"/invent the truncated part); (2) evidence-guard — an OIB in the
+answer that NO tool actually saw = unverified (anti-hallucination for accounting);
+(3) loop-guard key (same tool+args repeated = no progress)."""
 import json
 import re
 
 from atlas.core import security
 
+# LLM-facing note appended to truncated tool results (kept Croatian — the assistant
+# reasons in Croatian; this is prompt content, like tool descriptions).
 _FIDELITY = "\n…[skraćeno — izostavljeni dio NIJE poznat; ne izmišljaj nastavak]"
 _OIB_RE = re.compile(r"\b\d{11}\b")
 _STRUCT_SEPS = ("},", "],", "}", "]", ",")
 
 
 def truncate_structured(text: str, limit: int = 6000) -> str:
-    """Rez na zadnjoj strukturnoj granici (,/}/]) unutar limita — retained dio ne
-    završava usred tokena (inače model izmišlja 'popravak'). Fidelity-nota jasno
-    kaže da je nepotpuno (model NE parsira kao valjan JSON). Ukupno <= limit
-    (nota rezervirana; Codex). Rez može biti unutar stringa — nota to signalizira."""
+    """Cut at the last structural boundary (,/}/]) within the limit — the retained part
+    does not end mid-token (otherwise the model invents a 'fix'). The fidelity note makes
+    clear it is incomplete (the model does NOT parse it as valid JSON). Total <= limit
+    (note reserved; Codex). The cut may fall inside a string — the note signals that."""
     if text is None or len(text) <= limit:
         return text or ""
     budget = max(1, limit - len(_FIDELITY))
@@ -30,16 +32,15 @@ def truncate_structured(text: str, limit: int = 6000) -> str:
 
 
 def observed_oibs(text: str) -> set:
-    """OIB-ovi viđeni u sadržaju (za evidence-akumulaciju; jeftino, set ne string)."""
+    """OIBs seen in the content (for evidence accumulation; cheap, a set not a string)."""
     return set(_OIB_RE.findall(text or ""))
 
 
 def unverified_oibs(answer: str, observed) -> list[str]:
-    """Vrati VALJANE OIB-ove koje odgovor navodi a NISU u skupu viđenih (`observed`
-    = set OIB-stringova iz rezultata alata + upita). Hvata ČISTU izmišljotinu (OIB
-    koji se ne pojavljuje nigdje); NE hvata krivo-pripisivanje (točan OIB, kriv
-    klijent) — to je entity-binding, širi zahvat. OIB=11 znam.+checksum = visoka
-    preciznost."""
+    """Return VALID OIBs the answer states that are NOT in the observed set (`observed`
+    = set of OIB strings from tool results + the query). Catches PURE fabrication (an OIB
+    that appears nowhere); does NOT catch mis-attribution (correct OIB, wrong client) —
+    that is entity-binding, a larger change. OIB = 11 digits + checksum = high precision."""
     ans = {o for o in _OIB_RE.findall(answer or "") if security.oib_valid(o)}
     if not ans:
         return []
@@ -48,8 +49,8 @@ def unverified_oibs(answer: str, observed) -> list[str]:
 
 
 def loop_key(name, args: dict) -> str:
-    """Potpis poziva (alat+argumenti) — ponovljeni isti = bez napretka. Podnosi
-    name=None (malformiran poziv; Codex)."""
+    """Call signature (tool+args) — the same one repeated = no progress. Tolerates
+    name=None (malformed call; Codex)."""
     n = str(name or "")
     try:
         return n + "|" + json.dumps(args or {}, sort_keys=True, default=str)
@@ -60,6 +61,7 @@ def loop_key(name, args: dict) -> str:
 def append_evidence_caution(text: str, unverified: list[str]) -> str:
     if not unverified:
         return text
-    lista = ", ".join(unverified)
-    return (text or "") + ("\n\n⚠ Nisam iz podataka potvrdio OIB: " + lista +
+    joined = ", ".join(unverified)
+    # user-facing caution appended to the answer -> Croatian
+    return (text or "") + ("\n\n⚠ Nisam iz podataka potvrdio OIB: " + joined +
                            " — provjerite prije korištenja.")
