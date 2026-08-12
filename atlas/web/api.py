@@ -1351,6 +1351,22 @@ def create_app(spine, cfg) -> FastAPI:
         spine.audit(actor.username, "budget_set", "agent")
         return {"ok": True, "budget": agent_budget.usage_today(spine)}
 
+    # --- Replay: ponovi ranije izvršenu agent-radnju iz audit-traga (owner) ---
+    @app.get("/replay")
+    def replay_list(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import replay
+        _require_owner(actor)  # ponavljanje radnji = vlasnička operacija
+        return {"radnje": replay.list_replayable(spine)}
+
+    @app.post("/replay/{audit_id}")
+    def replay_run(audit_id: int, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import replay
+        _require_owner(actor)
+        try:
+            return replay.replay(spine, cfg, audit_id, actor)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
     # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
     @app.get("/zakazano")
     def zakazano_list(actor: Actor = Depends(require_actor_web)):
