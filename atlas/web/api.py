@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from atlas.business import auditlog
 from atlas.business import checklist
-from atlas.business import cjenik
+from atlas.business import pricelist
 from atlas.business import client_visibility
 from atlas.business import dashboard
 from atlas.business import expiry as expiry_mod
@@ -2736,14 +2736,14 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/cjenik")
     def cjenik_list(user: str = Depends(require_user_web)):
-        return cjenik.price_list(spine)
+        return pricelist.price_list(spine)
 
     @app.post("/cjenik/izracun")
     def cjenik_izracun(body: CjenikIzracunBody, actor: Actor = Depends(require_actor_web)):
         if body.client_id is not None:
             _guard_client(actor, body.client_id)
         try:
-            return cjenik.izracunaj_cijenu(spine, body.client_id, employees=body.employees,
+            return pricelist.calculate_price(spine, body.client_id, employees=body.employees,
                                             extras=body.extras)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
@@ -2752,7 +2752,7 @@ def create_app(spine, cfg) -> FastAPI:
     def cjenik_usporedba(client_id: int, actor: Actor = Depends(require_actor_web)):
         _guard_client(actor, client_id)
         try:
-            return cjenik.usporedi_s_trzistem(spine, client_id)
+            return pricelist.compare_to_market(spine, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 

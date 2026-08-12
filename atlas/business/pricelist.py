@@ -65,7 +65,7 @@ def get_price(spine, key: str, default: float = 0.0) -> float:
     return row["cijena"] if row else default
 
 
-def izracunaj_cijenu(spine, client_id: int, employees: int = 0, extras: list[str] | None = None) -> dict:
+def calculate_price(spine, client_id: int, employees: int = 0, extras: list[str] | None = None) -> dict:
     client = spine.read().execute(
         "SELECT name,pausal_eur,pdv_status FROM clients WHERE id=?", (client_id,)
     ).fetchone()
@@ -102,7 +102,7 @@ def izracunaj_cijenu(spine, client_id: int, employees: int = 0, extras: list[str
     return {"stavke": stavke, "ukupno": ukupno, "klijent": client["name"]}
 
 
-def usporedi_s_trzistem(spine, client_id: int) -> dict:
+def compare_to_market(spine, client_id: int) -> dict:
     client = spine.read().execute(
         "SELECT name,pausal_eur FROM clients WHERE id=?", (client_id,)
     ).fetchone()

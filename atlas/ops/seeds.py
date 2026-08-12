@@ -1,5 +1,5 @@
 """DB seed data: kontni plan, watch defaults, dnevnice rates (+ kalendar/quickref via all())."""
-from atlas.business import cjenik, dnevnice, kalendar, quickref
+from atlas.business import dnevnice, kalendar, pricelist, quickref
 from atlas.web.watchlist import DEFAULT_RSS, add_source
 
 # ponytail: plausible RRIF-style konto layout (razred = first digit), not the
@@ -132,5 +132,5 @@ def all(spine, year: int) -> dict:
         "quickref": quickref.seed(spine),
         "kalendar": kalendar.seed(spine, year),
         "dnevnice": dnevnice_seed(spine),
-        "cjenik": cjenik.seed(spine),
+        "cjenik": pricelist.seed(spine),
     }

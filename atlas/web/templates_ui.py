@@ -1463,9 +1463,9 @@ async function loadKarton() {
     renderObligations($('k-obligations'), data.obligations || []);
     renderExpiry($('k-expiry'), data.expiry || []);
 
-    $('k-cjenik-ukupno').textContent = euro(data.cjenik.ukupno || 0);
+    $('k-cjenik-ukupno').textContent = euro(data.pricelist.ukupno || 0);
     $('k-cjenik-preporuka').textContent =
-      (data.cjenik.usporedba && data.cjenik.usporedba.preporuka) || '';
+      (data.pricelist.usporedba && data.pricelist.usporedba.preporuka) || '';
 
     renderEracuni($('k-eracuni'), data.eracuni || { count: 0, recent: [] });
     renderDocuments($('k-documents'), data.documents || []);

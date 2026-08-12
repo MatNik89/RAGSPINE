@@ -3,7 +3,7 @@
 # not crash the whole card - it degrades to an empty/default result.
 from datetime import date
 
-from atlas.business import checklist, cjenik, notes, obveze
+from atlas.business import checklist, notes, obveze, pricelist
 from atlas.business import onboarding
 
 
@@ -87,8 +87,8 @@ def karton_data(spine, cfg, client_id: int) -> dict:
     obligations = _safe(lambda: _client_obligations(spine, client_id, period), [])
     expiry_rows = _safe(lambda: _client_expiry(spine, client_id), [])
     cjenik_data = _safe(lambda: {
-        "ukupno": cjenik.izracunaj_cijenu(spine, client_id)["ukupno"],
-        "usporedba": cjenik.usporedi_s_trzistem(spine, client_id),
+        "ukupno": pricelist.calculate_price(spine, client_id)["ukupno"],
+        "usporedba": pricelist.compare_to_market(spine, client_id),
     }, {"ukupno": 0, "usporedba": None})
     eracuni = _safe(lambda: _client_eracuni(spine, client.get("oib")), {"count": 0, "recent": []})
     documents = _safe(lambda: onboarding.list_documents(spine, cfg, client_id), [])
