@@ -46,6 +46,42 @@ def test_bad_override_falls_back_to_default(spine):
     assert ab.usage_today(spine)["llm"]["cap"] == ab.DEFAULTS["llm"]
 
 
+def test_add_persists_even_over_cap_and_over_detects(spine):
+    """Token-bypass fix (Codex): add() bilježi i preko plafona -> total dosegne
+    plafon -> over() zatvori vrata. (consume() bi rollbackao over-cap i vrata
+    se nikad ne zatvore.)"""
+    spine.set_override("agent", "budget_tokens", 1000)
+    ab.add(spine, "tokens", 800)
+    assert ab.over(spine, "tokens") is False
+    ab.add(spine, "tokens", 800)          # 1600 > 1000, ali SE BILJEŽI
+    assert ab.usage_today(spine)["tokens"]["used"] == 1600
+    assert ab.over(spine, "tokens") is True
+
+
+def test_over_zero_cap_never(spine):
+    spine.set_override("agent", "budget_tokens", 0)
+    ab.add(spine, "tokens", 10_000)
+    assert ab.over(spine, "tokens") is False
+
+
+def test_run_agent_stops_when_tokens_exhausted(spine):
+    from atlas.business import acl, tenancy
+    from atlas.rag import agent
+    from atlas.web.deps import add_user
+    add_user(spine, "ana", "pw", "member")
+    actor = acl.Actor(user_id=1, org_id=tenancy.default_org_id(spine),
+                      role="member", username="ana")
+    spine.set_override("agent", "budget_tokens", 500)
+    ab.add(spine, "tokens", 500)  # već na plafonu
+
+    class _LLM:
+        def complete(self, *a, **k):
+            raise AssertionError("LLM ne smije biti pozvan kad su tokeni iscrpljeni")
+
+    out = agent.run_agent(spine, object(), "pitanje", actor, _LLM(), max_steps=3)
+    assert "tokens" in out["text"] and "Zaustavljeno" in out["text"]
+
+
 def test_run_agent_stops_on_llm_budget(spine):
     """run_agent staje graciozno kad je LLM-budžet iscrpljen (ne ruši)."""
     from atlas.business import acl, tenancy

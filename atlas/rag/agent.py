@@ -222,16 +222,17 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
 
     from atlas.business import agent_budget  # budžet-štit (cost-runaway, pos. unattended)
     for _ in range(max_steps):
+        # token-plafon se provjerava PRIJE poziva (potrošnja se bilježi nakon; Codex:
+        # inače over-cap tokeni nikad ne uđu u total i vrata se ne zatvore)
+        if agent_budget.over(spine, "tokens"):
+            return _finish((last_text or "") + "\n\n[Zaustavljeno: dnevni budžet 'tokens' iscrpljen]")
         try:
-            agent_budget.consume(spine, "llm", 1)  # dnevni plafon LLM-poziva
+            agent_budget.consume(spine, "llm", 1)  # dnevni plafon LLM-poziva (rezervacija)
         except agent_budget.BudgetError as e:
             return _finish((last_text or "") + f"\n\n[Zaustavljeno: {e}]")
         result = llm.complete(messages, system=system, tools=tools)
         last_text = result.text
-        try:  # tokeni se broje NAKON poziva (soft-plafon za idući korak)
-            agent_budget.consume(spine, "tokens", agent_budget.tokens_of(result.usage))
-        except agent_budget.BudgetError as e:
-            return _finish(result.text + f"\n\n[Zaustavljeno: {e}]")
+        agent_budget.add(spine, "tokens", agent_budget.tokens_of(result.usage))  # uvijek zabilježi
 
         if not result.tool_calls:
             return _finish(result.text)

@@ -59,6 +59,33 @@ def consume(spine, kind: str, n: int = 1) -> None:
             f"UPDATE agent_budget SET {kind}={kind}+? WHERE day=date('now','localtime')", (n,))
 
 
+def add(spine, kind: str, n: int) -> None:
+    """Uvijek pribroji potrošnju (bez plafon-provjere, NE baci). Za mjerenja koja
+    se događaju NAKON troška (tokeni: poziv je već obavljen) — moraju se zabilježiti
+    i kad prelaze plafon, inače total nikad ne dosegne plafon i vrata se ne zatvore
+    (Codex: token-bypass). Plafon se onda provjerava PRIJE idućeg poziva preko over()."""
+    if kind not in DEFAULTS:
+        raise ValueError(f"nepoznata vrsta budžeta: {kind!r}")
+    if n <= 0:
+        return
+    with spine.write() as c:
+        c.execute("INSERT OR IGNORE INTO agent_budget(day) VALUES(date('now','localtime'))")
+        c.execute(
+            f"UPDATE agent_budget SET {kind}={kind}+? WHERE day=date('now','localtime')", (n,))
+
+
+def over(spine, kind: str) -> bool:
+    """Je li dnevna potrošnja već dosegla plafon (cap>0)? Pre-provjera prije poziva."""
+    if kind not in DEFAULTS:
+        raise ValueError(f"nepoznata vrsta budžeta: {kind!r}")
+    cap = _cap(spine, kind)
+    if cap <= 0:
+        return False
+    row = spine.read().execute(
+        f"SELECT {kind} AS v FROM agent_budget WHERE day=date('now','localtime')").fetchone()
+    return ((row["v"] if row else 0) or 0) >= cap
+
+
 def usage_today(spine) -> dict:
     row = spine.read().execute(
         "SELECT llm, tokens, writes FROM agent_budget "
