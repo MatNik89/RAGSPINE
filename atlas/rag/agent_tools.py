@@ -217,7 +217,7 @@ def _run_kompletnost_klijenta(spine, cfg, actor, args) -> dict:
 
 
 def _run_posalji_poruku_klijentu(spine, cfg, actor, args) -> dict:
-    from atlas.web import messaging
+    from atlas.business import messaging
     row = _resolve_visible(spine, actor, args["klijent"])
     return messaging.send_to_client(spine, cfg, row["id"], args["naslov"], args["tekst"],
                                     dry_run=False)

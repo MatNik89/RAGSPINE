@@ -23,7 +23,7 @@ def send_expiry_reminder(spine, cfg, item_id: int, dry_run: bool = False) -> dic
         "SELECT client_id, label, expires FROM expiry_items WHERE id=?", (item_id,)).fetchone()
     if row is None:
         raise ValueError(f"nepoznata stavka isteka: {item_id}")
-    from atlas.web import messaging
+    from atlas.business import messaging
     subject = f"Podsjetnik: {row['label']} ističe {row['expires']}"
     body = (f"Poštovani,\n\nvaš dokument „{row['label']}“ ističe {row['expires']}. "
             f"Molimo obnovite ga na vrijeme.\n\nRačunovodstveni ured")

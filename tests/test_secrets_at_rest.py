@@ -31,7 +31,7 @@ def test_messaging_target_stored_encrypted(spine, cfg):
 
 
 def test_send_to_client_decrypts_target(spine, cfg):
-    from atlas.web import messaging
+    from atlas.business import messaging
     with spine.write() as conn:
         cid = conn.execute("INSERT INTO clients(name) VALUES('X')").lastrowid
         enc = secretbox.encrypt("mailto://a@b.com", cfg)
@@ -43,7 +43,7 @@ def test_send_to_client_decrypts_target(spine, cfg):
 
 def test_old_plaintext_target_still_works(spine, cfg):
     # back-compat: stari (nešifrirani) zapis se i dalje koristi (secretbox fallback)
-    from atlas.web import messaging
+    from atlas.business import messaging
     with spine.write() as conn:
         cid = conn.execute("INSERT INTO clients(name) VALUES('Y')").lastrowid
         conn.execute("UPDATE clients SET messaging_consent=1, messaging_channel='mail', "

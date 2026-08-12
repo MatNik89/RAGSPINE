@@ -70,7 +70,7 @@ def _run_kampanja_obveza(spine, cfg, params: dict, org_id, created_by=None) -> d
     pristanka). NAPOMENA: clients/obligations u ATLAS-u NISU org-particionirani
     (jedan ured) — doseg je identičan postojećoj ručnoj /messaging/campaign (admin,
     office-wide); org_id se čuva na zadatku za buduću multi-tenancy."""
-    from atlas.web import messaging
+    from atlas.business import messaging
     kind = (params.get("kind") or "").strip()
     if not kind:
         raise ValueError("akcija kampanja_obveza traži 'kind' (npr. PDV)")

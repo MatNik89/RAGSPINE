@@ -38,7 +38,7 @@ from atlas.business import tenancy
 from atlas.business.acl import ROLE_RANK, VISIBILITIES, Actor, Asset, can
 from atlas.knowledge import skills as skills_mod
 from atlas.knowledge import wiki as wiki_mod
-from atlas.web import messaging
+from atlas.business import messaging
 from atlas.web import static as static_mod
 from atlas.browser import agent as agent_mod
 from atlas.browser.bridge import Bridge
