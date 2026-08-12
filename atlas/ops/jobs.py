@@ -4,7 +4,7 @@ import logging
 import time
 from datetime import date
 
-from atlas.business import expiry, folder_sync, kalendar, obveze, power, rokovi
+from atlas.business import deadlines, expiry, folder_sync, kalendar, obveze, power
 from atlas.core import memory
 from atlas.docs import imap_fetch
 from atlas.ops import digest, health, reminders_dump
@@ -73,7 +73,7 @@ def obveze_job(spine, cfg) -> None:
 
 
 def rokovi_job(spine, cfg) -> None:
-    added = rokovi.generate(spine)
+    added = deadlines.generate(spine)
     logger.info("rokovi_job: %d new deadline dates materialised", added)
 
 

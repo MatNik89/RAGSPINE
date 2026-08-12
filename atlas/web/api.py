@@ -22,7 +22,7 @@ from atlas.business import feedback_learn
 from atlas.business import folders as folders_mod
 from atlas.business import kalendar
 from atlas.business import karton as karton_mod
-from atlas.business import knjizenje  # noqa: F401 — register knjizenje lane handler
+from atlas.business import bookkeeping  # noqa: F401 — register bookkeeping lane handler
 from atlas.business import model_settings
 from atlas.business import monthly
 from atlas.business import nldate
@@ -2788,7 +2788,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/knjizenje")
     def knjizenje_suggest(body: KnjizenjeBody, user: str = Depends(require_user_web)):
-        return knjizenje.suggest(spine, body.description)
+        return bookkeeping.suggest(spine, body.description)
 
     @app.post("/knjizenje/correct")
     def knjizenje_correct(body: KnjizenjeCorrectBody, user: str = Depends(require_user_web)):

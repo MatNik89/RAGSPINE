@@ -1,11 +1,11 @@
 # Posting (knjizenje): account suggestion + tax deductibility, with learning from corrections.
 #
 # Priority: (1) learned from konto_corrections, (2) regex rule from
-# kategorizacija.RULES, (3) search of the chart of accounts by keywords,
+# categorization.RULES, (3) search of the chart of accounts by keywords,
 # (4) generic fallback.
 import re
 
-from atlas.business import feedback_learn, kategorizacija
+from atlas.business import feedback_learn, categorization
 
 _LEAD_PATTERNS = [
     r"^kako\s+(da\s+)?(pro)?knji[žz]im\s*",
@@ -31,14 +31,14 @@ def _naziv_for_konto(spine, konto: str) -> str:
     row = spine.read().execute("SELECT naziv FROM kontni_plan WHERE konto=?", (konto,)).fetchone()
     if row is not None:
         return row["naziv"]
-    for rule in kategorizacija.RULES:
+    for rule in categorization.RULES:
         if rule["konto"] == konto:
             return rule["naziv"]
     return konto
 
 
 def _porezno_note_for_konto(konto: str) -> tuple[float, str]:
-    for rule in kategorizacija.RULES:
+    for rule in categorization.RULES:
         if rule["konto"] == konto:
             return rule["porezno_priznato"], rule["note"]
     return 1.0, "Naučeno iz prethodnih ispravki — provjeri poreznu priznatost."
@@ -68,7 +68,7 @@ def suggest(spine, description: str) -> dict:
         return {"konto": learned["konto"], "naziv": naziv, "porezno_priznato": porezno,
                 "note": note, "confidence": learned["confidence"], "source": "naučeno"}
 
-    cat = kategorizacija.categorize(description)
+    cat = categorization.categorize(description)
     if cat["matched"]:
         return {"konto": cat["konto"], "naziv": cat["naziv"],
                 "porezno_priznato": cat["porezno_priznato"], "note": cat["note"],
