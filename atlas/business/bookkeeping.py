@@ -27,33 +27,33 @@ def _extract_description(query: str) -> str:
     return q.strip(_TRAILING)
 
 
-def _naziv_for_konto(spine, konto: str) -> str:
-    row = spine.read().execute("SELECT naziv FROM kontni_plan WHERE konto=?", (konto,)).fetchone()
+def _name_for_account(spine, account: str) -> str:
+    row = spine.read().execute("SELECT naziv FROM kontni_plan WHERE konto=?", (account,)).fetchone()
     if row is not None:
         return row["naziv"]
     for rule in categorization.RULES:
-        if rule["konto"] == konto:
+        if rule["konto"] == account:
             return rule["naziv"]
-    return konto
+    return account
 
 
-def _porezno_note_for_konto(konto: str) -> tuple[float, str]:
+def _tax_note_for_account(account: str) -> tuple[float, str]:
     for rule in categorization.RULES:
-        if rule["konto"] == konto:
+        if rule["konto"] == account:
             return rule["porezno_priznato"], rule["note"]
     return 1.0, "Naučeno iz prethodnih ispravki — provjeri poreznu priznatost."
 
 
-def _search_kontni_plan(spine, description: str) -> dict | None:
+def _search_chart_of_accounts(spine, description: str) -> dict | None:
     words = feedback_learn._significant_words(feedback_learn._norm(description))
     if not words:
         return None
     stems = {feedback_learn._stem(w) for w in words}
     rows = spine.read().execute("SELECT konto, naziv FROM kontni_plan").fetchall()
     for row in rows:
-        naziv_stems = {feedback_learn._stem(w) for w in
+        name_stems = {feedback_learn._stem(w) for w in
                         feedback_learn._significant_words(feedback_learn._norm(row["naziv"]), limit=None)}
-        if naziv_stems & stems:
+        if name_stems & stems:
             return {"konto": row["konto"], "naziv": row["naziv"],
                     "porezno_priznato": 1.0,
                     "note": "Pronađeno pretragom kontnog plana — provjeri."}
@@ -63,9 +63,9 @@ def _search_kontni_plan(spine, description: str) -> dict | None:
 def suggest(spine, description: str) -> dict:
     learned = feedback_learn.suggest_from_feedback(spine, description)
     if learned is not None:
-        naziv = _naziv_for_konto(spine, learned["konto"])
-        porezno, note = _porezno_note_for_konto(learned["konto"])
-        return {"konto": learned["konto"], "naziv": naziv, "porezno_priznato": porezno,
+        name = _name_for_account(spine, learned["konto"])
+        deductible, note = _tax_note_for_account(learned["konto"])
+        return {"konto": learned["konto"], "naziv": name, "porezno_priznato": deductible,
                 "note": note, "confidence": learned["confidence"], "source": "naučeno"}
 
     cat = categorization.categorize(description)
@@ -74,7 +74,7 @@ def suggest(spine, description: str) -> dict:
                 "porezno_priznato": cat["porezno_priznato"], "note": cat["note"],
                 "confidence": 0.8, "source": "pravilo"}
 
-    kp = _search_kontni_plan(spine, description)
+    kp = _search_chart_of_accounts(spine, description)
     if kp is not None:
         return {**kp, "confidence": 0.5, "source": "kontni-plan"}
 

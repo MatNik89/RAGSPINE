@@ -98,12 +98,12 @@ def _today() -> str:
     return date.today().strftime("%d.%m.%Y.")
 
 
-def _stavka_iznos(stavka) -> Decimal:
+def _line_amount(line) -> Decimal:
     """Validate one {"naziv","iznos"} quote line; raise ValueError on bad shape."""
-    if not isinstance(stavka, dict) or "naziv" not in stavka or "iznos" not in stavka:
+    if not isinstance(line, dict) or "naziv" not in line or "iznos" not in line:
         raise ValueError("neispravna stavka")
     try:
-        return Decimal(str(stavka["iznos"]))
+        return Decimal(str(line["iznos"]))
     except (InvalidOperation, TypeError, ValueError):
         raise ValueError("neispravna stavka") from None
 
@@ -177,13 +177,13 @@ def generate_from_client(spine, doc_type: str, client_id: int,
     prose_slots = TEMPLATES[doc_type]["prose_slots"]
 
     if doc_type == "ponuda":
-        stavke = extra.get("stavke", [])
-        iznosi_dec = [_stavka_iznos(s) for s in stavke]  # raises ValueError on bad shape
-        ukupno_dec = sum(iznosi_dec, Decimal("0")).quantize(Decimal("0.01"))
+        items = extra.get("stavke", [])
+        amounts_dec = [_line_amount(s) for s in items]  # raises ValueError on bad shape
+        total_dec = sum(amounts_dec, Decimal("0")).quantize(Decimal("0.01"))
         values["stavke"] = "\n".join(
-            f"- {s['naziv']}: {_fmt_money(d)}" for s, d in zip(stavke, iznosi_dec))
-        values["ukupno"] = _fmt_money(ukupno_dec)
-        values["_stavke_iznosi"] = [float(d) for d in iznosi_dec]
+            f"- {s['naziv']}: {_fmt_money(d)}" for s, d in zip(items, amounts_dec))
+        values["ukupno"] = _fmt_money(total_dec)
+        values["_stavke_iznosi"] = [float(d) for d in amounts_dec]
         prompt = f"Napiši kratak profesionalan uvod za ponudu klijentu {row['name']}."
         default_prose = f"Poštovani {row['name']},\n\nu nastavku Vam dostavljamo ponudu."
     elif doc_type == "opomena":

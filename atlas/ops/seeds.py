@@ -88,10 +88,10 @@ INDUSTRY_SOURCES = [
 def kontni_plan(spine) -> int:
     n = 0
     with spine.write() as c:
-        for konto, naziv, razred in KONTNI_PLAN:
+        for account, name, grade in KONTNI_PLAN:
             cur = c.execute(
                 "INSERT OR IGNORE INTO kontni_plan(konto,naziv,razred) VALUES(?,?,?)",
-                (konto, naziv, razred),
+                (account, name, grade),
             )
             n += cur.rowcount
     return n

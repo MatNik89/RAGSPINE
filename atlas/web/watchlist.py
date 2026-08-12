@@ -9,7 +9,7 @@ from atlas.core.net import safe_fetch
 from atlas.docs.ingest import ingest_text
 from atlas.web.learn import HR_GRADOVI as CITIES
 
-_PRIREZ_MAX_PCT = 30.0  # HR historical max ~18% (Zagreb); anything above = bogus/attack
+_SURTAX_MAX_PCT = 30.0  # HR historical max ~18% (Zagreb); anything above = bogus/attack
 
 INDUSTRY_KEYWORDS: dict[str, list[str]] = {
     "ugostiteljstvo": ["ugostitelj", "restoran", "kafic", "hrana", "pice", "turisticka pristojba"],
@@ -172,7 +172,7 @@ def check_source(spine, cfg, source_row, fetch=None) -> Change | None:
         # common-sense bound: the surtax in HR is 0-~18%; a malicious/MITM'd source
         # must not live-set e.g. 999% into the calculator. Out of bounds -> skip.
         try:
-            if not 0 <= float(rate) <= _PRIREZ_MAX_PCT:
+            if not 0 <= float(rate) <= _SURTAX_MAX_PCT:
                 continue
         except ValueError:
             continue

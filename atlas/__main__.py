@@ -511,9 +511,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ocr.add_argument("path")
     p_ocr.set_defaults(func=_cmd_ocr)
 
-    p_servis = sub.add_parser("servis")
-    p_servis.add_argument("akcija", choices=["install", "uninstall", "status"])
-    p_servis.set_defaults(func=_cmd_servis)
+    p_service = sub.add_parser("servis")
+    p_service.add_argument("akcija", choices=["install", "uninstall", "status"])
+    p_service.set_defaults(func=_cmd_servis)
 
     return p
 

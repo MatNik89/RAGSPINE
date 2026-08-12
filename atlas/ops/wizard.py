@@ -41,35 +41,35 @@ def page_preduvjeti(spine, cfg, *, input_fn=input, out=print) -> bool:
         reqs = preflight.requirements(cfg)
         ok = render_preflight(reqs, out=out)
         # winget auto-install is Windows-only (elsewhere the wizard does not offer it — brief).
-        instalabilni = [r for r in reqs
-                        if os.name == "nt" and r["key"] in preflight.WINGET_IDS
-                        and r["status"] in ("fail", "warn")]
-        if ok and not instalabilni:
+        installable = [r for r in reqs
+                       if os.name == "nt" and r["key"] in preflight.WINGET_IDS
+                       and r["status"] in ("fail", "warn")]
+        if ok and not installable:
             return True
         out("")
-        opcije, akcije = [], []
+        options, actions = [], []
         if ok:
-            opcije.append("Nastavi (obavezni preduvjeti ✓)")
-            akcije.append("ok")
-        for r in instalabilni:
-            opcije.append(f"Auto-instaliraj: {r['naziv']}")
-            akcije.append(("winget", r["key"]))
-        opcije.append("Provjeri ponovno")
-        akcije.append("retry")
-        opcije.append("Prekini setup")
-        akcije.append("stop")
-        naslov = ("Neki obavezni preduvjeti nedostaju (✗) — što dalje?"
-                  if not ok else "Preporuke (⚠) — što dalje?")
-        idx = tui_curses.radiolist(naslov, opcije, selected=0,
-                                   cancel_returns=len(akcije) - 1,
+            options.append("Nastavi (obavezni preduvjeti ✓)")
+            actions.append("ok")
+        for r in installable:
+            options.append(f"Auto-instaliraj: {r['naziv']}")
+            actions.append(("winget", r["key"]))
+        options.append("Provjeri ponovno")
+        actions.append("retry")
+        options.append("Prekini setup")
+        actions.append("stop")
+        title = ("Neki obavezni preduvjeti nedostaju (✗) — što dalje?"
+                 if not ok else "Preporuke (⚠) — što dalje?")
+        idx = tui_curses.radiolist(title, options, selected=0,
+                                   cancel_returns=len(actions) - 1,
                                    input_fn=input_fn, out=out)
-        akcija = akcije[idx]
-        if akcija == "ok":
+        action = actions[idx]
+        if action == "ok":
             return True
-        if akcija == "stop":
+        if action == "stop":
             return False
-        if isinstance(akcija, tuple):
-            preflight.install_via_winget(akcija[1], out=out)
+        if isinstance(action, tuple):
+            preflight.install_via_winget(action[1], out=out)
         # "retry" and post-install: the loop checks again
 
 
@@ -226,9 +226,9 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
     model = names[idx]
 
     row = rows[idx]
-    kandidati = preflight.quant_tags(model, row.get("best_quant", "")) + [model]
+    candidates = preflight.quant_tags(model, row.get("best_quant", "")) + [model]
     pulled_tag = None
-    for tag in kandidati:
+    for tag in candidates:
         if tag != model:
             out(f"Skidam {tag} (točan kvant; prekid je siguran — nastavlja gdje je stalo)...")
         else:
@@ -240,18 +240,18 @@ def page_model(spine, cfg, *, input_fn=input, out=print) -> bool:
         out("Model nije skinut. Pokreni setup ponovno ili postavi kasnije u Postavkama.")
         return tui.prompt_yes_no("Nastavi setup bez modela?", default=True,
                                  input_fn=input_fn, out=out)
-    if pulled_tag == model and len(kandidati) > 1:
+    if pulled_tag == model and len(candidates) > 1:
         out("  ⚠ Registry nema izračunati kvant — skinut zadani tag "
             "(može biti veći od procjene).")
-    stvarno = preflight.ollama_model_size(pulled_tag, url)
-    if stvarno:
-        procjena = model_table.disk_gb(row.get("params", ""), row.get("best_quant", ""))
-        linija = f"  Stvarna veličina: {stvarno:.1f} GB"
-        if procjena:
-            linija += f" (procjena {procjena:.1f} GB)"
-        if procjena and stvarno > procjena * 1.3:
-            linija = "  ⚠ " + linija.removeprefix("  ") + " — veće od procjene!"
-        out(linija)
+    actual = preflight.ollama_model_size(pulled_tag, url)
+    if actual:
+        estimate = model_table.disk_gb(row.get("params", ""), row.get("best_quant", ""))
+        line = f"  Stvarna veličina: {actual:.1f} GB"
+        if estimate:
+            line += f" (procjena {estimate:.1f} GB)"
+        if estimate and actual > estimate * 1.3:
+            line = "  ⚠ " + line.removeprefix("  ") + " — veće od procjene!"
+        out(line)
 
     emb = setup_embedding(spine, cfg, out=out)
     from atlas.business import model_settings
@@ -371,9 +371,9 @@ def render_summary(spine, cfg, *, out=print) -> None:
     out(f"  Embedding: {emb or '— preskočeno (Postavke → Model)'}")
     out(f"  Mreža: {f'https://{host}:{port}' if host else '— zadano (Postavke → Mreža)'}")
     out(f"  HTTPS cert: {cert or '— nema (atlas setup, stranica 4)'}")
-    mape = folders.list_folders(spine)
-    if mape:
-        for m in mape:
+    mounts = folders.list_folders(spine)
+    if mounts:
+        for m in mounts:
             out(f"  Mapa [{m['role']}]: {m['path']}")
     else:
         out("  Mape: — dodaj nakon prijave (Postavke → Mrežne mape)")

@@ -72,34 +72,34 @@ def calculate_price(spine, client_id: int, employees: int = 0, extras: list[str]
     if client is None:
         raise ValueError("nepoznat klijent")
 
-    stavke = []
+    items = []
 
     base = client["pausal_eur"] or 0
     if not base:
         base = get_price(spine, "mjesecno_knjigovodstvo")
-    stavke.append({"naziv": "Mjesečno knjigovodstvo", "iznos": _d(base)})
+    items.append({"naziv": "Mjesečno knjigovodstvo", "iznos": _d(base)})
 
     if employees > 0:
         per_emp = get_price(spine, "obracun_place")
-        stavke.append({"naziv": f"Obračun plaće ({employees} zaposlenika)",
+        items.append({"naziv": f"Obračun plaće ({employees} zaposlenika)",
                         "iznos": _d(per_emp * employees)})
         joppd = get_price(spine, "joppd_obrazac")
-        stavke.append({"naziv": "JOPPD obrazac", "iznos": _d(joppd)})
+        items.append({"naziv": "JOPPD obrazac", "iznos": _d(joppd)})
 
     pdv_status = (client["pdv_status"] or "").lower()
     if "u sustavu" in pdv_status:
         pdv = get_price(spine, "pdv_prijava")
-        stavke.append({"naziv": "PDV prijava", "iznos": _d(pdv)})
+        items.append({"naziv": "PDV prijava", "iznos": _d(pdv)})
 
     for ekey in (extras or []):
         row = _lookup(spine, ekey)
-        naziv = row["usluga"] if row else ekey
-        iznos = row["cijena"] if row else 0.0
-        stavke.append({"naziv": naziv, "iznos": _d(iznos)})
+        name = row["usluga"] if row else ekey
+        amount = row["cijena"] if row else 0.0
+        items.append({"naziv": name, "iznos": _d(amount)})
 
-    ukupno = sum((s["iznos"] for s in stavke), Decimal("0.00"))
+    total = sum((s["iznos"] for s in items), Decimal("0.00"))
 
-    return {"stavke": stavke, "ukupno": ukupno, "klijent": client["name"]}
+    return {"stavke": items, "ukupno": total, "klijent": client["name"]}
 
 
 def compare_to_market(spine, client_id: int) -> dict:
@@ -109,7 +109,7 @@ def compare_to_market(spine, client_id: int) -> dict:
     if client is None:
         raise ValueError("nepoznat klijent")
 
-    klijent_pausal = client["pausal_eur"] or 0
+    client_pausal = client["pausal_eur"] or 0
     others = spine.read().execute(
         "SELECT pausal_eur FROM clients WHERE id!=? AND active=1 AND pausal_eur>0",
         (client_id,),
@@ -117,26 +117,26 @@ def compare_to_market(spine, client_id: int) -> dict:
 
     if not others:
         return {
-            "klijent_pausal": _d(klijent_pausal),
+            "klijent_pausal": _d(client_pausal),
             "prosjek_trzista": None,
             "preporuka": "Nema dovoljno podataka o drugim klijentima za usporedbu.",
         }
 
-    prosjek = sum(r["pausal_eur"] for r in others) / len(others)
+    average = sum(r["pausal_eur"] for r in others) / len(others)
 
-    if klijent_pausal <= 0 or prosjek == 0:
-        preporuka = "Nema dovoljno podataka o drugim klijentima za usporedbu."
+    if client_pausal <= 0 or average == 0:
+        recommendation = "Nema dovoljno podataka o drugim klijentima za usporedbu."
     else:
-        diff = (klijent_pausal - prosjek) / prosjek
+        diff = (client_pausal - average) / average
         if diff < -0.15:
-            preporuka = "Ispod tržišta — razmisli o povećanju naknade"
+            recommendation = "Ispod tržišta — razmisli o povećanju naknade"
         elif diff > 0.15:
-            preporuka = "Iznad tržišta — u redu ako je opravdano"
+            recommendation = "Iznad tržišta — u redu ako je opravdano"
         else:
-            preporuka = "U skladu s tržištem"
+            recommendation = "U skladu s tržištem"
 
     return {
-        "klijent_pausal": _d(klijent_pausal),
-        "prosjek_trzista": _d(prosjek),
-        "preporuka": preporuka,
+        "klijent_pausal": _d(client_pausal),
+        "prosjek_trzista": _d(average),
+        "preporuka": recommendation,
     }

@@ -50,7 +50,7 @@ def _client_expiry(spine, client_id: int) -> list[dict]:
     return out
 
 
-def _client_eracuni(spine, oib: str | None) -> dict:
+def _client_einvoices(spine, oib: str | None) -> dict:
     if not oib:
         return {"count": 0, "recent": []}
     count = spine.read().execute(
@@ -86,11 +86,11 @@ def client_card_data(spine, cfg, client_id: int) -> dict:
         "ORDER BY updated_at DESC", (client_id,)).fetchall()], [])
     obligations = _safe(lambda: _client_obligations(spine, client_id, period), [])
     expiry_rows = _safe(lambda: _client_expiry(spine, client_id), [])
-    cjenik_data = _safe(lambda: {
+    pricelist_data = _safe(lambda: {
         "ukupno": pricelist.calculate_price(spine, client_id)["ukupno"],
         "usporedba": pricelist.compare_to_market(spine, client_id),
     }, {"ukupno": 0, "usporedba": None})
-    eracuni = _safe(lambda: _client_eracuni(spine, client.get("oib")), {"count": 0, "recent": []})
+    einvoices = _safe(lambda: _client_einvoices(spine, client.get("oib")), {"count": 0, "recent": []})
     documents = _safe(lambda: onboarding.list_documents(spine, cfg, client_id), [])
 
     return {
@@ -100,7 +100,7 @@ def client_card_data(spine, cfg, client_id: int) -> dict:
         "sops": sops,
         "obligations": obligations,
         "expiry": expiry_rows,
-        "cjenik": cjenik_data,
-        "eracuni": eracuni,
+        "cjenik": pricelist_data,
+        "eracuni": einvoices,
         "documents": documents,
     }

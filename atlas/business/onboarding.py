@@ -25,7 +25,7 @@ def _slug(name: str) -> str:
 # fallback client folder name when the real one is NOT registered (e.g. KLIJENTI
 # on the NAS) via Network folders with role='klijenti'. A registered folder always
 # wins — the user's existing structure is the source of truth, not our constant.
-KLIJENTI_DIR = "klijenti"
+CLIENTS_DIR = "klijenti"
 
 
 def klijenti_root(spine, cfg) -> str | None:
@@ -48,7 +48,7 @@ def klijenti_root(spine, cfg) -> str | None:
                 and any(b and security.path_under(rp, b) for b in roots)):
             return rp
         raise ValueError(f"mapa klijenata nedostupna ili izvan dozvoljenih korijena: {r['path']!r}")
-    fb = os.path.join(os.path.realpath(cfg.nas_root or cfg.data_dir), KLIJENTI_DIR)
+    fb = os.path.join(os.path.realpath(cfg.nas_root or cfg.data_dir), CLIENTS_DIR)
     return os.path.realpath(fb) if os.path.isdir(fb) else None
 
 
@@ -57,7 +57,7 @@ def _client_root(spine, cfg, client_id, name: str) -> str:
     SECURITY: realpath+commonpath guard — the result must resolve inside the
     klijenti base, never escape it."""
     base = klijenti_root(spine, cfg) or os.path.realpath(
-        os.path.join(cfg.nas_root or cfg.data_dir, KLIJENTI_DIR))
+        os.path.join(cfg.nas_root or cfg.data_dir, CLIENTS_DIR))
     folder = f"{client_id}_{_slug(name)}"
     dest = os.path.realpath(os.path.join(base, folder))
     if not security.path_under(dest, base):

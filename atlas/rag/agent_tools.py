@@ -39,51 +39,51 @@ class Tool:
 
 # --- helper: client by key (oib > id > name) ------------------------
 
-def _resolve_client(spine, kljuc: str) -> dict | None:
-    kljuc = (kljuc or "").strip()
-    if not kljuc:
+def _resolve_client(spine, key: str) -> dict | None:
+    key = (key or "").strip()
+    if not key:
         return None
     row = None
-    if re.fullmatch(r"\d{11}", kljuc):
-        row = spine.read().execute("SELECT * FROM clients WHERE oib=?", (kljuc,)).fetchone()
-    if row is None and kljuc.isdigit():
-        row = spine.read().execute("SELECT * FROM clients WHERE id=?", (int(kljuc),)).fetchone()
+    if re.fullmatch(r"\d{11}", key):
+        row = spine.read().execute("SELECT * FROM clients WHERE oib=?", (key,)).fetchone()
+    if row is None and key.isdigit():
+        row = spine.read().execute("SELECT * FROM clients WHERE id=?", (int(key),)).fetchone()
     if row is None:
-        row = spine.read().execute("SELECT * FROM clients WHERE name=?", (kljuc,)).fetchone()
+        row = spine.read().execute("SELECT * FROM clients WHERE name=?", (key,)).fetchone()
     if row is None:
-        row = spine.read().execute("SELECT * FROM clients WHERE name LIKE ?", (f"%{kljuc}%",)).fetchone()
+        row = spine.read().execute("SELECT * FROM clients WHERE name LIKE ?", (f"%{key}%",)).fetchone()
     return dict(row) if row else None
 
 
-def _resolve_visible(spine, actor, kljuc: str) -> dict:
+def _resolve_visible(spine, actor, key: str) -> dict:
     """Resolve + visibility in one step. An unknown OR invisible client
     yield the SAME error — a restricted worker is not told even of the
     existence of someone else's client."""
-    row = _resolve_client(spine, kljuc)
+    row = _resolve_client(spine, key)
     if row is None or not client_visibility.can_see(spine, actor.user_id, row["id"], actor.role):
-        raise ValueError(f"nepoznat klijent: {kljuc!r}")
+        raise ValueError(f"nepoznat klijent: {key!r}")
     return row
 
 
 # --- readonly tools --------------------------------------------------------
 
-def _run_pretrazi(spine, cfg, actor, args) -> dict:
-    upit = args["upit"]
+def _run_search(spine, cfg, actor, args) -> dict:
+    query = args["upit"]
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-    hits = retrieval.search(spine, upit, org_id=getattr(actor, "org_id", None),
+    hits = retrieval.search(spine, query, org_id=getattr(actor, "org_id", None),
                             visible_client_ids=visible)
     out = {"lokalno": [{"naslov": h.title, "tekst": h.text, "doc_id": h.doc_id,
                          "score": h.score} for h in hits]}
     if args.get("web") or not out["lokalno"]:
-        out["web"] = websearch.ddg(upit)
+        out["web"] = websearch.ddg(query)
     return out
 
 
-def _run_popis_obveza(spine, cfg, actor, args) -> dict:
-    vrsta = (args.get("vrsta") or "").strip().upper() or None
+def _run_list_obligations(spine, cfg, actor, args) -> dict:
+    kind = (args.get("vrsta") or "").strip().upper() or None
     period = args.get("period") or date.today().strftime("%Y-%m")
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-    kinds = [vrsta] if vrsta else obligations.active_kinds(spine)
+    kinds = [kind] if kind else obligations.active_kinds(spine)
     out = []
     for k in kinds:
         obligations.ensure_period(spine, k, period)
@@ -97,14 +97,14 @@ def _run_popis_obveza(spine, cfg, actor, args) -> dict:
     return {"period": period, "obveze": out}
 
 
-def _run_stanje_klijenta(spine, cfg, actor, args) -> dict:
+def _run_client_status(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["kljuc"])
     return client_card.client_card_data(spine, cfg, row["id"])
 
 
 # --- write tools -------------------------------------------------------
 
-def _run_dodaj_klijenta(spine, cfg, actor, args) -> dict:
+def _run_add_client(spine, cfg, actor, args) -> dict:
     data = {
         "name": args["naziv"],
         "oib": args.get("oib"),
@@ -121,46 +121,46 @@ def _run_dodaj_klijenta(spine, cfg, actor, args) -> dict:
     return result
 
 
-def _run_uredi_klijenta(spine, cfg, actor, args) -> dict:
+def _run_edit_client(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["kljuc"])
-    polja = args["polja"]
+    fields = args["polja"]
     sets, params = [], []
-    for k, v in polja.items():
+    for k, v in fields.items():
         sets.append(f"{k}=?")
         params.append(v)
     params.append(row["id"])
     with spine.write() as c:
         c.execute(f"UPDATE clients SET {', '.join(sets)} WHERE id=?", params)
-    spine.audit(actor.username, "client_update_agent", str(row["id"]), ",".join(polja))
-    return {"id": row["id"], "polja": polja}
+    spine.audit(actor.username, "client_update_agent", str(row["id"]), ",".join(fields))
+    return {"id": row["id"], "polja": fields}
 
 
-def _run_oznaci_obvezu(spine, cfg, actor, args) -> dict:
+def _run_mark_obligation(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["klijent"])
-    vrsta = args["vrsta"].strip().upper()
+    kind = args["vrsta"].strip().upper()
     period = args.get("period") or date.today().strftime("%Y-%m")
-    obligations.ensure_period(spine, vrsta, period)
+    obligations.ensure_period(spine, kind, period)
     ob = spine.read().execute(
         "SELECT id FROM obligations WHERE client_id=? AND kind=? AND period=?",
-        (row["id"], vrsta, period),
+        (row["id"], kind, period),
     ).fetchone()
     if ob is None:
-        raise ValueError(f"klijent {row['name']!r} nema obvezu {vrsta} za {period}")
+        raise ValueError(f"klijent {row['name']!r} nema obvezu {kind} za {period}")
     sent = bool(args.get("stanje", True))
     obligations.mark_sent(spine, ob["id"], actor.username, sent)
-    return {"obligation_id": ob["id"], "client_id": row["id"], "vrsta": vrsta, "sent": sent}
+    return {"obligation_id": ob["id"], "client_id": row["id"], "vrsta": kind, "sent": sent}
 
 
-def _run_zakazi_rok(spine, cfg, actor, args) -> dict:
+def _run_schedule_deadline(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["klijent"])
-    vrsta = args["vrsta"]
-    datum = args["datum"]
-    item_id = expiry.add(spine, row["id"], vrsta, args.get("oznaka") or vrsta, datum)
-    spine.audit(actor.username, "expiry_add_agent", f"client:{row['id']}", vrsta)
-    return {"id": item_id, "client_id": row["id"], "vrsta": vrsta, "datum": datum}
+    kind = args["vrsta"]
+    due_date = args["datum"]
+    item_id = expiry.add(spine, row["id"], kind, args.get("oznaka") or kind, due_date)
+    spine.audit(actor.username, "expiry_add_agent", f"client:{row['id']}", kind)
+    return {"id": item_id, "client_id": row["id"], "vrsta": kind, "datum": due_date}
 
 
-def _run_zapisi_belesku(spine, cfg, actor, args) -> dict:
+def _run_write_note(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["klijent"])
     note_id = notes.add(spine, row["id"], actor.username, args["tekst"])
     return {"id": note_id, "client_id": row["id"]}
@@ -168,7 +168,7 @@ def _run_zapisi_belesku(spine, cfg, actor, args) -> dict:
 
 # --- Phase 2: promotion — more business capabilities as tools --------------
 
-def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
+def _run_add_obligation_type(spine, cfg, actor, args) -> dict:
     kind = obligations.upsert_type(
         spine, args["kind"], args.get("label") or args["kind"], args.get("rule", ""),
         args.get("frequency", "monthly"), args.get("applies_to", "all_active"),
@@ -177,7 +177,7 @@ def _run_dodaj_vrstu_obveze(spine, cfg, actor, args) -> dict:
     return {"kind": kind, "label": args.get("label") or kind}
 
 
-def _run_nedostajuci_dokumenti(spine, cfg, actor, args) -> dict:
+def _run_missing_documents(spine, cfg, actor, args) -> dict:
     from atlas.business import doc_completeness
     row = _resolve_visible(spine, actor, args["klijent"])
     present = sorted({r["doc_type"] for r in spine.read().execute(
@@ -186,18 +186,18 @@ def _run_nedostajuci_dokumenti(spine, cfg, actor, args) -> dict:
             "nedostaju": doc_completeness.missing_for_client(spine, row["id"])}
 
 
-def _run_upit_baze(spine, cfg, actor, args) -> dict:
+def _run_query_database(spine, cfg, actor, args) -> dict:
     from atlas.rag import sql_lane
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
     return {"odgovor": sql_lane.handle(spine, args["pitanje"], visible=visible)}
 
 
-def _run_nauci_izvor(spine, cfg, actor, args) -> dict:
+def _run_learn_source(spine, cfg, actor, args) -> dict:
     from atlas.web import learn
     return learn.learn_url(spine, cfg, args["url"], actor.username)
 
 
-def _run_pokreni_program(spine, cfg, actor, args) -> dict:
+def _run_start_program(spine, cfg, actor, args) -> dict:
     from atlas.business import fleet
     res = fleet.open_on_worker(spine, args["radnik"], args["program"], actor_role=actor.role)
     if not res.get("ok"):
@@ -205,56 +205,56 @@ def _run_pokreni_program(spine, cfg, actor, args) -> dict:
     return res
 
 
-def _run_porezni_rokovi(spine, cfg, actor, args) -> dict:
+def _run_tax_deadlines(spine, cfg, actor, args) -> dict:
     from atlas.business import deadline_calendar
-    dana = int(args.get("dana", 14))
-    return {"rokovi": [dict(r) for r in deadline_calendar.upcoming(spine, days=dana)]}
+    days = int(args.get("dana", 14))
+    return {"rokovi": [dict(r) for r in deadline_calendar.upcoming(spine, days=days)]}
 
 
-def _run_kompletnost_klijenta(spine, cfg, actor, args) -> dict:
+def _run_client_completeness(spine, cfg, actor, args) -> dict:
     from atlas.business import checklist
     row = _resolve_visible(spine, actor, args["klijent"])
     return checklist.score_client(spine, row["id"])
 
 
-def _run_posalji_poruku_klijentu(spine, cfg, actor, args) -> dict:
+def _run_send_client_message(spine, cfg, actor, args) -> dict:
     from atlas.business import messaging
     row = _resolve_visible(spine, actor, args["klijent"])
     return messaging.send_to_client(spine, cfg, row["id"], args["naslov"], args["tekst"],
                                     dry_run=False)
 
 
-def _run_izvezi_excel(spine, cfg, actor, args) -> dict:
+def _run_export_excel(spine, cfg, actor, args) -> dict:
     from atlas.business import excel_export
-    sto, period = args.get("sto"), args.get("period")
-    pitanja = excel_export.clarify(sto, period)
-    if pitanja:  # info missing -> AI asks the user these questions (does not export)
-        return {"pitanja": pitanja}
+    what, period = args.get("sto"), args.get("period")
+    questions = excel_export.clarify(what, period)
+    if questions:  # info missing -> AI asks the user these questions (does not export)
+        return {"pitanja": questions}
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-    token, rows = excel_export.build(spine, cfg, sto, period, visible)
-    return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": sto}
+    token, rows = excel_export.build(spine, cfg, what, period, visible)
+    return {"preuzmi": f"/export/{token}", "redaka": rows, "sto": what}
 
 
-def _run_ucitaj_vjestinu(spine, cfg, actor, args) -> dict:
+def _run_load_skill(spine, cfg, actor, args) -> dict:
     """Load the full STEPS of a single skill (office procedure) on demand. Progressive
     disclosure over the existing skills registry: the agent has only the catalog
     (name+description) in the prompt up front, and pulls the full steps only when
     needed. Org-scoped."""
     from atlas.knowledge import skills as skills_mod
-    ime = (args.get("ime") or "").strip().lower()
+    name = (args.get("ime") or "").strip().lower()
     # readable: only skills THIS actor is allowed to see (private/team gate; Codex)
-    aktivne = skills_mod.readable(
+    active = skills_mod.readable(
         skills_mod.list_skills(spine, actor.org_id, status="active"), actor)
-    match = next((s for s in aktivne if (s["name"] or "").strip().lower() == ime), None)
+    match = next((s for s in active if (s["name"] or "").strip().lower() == name), None)
     if match is None:
         return {"greska": f"nepoznata vještina: {args.get('ime')!r}",
-                "dostupne": [s["name"] for s in aktivne]}
+                "dostupne": [s["name"] for s in active]}
     skills_mod.mark_used(spine, match["id"])  # use_count for skill-health (dead/alive)
     return {"ime": match["name"], "koraci": match["steps"],
             "validacija": match.get("validation") or ""}
 
 
-def _run_povezanost(spine, cfg, actor, args) -> dict:
+def _run_connectivity(spine, cfg, actor, args) -> dict:
     """Connectivity graph: entities from the query -> related documents -> summary.
     Read-only, client visibility is respected (hidden documents are not included). The
     tool builds the LLM client itself (the tool registry does not receive an llm);
@@ -271,18 +271,18 @@ def _run_povezanost(spine, cfg, actor, args) -> dict:
                                        org_id=actor.org_id)}
 
 
-def _run_rokovi_isteka(spine, cfg, actor, args) -> dict:
+def _run_expiry_deadlines(spine, cfg, actor, args) -> dict:
     """Upcoming EXPIRY deadlines (ID cards, permits, certificates) — filtered by
     client visibility (a hidden client does not leak)."""
-    dana = int(args.get("dana", 60))
+    days = int(args.get("dana", 60))
     visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-    rows = [dict(r) for r in expiry.expiring(spine, days=dana)]
+    rows = [dict(r) for r in expiry.expiring(spine, days=days)]
     if visible is not None:  # None = sees all; otherwise filter
         rows = [r for r in rows if r["client_id"] in visible]
     return {"rokovi": rows}
 
 
-def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
+def _run_client_documents(spine, cfg, actor, args) -> dict:
     """Documents in the client's file (name, type, validity) — the AI sees what the
     office has. Client visibility is checked through _resolve_visible."""
     row = _resolve_visible(spine, actor, args["klijent"])
@@ -292,7 +292,7 @@ def _run_dokumenti_klijenta(spine, cfg, actor, args) -> dict:
     return {"klijent": row["name"], "dokumenti": [dict(d) for d in docs]}
 
 
-def _run_predlozi_vjestinu(spine, cfg, actor, args) -> dict:
+def _run_propose_skill(spine, cfg, actor, args) -> dict:
     """Self-evolving skills (Abu): save a repeatable procedure as a DRAFT skill
     (owner=proposer, org-scoped, private). A draft does not enter the prompt catalog
     until the office activates it. Goes through propose->confirm like every write (the
@@ -306,7 +306,7 @@ def _run_predlozi_vjestinu(spine, cfg, actor, args) -> dict:
     return {"skill_id": sid, "ime": args["ime"], "status": "draft"}
 
 
-def _run_probudi_racunalo(spine, cfg, actor, args) -> dict:
+def _run_wake_computer(spine, cfg, actor, args) -> dict:
     """Wake the worker's workstation over the network (Wake-on-LAN). Admin+, counterpart
     to the pokreni_program tool."""
     from atlas.business import fleet
@@ -325,7 +325,7 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object",
                 "properties": {"upit": {"type": "string"}, "web": {"type": "boolean"}},
                 "required": ["upit"]},
-        readonly=True, min_role="viewer", run=_run_pretrazi,
+        readonly=True, min_role="viewer", run=_run_search,
     ),
     "popis_obveza": Tool(
         name="popis_obveza",
@@ -334,14 +334,14 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"vrsta": {"type": "string"}, "period": {"type": "string"},
                                "samo_neposlano": {"type": "boolean"}},
                 "required": []},
-        readonly=True, min_role="viewer", run=_run_popis_obveza,
+        readonly=True, min_role="viewer", run=_run_list_obligations,
     ),
     "stanje_klijenta": Tool(
         name="stanje_klijenta",
         description="Cjeloviti dosje klijenta (obveze, rokovi, bilješke, dokumenti...).",
         schema={"type": "object", "properties": {"kljuc": {"type": "string"}},
                 "required": ["kljuc"]},
-        readonly=True, min_role="viewer", run=_run_stanje_klijenta,
+        readonly=True, min_role="viewer", run=_run_client_status,
     ),
     "dodaj_klijenta": Tool(
         name="dodaj_klijenta",
@@ -354,7 +354,7 @@ TOOLS: dict[str, Tool] = {
                     "pdv_ucestalost": {"type": "string"},
                 },
                 "required": ["naziv"]},
-        readonly=False, min_role="member", run=_run_dodaj_klijenta,
+        readonly=False, min_role="member", run=_run_add_client,
     ),
     "uredi_klijenta": Tool(
         name="uredi_klijenta",
@@ -362,7 +362,7 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object",
                 "properties": {"kljuc": {"type": "string"}, "polja": {"type": "object"}},
                 "required": ["kljuc", "polja"]},
-        readonly=False, min_role="member", run=_run_uredi_klijenta,
+        readonly=False, min_role="member", run=_run_edit_client,
     ),
     "oznaci_obvezu": Tool(
         name="oznaci_obvezu",
@@ -371,7 +371,7 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"klijent": {"type": "string"}, "vrsta": {"type": "string"},
                                "stanje": {"type": "boolean"}, "period": {"type": "string"}},
                 "required": ["klijent", "vrsta"]},
-        readonly=False, min_role="member", run=_run_oznaci_obvezu,
+        readonly=False, min_role="member", run=_run_mark_obligation,
     ),
     "zakazi_rok": Tool(
         name="zakazi_rok",
@@ -380,7 +380,7 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"klijent": {"type": "string"}, "vrsta": {"type": "string"},
                                "datum": {"type": "string"}, "oznaka": {"type": "string"}},
                 "required": ["klijent", "vrsta", "datum"]},
-        readonly=False, min_role="member", run=_run_zakazi_rok,
+        readonly=False, min_role="member", run=_run_schedule_deadline,
     ),
     "zapisi_belesku": Tool(
         name="zapisi_belesku",
@@ -388,21 +388,21 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object",
                 "properties": {"klijent": {"type": "string"}, "tekst": {"type": "string"}},
                 "required": ["klijent", "tekst"]},
-        readonly=False, min_role="member", run=_run_zapisi_belesku,
+        readonly=False, min_role="member", run=_run_write_note,
     ),
     "nedostajuci_dokumenti": Tool(
         name="nedostajuci_dokumenti",
         description="Koji obavezni dokumenti nedostaju klijentu (iz popisa obaveznih vrsta).",
         schema={"type": "object", "properties": {"klijent": {"type": "string"}},
                 "required": ["klijent"]},
-        readonly=True, min_role="viewer", run=_run_nedostajuci_dokumenti,
+        readonly=True, min_role="viewer", run=_run_missing_documents,
     ),
     "upit_baze": Tool(
         name="upit_baze",
         description="Brojčani upit nad bazom (koliko klijenata/računa, zbroj, top...).",
         schema={"type": "object", "properties": {"pitanje": {"type": "string"}},
                 "required": ["pitanje"]},
-        readonly=True, min_role="viewer", run=_run_upit_baze,
+        readonly=True, min_role="viewer", run=_run_query_database,
     ),
     "dodaj_vrstu_obveze": Tool(
         name="dodaj_vrstu_obveze",
@@ -414,14 +414,14 @@ TOOLS: dict[str, Tool] = {
                     "applies_to": {"type": "string"}, "category": {"type": "string"},
                     "active": {"type": "boolean"}},
                 "required": ["kind"]},
-        readonly=False, min_role="member", run=_run_dodaj_vrstu_obveze,
+        readonly=False, min_role="member", run=_run_add_obligation_type,
     ),
     "nauci_izvor": Tool(
         name="nauci_izvor",
         description="Nauči s web-stranice (URL): spremi sadržaj i prepoznate podatke u znanje.",
         schema={"type": "object", "properties": {"url": {"type": "string"}},
                 "required": ["url"]},
-        readonly=False, min_role="member", run=_run_nauci_izvor,
+        readonly=False, min_role="member", run=_run_learn_source,
     ),
     "pokreni_program": Tool(
         name="pokreni_program",
@@ -429,20 +429,20 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object",
                 "properties": {"radnik": {"type": "string"}, "program": {"type": "string"}},
                 "required": ["radnik", "program"]},
-        readonly=False, min_role="admin", run=_run_pokreni_program,
+        readonly=False, min_role="admin", run=_run_start_program,
     ),
     "porezni_rokovi": Tool(
         name="porezni_rokovi",
         description="Nadolazeći porezni rokovi (PDV, JOPPD...) u sljedećih N dana.",
         schema={"type": "object", "properties": {"dana": {"type": "integer"}}, "required": []},
-        readonly=True, min_role="viewer", run=_run_porezni_rokovi,
+        readonly=True, min_role="viewer", run=_run_tax_deadlines,
     ),
     "kompletnost_klijenta": Tool(
         name="kompletnost_klijenta",
         description="Koliko je dosje klijenta kompletan (koji podaci/dokumenti fale).",
         schema={"type": "object", "properties": {"klijent": {"type": "string"}},
                 "required": ["klijent"]},
-        readonly=True, min_role="viewer", run=_run_kompletnost_klijenta,
+        readonly=True, min_role="viewer", run=_run_client_completeness,
     ),
     "posalji_poruku_klijentu": Tool(
         name="posalji_poruku_klijentu",
@@ -451,7 +451,7 @@ TOOLS: dict[str, Tool] = {
                 "properties": {"klijent": {"type": "string"}, "naslov": {"type": "string"},
                                "tekst": {"type": "string"}},
                 "required": ["klijent", "naslov", "tekst"]},
-        readonly=False, min_role="member", run=_run_posalji_poruku_klijentu,
+        readonly=False, min_role="member", run=_run_send_client_message,
     ),
     "izvezi_excel": Tool(
         name="izvezi_excel",
@@ -460,41 +460,41 @@ TOOLS: dict[str, Tool] = {
         schema={"type": "object",
                 "properties": {"sto": {"type": "string"}, "period": {"type": "string"}},
                 "required": []},
-        readonly=True, min_role="viewer", run=_run_izvezi_excel,
+        readonly=True, min_role="viewer", run=_run_export_excel,
     ),
     "rokovi_isteka": Tool(
         name="rokovi_isteka",
         description="Nadolazeći rokovi isteka (osobne iskaznice, dozvole, certifikati) u N dana.",
         schema={"type": "object", "properties": {"dana": {"type": "integer"}}, "required": []},
-        readonly=True, min_role="viewer", run=_run_rokovi_isteka,
+        readonly=True, min_role="viewer", run=_run_expiry_deadlines,
     ),
     "dokumenti_klijenta": Tool(
         name="dokumenti_klijenta",
         description="Popis dokumenata koje ured ima u dosjeu klijenta (naziv, vrsta, valjanost).",
         schema={"type": "object", "properties": {"klijent": {"type": "string"}},
                 "required": ["klijent"]},
-        readonly=True, min_role="viewer", run=_run_dokumenti_klijenta,
+        readonly=True, min_role="viewer", run=_run_client_documents,
     ),
     "probudi_racunalo": Tool(
         name="probudi_racunalo",
         description="Probudi radnikovu radnu stanicu preko mreže (Wake-on-LAN).",
         schema={"type": "object", "properties": {"radnik": {"type": "string"}},
                 "required": ["radnik"]},
-        readonly=False, min_role="admin", run=_run_probudi_racunalo,
+        readonly=False, min_role="admin", run=_run_wake_computer,
     ),
     "povezanost": Tool(
         name="povezanost",
         description="Poveznice kroz graf: kako su klijenti/dokumenti/entiteti povezani.",
         schema={"type": "object", "properties": {"upit": {"type": "string"}},
                 "required": ["upit"]},
-        readonly=True, min_role="viewer", run=_run_povezanost,
+        readonly=True, min_role="viewer", run=_run_connectivity,
     ),
     "ucitaj_vjestinu": Tool(
         name="ucitaj_vjestinu",
         description="Učitaj pune upute imenovane vještine (procedure ureda) kad je relevantna.",
         schema={"type": "object", "properties": {"ime": {"type": "string"}},
                 "required": ["ime"]},
-        readonly=True, min_role="viewer", run=_run_ucitaj_vjestinu,
+        readonly=True, min_role="viewer", run=_run_load_skill,
     ),
     "predlozi_vjestinu": Tool(
         name="predlozi_vjestinu",
@@ -505,7 +505,7 @@ TOOLS: dict[str, Tool] = {
                                "okidac": {"type": "string"}, "koraci": {"type": "string"},
                                "validacija": {"type": "string"}},
                 "required": ["ime", "koraci"]},
-        readonly=False, min_role="member", run=_run_predlozi_vjestinu,
+        readonly=False, min_role="member", run=_run_propose_skill,
     ),
 }
 
@@ -547,8 +547,8 @@ def validate(name: str, args: dict) -> tuple[bool, str | None]:
         except ValueError:
             return False, "datum mora biti ISO format (GGGG-MM-DD)"
     if name == "uredi_klijenta":
-        polja = args.get("polja") or {}
-        bad = set(polja) - _EDITABLE_FIELDS
+        fields = args.get("polja") or {}
+        bad = set(fields) - _EDITABLE_FIELDS
         if bad:
             return False, f"nedozvoljena polja: {sorted(bad)}"
 

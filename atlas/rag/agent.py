@@ -95,20 +95,20 @@ def summarize_action(name: str, args: dict) -> str:
         oib = f" (OIB {args['oib']})" if args.get("oib") else ""
         return f"Dodat ću klijenta {args.get('naziv', '')}{oib}."
     if name == "uredi_klijenta":
-        polja = ", ".join(f"{k}={v}" for k, v in (args.get("polja") or {}).items())
-        return f"Uredit ću klijenta {args.get('kljuc', '')}: {polja}."
+        fields = ", ".join(f"{k}={v}" for k, v in (args.get("polja") or {}).items())
+        return f"Uredit ću klijenta {args.get('kljuc', '')}: {fields}."
     if name == "oznaci_obvezu":
-        stanje = "poslano" if args.get("stanje", True) else "nije poslano"
+        state = "poslano" if args.get("stanje", True) else "nije poslano"
         period = args.get("period") or "tekući period"
         return (f"Označit ću obvezu {args.get('vrsta', '')} za "
-                f"{args.get('klijent', '')} ({period}) kao {stanje}.")
+                f"{args.get('klijent', '')} ({period}) kao {state}.")
     if name == "zakazi_rok":
         return (f"Zakazat ću rok {args.get('vrsta', '')} za "
                 f"{args.get('klijent', '')} na {args.get('datum', '')}.")
     if name == "zapisi_belesku":
-        tekst = args.get("tekst", "")
-        kratko = tekst if len(tekst) <= 60 else tekst[:57] + "..."
-        return f"Zapisat ću bilješku uz klijenta {args.get('klijent', '')}: \"{kratko}\"."
+        text = args.get("tekst", "")
+        short_text = text if len(text) <= 60 else text[:57] + "..."
+        return f"Zapisat ću bilješku uz klijenta {args.get('klijent', '')}: \"{short_text}\"."
     if name == "dodaj_vrstu_obveze":
         freq = args.get("frequency", "monthly")
         return (f"Dodat ću/urediti vrstu obveze {args.get('label') or args.get('kind', '')} "
@@ -122,11 +122,11 @@ def summarize_action(name: str, args: dict) -> str:
     if name == "predlozi_vjestinu":
         # show the ACTUAL content (description+steps) so the confirmation is not
         # blind — the content is untrusted (may come from an injected document); Codex
-        opis = (args.get("opis") or "").strip()[:200]
-        koraci = (args.get("koraci") or "").strip()[:600]
-        d = f"\nOpis: {opis}" if opis else ""
+        description = (args.get("opis") or "").strip()[:200]
+        steps = (args.get("koraci") or "").strip()[:600]
+        d = f"\nOpis: {description}" if description else ""
         return (f"Spremit ću novu vještinu (nacrt) {args.get('ime', '')!r}; ured je "
-                f"kasnije aktivira.{d}\nKoraci:\n{koraci}")
+                f"kasnije aktivira.{d}\nKoraci:\n{steps}")
     return f"Izvršit ću akciju {name} s argumentima {args}."
 
 
@@ -224,8 +224,8 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
     # (memory; Codex). The query is included because a user-typed OIB is not a hallucination.
     observed_oibs: set = agent_guards.observed_oibs(query)
     seen_calls: set = set()  # signatures of SUCCESSFUL readonly calls (loop-guard)
-    parkirano: list = []     # ids of parked actions (unattended)
-    izvrseno: list = []      # tools auto-run by grant (unattended)
+    parked_ids: list = []    # ids of parked actions (unattended)
+    executed: list = []      # tools auto-run by grant (unattended)
     run_writes: set = set()  # distinct write actions in THIS run (blast-radius cap)
     tainted = False          # whether the run consumed free text/documents (trust-taint)
 
@@ -240,7 +240,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             text, agent_guards.unverified_oibs(text, observed_oibs)),
             "sources": sources, "pending": None}
         if unattended:
-            out["parkirano"], out["izvrseno"] = parkirano, izvrseno
+            out["parkirano"], out["izvrseno"] = parked_ids, executed
         return out
 
     from atlas.business import agent_budget  # budget guard (cost-runaway, esp. unattended)
@@ -359,7 +359,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             spine.audit(actor.username, "agent_auto_grant", name,
                         json.dumps(args, ensure_ascii=False, default=str))
             if unattended:  # auto-run by grant -> continue the run
-                izvrseno.append(name)
+                executed.append(name)
                 messages.append({"role": "assistant", "content": _echo(result.text, name)})
                 messages.append({"role": "user", "content":
                                   f"{summary} — automatski odobreno (pravilo). Nastavi."})
@@ -370,7 +370,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             # no grant / high-risk -> PARK for approval and CONTINUE (do not touch data)
             from atlas.business import parked
             pid = parked.park(spine, actor.org_id, source or "autonomni", name, args, summary, risk)
-            parkirano.append(pid)
+            parked_ids.append(pid)
             messages.append({"role": "assistant", "content": _echo(result.text, name)})
             messages.append({"role": "user", "content":
                               f"{summary} — stavljeno u red za odobrenje (#{pid}). "

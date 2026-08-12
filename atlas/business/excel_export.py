@@ -21,11 +21,11 @@ def _cell(v):
     return v
 
 
-def clarify(sto: str | None, period: str | None) -> list[str]:
+def clarify(what: str | None, period: str | None) -> list[str]:
     """Return the questions still missing before the export can be made (empty = ready)."""
-    if not sto or sto not in EXPORTS:
+    if not what or what not in EXPORTS:
         return [f"Što izvesti? Mogu: {', '.join(EXPORTS)}."]
-    if sto == "obveze" and (not period or not _PERIOD_RE.match(period)):
+    if what == "obveze" and (not period or not _PERIOD_RE.match(period)):
         return ["Za koji mjesec (format GGGG-MM, npr. 2026-08)?"]
     return []
 
@@ -36,10 +36,10 @@ def _exports_dir(cfg) -> Path:
     return d
 
 
-def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
+def build(spine, cfg, what: str, period: str | None, visible) -> tuple[str, int]:
     """Build the xlsx for the requested export (visibility-scoped). Return (token, row_count).
     `visible` = set of visible client_id, or None (all)."""
-    if clarify(sto, period):
+    if clarify(what, period):
         raise ValueError("izvoz nije potpuno određen")
     openpyxl = optional.need("openpyxl", "Excel izvoz")
     if openpyxl is None:
@@ -47,7 +47,7 @@ def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
     wb = openpyxl.Workbook()
     ws = wb.active
     rows = 0
-    if sto == "klijenti":
+    if what == "klijenti":
         ws.title = "Klijenti"
         ws.append(["Naziv", "OIB", "PDV", "Sustav"])
         for r in spine.read().execute(

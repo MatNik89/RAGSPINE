@@ -459,7 +459,7 @@ def requirements(cfg=None) -> list[dict]:
                 "fix": "spoji mrežu ili koristi --offline s ručno skinutim modelima"})
 
     import warnings
-    for mod, naziv, fix in _OPTIONAL_MODULES:
+    for mod, name, fix in _OPTIONAL_MODULES:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")   # fitz deprecation etc. not into output
@@ -467,7 +467,7 @@ def requirements(cfg=None) -> list[dict]:
             present = True
         except Exception:
             present = False
-        out.append({"key": mod, "naziv": naziv, "status": _status(present, warn=True),
+        out.append({"key": mod, "naziv": name, "status": _status(present, warn=True),
                     "detalj": "instalirano" if present else "nedostaje", "fix": fix})
 
     return out

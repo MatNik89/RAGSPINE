@@ -72,7 +72,7 @@ def obveze_job(spine, cfg) -> None:
         obligations.ensure_period(spine, kind, period)
 
 
-def rokovi_job(spine, cfg) -> None:
+def deadline_dates_job(spine, cfg) -> None:
     added = deadlines.generate(spine)
     logger.info("rokovi_job: %d new deadline dates materialised", added)
 
@@ -153,7 +153,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="deadlines", fn=deadlines_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
-    sched.register(Job(name="rokovi", fn=rokovi_job, interval_s=0, daily=True, at_hour=5))
+    sched.register(Job(name="rokovi", fn=deadline_dates_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="health", fn=health_job, interval_s=900))

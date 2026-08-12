@@ -209,20 +209,20 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # unconditionally so it can surface even when the generic answer is IDK,
     # which is exactly when the client's own SOP/note is most needed.
     # Best-effort, must never break the answer.
-    napomena_block = ""
+    note_block = ""
     if resolved_client is not None:
         try:
-            napomena_block = client_context.client_note_block(
+            note_block = client_context.client_note_block(
                 spine, resolved_client["id"], resolved_client["name"], query)
         except Exception:
-            napomena_block = ""
+            note_block = ""
 
     pct = round(best["confidence"] * 100)
     if not verify.accepted(best):
         # below threshold (80%) — don't guess; explain why (anti-yes-man)
-        if resolved_client is not None and napomena_block:
+        if resolved_client is not None and note_block:
             final_text = (f"Nisam dovoljno siguran općenito (točnost {pct}%), ali imam "
-                          f"napomenu za ovog klijenta:\n\n{napomena_block}")
+                          f"napomenu za ovog klijenta:\n\n{note_block}")
         elif not verify.grounded(best):
             final_text = citations.IDK  # no cited source -> I don't know
         else:
@@ -245,8 +245,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
                     final_text = f"{final_text}\n\n📎 Povezani dokumenti: {titles}"
             except Exception:
                 pass
-        if napomena_block:
-            final_text = f"{final_text}\n\n{napomena_block}"
+        if note_block:
+            final_text = f"{final_text}\n\n{note_block}"
         final_text = f"{final_text}\n\nTočnost: {pct}% · {verify.explain(best)}"
 
     _record(spine, user, query, "chat", final_text, confidence, cache_write=not skip_cache,
