@@ -66,7 +66,7 @@ def expiry_job(spine, cfg) -> None:
         _notify_once(spine, "expiry", body, client_id=row["client_id"])
 
 
-def obveze_job(spine, cfg) -> None:
+def obligations_job(spine, cfg) -> None:
     period = _period_now()
     for kind in obligations.active_kinds(spine):
         obligations.ensure_period(spine, kind, period)
@@ -152,7 +152,7 @@ def register_defaults(sched) -> None:
     sched.register(Job(name="scheduled_tasks", fn=scheduled_tasks_job, interval_s=300))
     sched.register(Job(name="deadlines", fn=deadlines_job, interval_s=0, daily=True, at_hour=7))
     sched.register(Job(name="expiry", fn=expiry_job, interval_s=0, daily=True, at_hour=7))
-    sched.register(Job(name="obveze", fn=obveze_job, interval_s=0, daily=True, at_hour=6))
+    sched.register(Job(name="obveze", fn=obligations_job, interval_s=0, daily=True, at_hour=6))
     sched.register(Job(name="rokovi", fn=deadline_dates_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="folders_sync", fn=folders_sync_job, interval_s=0, daily=True, at_hour=5))
     sched.register(Job(name="stale", fn=stale_job, interval_s=0, daily=True, at_hour=6))

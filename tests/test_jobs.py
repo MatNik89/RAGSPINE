@@ -47,11 +47,11 @@ def test_obveze_job_seeds_current_period_idempotently(spine, cfg, monkeypatch):
     _client(spine, "Alfa", "u sustavu pdv")
     monkeypatch.setattr(jobs, "_period_now", lambda: "2026-07")
 
-    jobs.obveze_job(spine, cfg)
+    jobs.obligations_job(spine, cfg)
     rows = obligations.list_period(spine, "PDV", "2026-07")
     assert len(rows) == 1
 
-    jobs.obveze_job(spine, cfg)
+    jobs.obligations_job(spine, cfg)
     rows2 = obligations.list_period(spine, "PDV", "2026-07")
     assert len(rows2) == 1
 

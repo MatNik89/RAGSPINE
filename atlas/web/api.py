@@ -63,13 +63,13 @@ from atlas.web import websearch  # noqa: F401 — register web lane handler
 from atlas.web.deps import (COOKIE_NAME, add_user, require_actor, require_actor_web, require_user,
                                require_user_web)
 from atlas.web.templates_login import render_login
-from atlas.web.templates_mape import mape_page
+from atlas.web.templates_mape import folders_page
 from atlas.web.templates_model import model_page
-from atlas.web.templates_obveze import obveze_none_page, obveze_types_page, render_obveze
+from atlas.web.templates_obveze import obligations_none_page, obligation_types_page, render_obligations
 from atlas.web.templates_org import (org_page, radnici_page, skills_page,
                                         vidljivost_page, wiki_page as wiki_page_ui)
-from atlas.web.templates_ui import (chat_page, dashboard_page, dokumenti_page, klijent_page,
-                                        klijenti_page, obavijesti_page, postavke_page, upute_page)
+from atlas.web.templates_ui import (chat_page, dashboard_page, documents_page, client_page,
+                                        clients_page, notifications_page, settings_page, upute_page)
 
 
 class ChatBody(BaseModel):
@@ -1643,10 +1643,10 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return klijenti_page()
+        return clients_page()
 
     @app.get("/ui/klijenti-uvoz", response_class=HTMLResponse)
-    def ui_klijenti_uvoz(request: Request):
+    def ui_clients_import(request: Request):
         try:
             require_user_web(request)
         except HTTPException:
@@ -1669,7 +1669,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return klijent_page(client_id)
+        return client_page(client_id)
 
     @app.get("/ui/obavijesti", response_class=HTMLResponse)
     def ui_notifications(request: Request):
@@ -1677,7 +1677,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return obavijesti_page()
+        return notifications_page()
 
     @app.get("/ui/obveze-tipovi", response_class=HTMLResponse)
     def ui_obligation_types(request: Request):
@@ -1685,7 +1685,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return obveze_types_page()
+        return obligation_types_page()
 
     @app.get("/ui/postavke", response_class=HTMLResponse)
     def ui_settings(request: Request):
@@ -1693,7 +1693,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return postavke_page()
+        return settings_page()
 
     @app.get("/ui/pracenje", response_class=HTMLResponse)
     def ui_tracking(request: Request):
@@ -1797,8 +1797,8 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import obveze_polja_page
-        return obveze_polja_page()
+        from atlas.web.templates_ui import obligation_fields_page
+        return obligation_fields_page()
 
     @app.get("/ui/obveze-aktivnost", response_class=HTMLResponse)
     def ui_obligations_activity(request: Request):
@@ -1806,8 +1806,8 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import obveze_aktivnost_page
-        return obveze_aktivnost_page()
+        from atlas.web.templates_ui import obligations_activity_page
+        return obligations_activity_page()
 
     @app.get("/postavi-agent", response_class=HTMLResponse)
     def ui_setup_agent(request: Request):
@@ -1816,8 +1816,8 @@ def create_app(spine, cfg) -> FastAPI:
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
         _require_owner(actor)  # agent issuing = machine-level, owner-only
-        from atlas.web.templates_ui import postavi_agent_page
-        return postavi_agent_page()
+        from atlas.web.templates_ui import setup_agent_page
+        return setup_agent_page()
 
     @app.get("/ui/napajanje", response_class=HTMLResponse)
     def ui_power(request: Request):
@@ -1825,8 +1825,8 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        from atlas.web.templates_ui import napajanje_page
-        return napajanje_page()
+        from atlas.web.templates_ui import power_page
+        return power_page()
 
     @app.get("/ui/posta", response_class=HTMLResponse)
     def ui_mail(request: Request):
@@ -1996,7 +1996,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return mape_page()
+        return folders_page()
 
     @app.get("/ui/org", response_class=HTMLResponse)
     def ui_org(request: Request):
@@ -2199,7 +2199,7 @@ def create_app(spine, cfg) -> FastAPI:
             require_user_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        return dokumenti_page()
+        return documents_page()
 
     @app.get("/notifications.json")
     def notifications_json(actor: Actor = Depends(require_actor_web)):
@@ -2225,7 +2225,7 @@ def create_app(spine, cfg) -> FastAPI:
         tabs = [(t["kind"], t["label"]) for t in obligations.list_types(spine, active_only=True)]
         active = [k for k, _ in tabs]
         if not active:
-            return HTMLResponse(obveze_none_page())
+            return HTMLResponse(obligations_none_page())
         kind = kind or active[0]
         if kind not in active:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
@@ -2233,7 +2233,7 @@ def create_app(spine, cfg) -> FastAPI:
         _require_valid_period(period)
         obligations.ensure_period(spine, kind, period)
         rows = _visible_rows(actor, obligations.list_period(spine, kind, period))
-        return render_obveze(kind, period, rows, tabs)
+        return render_obligations(kind, period, rows, tabs)
 
     @app.get("/obligations.json")
     def obligations_json(kind: str = "PDV", period: str | None = None,

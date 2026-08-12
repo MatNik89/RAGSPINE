@@ -153,7 +153,7 @@ def _get(spine, device_id: int, kind: str) -> dict:
 
 def scanner_folder(spine, cfg) -> str:
     """Scan destination: the registered folder role='skener' (re-validated like
-    klijenti_root - isdir, not a symlink, within the mounts); fallback
+    clients_root - isdir, not a symlink, within the mounts); fallback
     {data_dir}/scans (created)."""
     r = spine.read().execute(
         "SELECT path FROM folders WHERE role='skener' AND enabled=1 "

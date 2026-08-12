@@ -28,7 +28,7 @@ def _slug(name: str) -> str:
 CLIENTS_DIR = "klijenti"
 
 
-def klijenti_root(spine, cfg) -> str | None:
+def clients_root(spine, cfg) -> str | None:
     """The real client folder: the registered folder with role='klijenti';
     fallback {root}/klijenti if it exists on disk; otherwise None.
 
@@ -53,10 +53,10 @@ def klijenti_root(spine, cfg) -> str | None:
 
 
 def _client_root(spine, cfg, client_id, name: str) -> str:
-    """Absolute path for a client's NAS folder: {klijenti_root}/{id}_{slug}.
+    """Absolute path for a client's NAS folder: {clients_root}/{id}_{slug}.
     SECURITY: realpath+commonpath guard — the result must resolve inside the
     klijenti base, never escape it."""
-    base = klijenti_root(spine, cfg) or os.path.realpath(
+    base = clients_root(spine, cfg) or os.path.realpath(
         os.path.join(cfg.nas_root or cfg.data_dir, CLIENTS_DIR))
     folder = f"{client_id}_{_slug(name)}"
     dest = os.path.realpath(os.path.join(base, folder))
@@ -141,7 +141,7 @@ def _client_dir(spine, cfg, client_id) -> str:
         raise ValueError(f"nepoznat klijent: {client_id}")
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     client_dir = os.path.realpath(os.path.join(root, row["nas_folder"] or ""))
-    kroot = klijenti_root(spine, cfg)
+    kroot = clients_root(spine, cfg)
     # STRICTLY below the root (a client folder is never the root itself — nas_folder
     # '.' would otherwise write documents straight into KLIJENTI/nas_root)
     ok_root = security.path_under(client_dir, root) and client_dir != root

@@ -2,7 +2,7 @@ import urllib.request
 import urllib.error
 
 from atlas.web.bootstrap_http import (
-    bat_content, postavi_html, best_display_host, start_bootstrap_server,
+    bat_content, setup_html, best_display_host, start_bootstrap_server,
 )
 
 
@@ -23,7 +23,7 @@ def test_bat_content_crlf_and_commands():
 
 
 def test_postavi_html_sadrzi_korake_i_link():
-    html = postavi_html("https://nick.fritz.box:8443")
+    html = setup_html("https://nick.fritz.box:8443")
     assert "https://nick.fritz.box:8443" in html
     assert "postavi-vezu.bat" in html
     assert "administrator" in html.lower()

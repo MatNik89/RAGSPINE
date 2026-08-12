@@ -810,7 +810,7 @@ q.addEventListener('keydown', function (e) {
 """
 
 
-def postavke_page() -> str:
+def settings_page() -> str:
     cards = [
         ("Računalo i modeli", "/ui/racunalo", "Stanje računala, preduvjeti za pokretanje, i koji lokalni modeli stanu (po kvantizaciji/kompresiji)."),
         ("E-pošta i Telegram", "/ui/posta", "Uredska e-pošta (M365/Exchange) i Telegram pristup ATLAS-u preko bota."),
@@ -959,7 +959,7 @@ load();
 """
 
 
-def obveze_polja_page() -> str:
+def obligation_fields_page() -> str:
     body = f"""<h1>Polja obveza</h1>
 <p class="meta">Vlastiti stupci na obvezama (npr. napomena, iznos, rok). Core
 stupci (klijent, rok, poslano, tko/kad) su zaključani i ne mogu se dirati.
@@ -976,7 +976,7 @@ Dodavanje polja radi vlasnik; vrijednosti popunjava radnik na obvezi.</p>
     return page_shell("Polja obveza", body, active="postavke")
 
 
-def obveze_aktivnost_page() -> str:
+def obligations_activity_page() -> str:
     body = f"""<h1>Aktivnost radnika — obveze</h1>
 <p class="meta">Tko je koliko obveza zatvorio i kad. Podaci iz evidencije slanja
 (sent_by/sent_at) — nadzorni uvid, samo admin.</p>
@@ -990,7 +990,7 @@ def obveze_aktivnost_page() -> str:
     return page_shell("Aktivnost radnika", body, active="obveze")
 
 
-def postavi_agent_page() -> str:
+def setup_agent_page() -> str:
     body = """<h1>Postavi agenta na radno računalo</h1>
 <p class="meta">atlas-agent se vrti u radnikovoj sesiji i spaja se odlazno prema
 serveru (bez otvaranja portova na radnom stroju). Prima samo odobrene radnje:
@@ -1007,7 +1007,7 @@ pokreni odobreni program, uredno ugasi, uključi WOL, javi status.</p>
     return page_shell("Postavi agenta", body, active="postavke")
 
 
-def napajanje_page() -> str:
+def power_page() -> str:
     body = f"""<h1>Napajanje</h1>
 <p class="meta">UPS nadzor preko NUT-a. Automatsko gašenje redom (radnici prvo,
 server zadnji) po rednom broju iz Uređaji. Gašenje je isključeno dok ga
@@ -1260,7 +1260,7 @@ loadClients();
 """
 
 
-def klijenti_page() -> str:
+def clients_page() -> str:
     body = f"""<h1>Klijenti</h1>
 <p class="meta">Svi klijenti ureda — otvori karton za pun pregled.</p>
 <div style="display:flex;gap:.5rem;align-items:center;margin:1rem 0;flex-wrap:wrap">
@@ -1511,7 +1511,7 @@ loadKarton();
 """
 
 
-def klijent_page(client_id: int) -> str:
+def client_page(client_id: int) -> str:
     body = f"""<div id="karton-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
 <div class="card">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:1rem">
@@ -1718,7 +1718,7 @@ loadNotifications();
 """
 
 
-def obavijesti_page() -> str:
+def notifications_page() -> str:
     body = f"""<h1>Obavijesti</h1>
 <p class="meta">Sve obavijesti — klikni nepročitanu da je označiš pročitanom.</p>
 <div id="notif-error" class="chip bad" style="display:none;margin-bottom:1rem"></div>
@@ -1842,7 +1842,7 @@ addStavkaRow();
 """
 
 
-def dokumenti_page() -> str:
+def documents_page() -> str:
     body = f"""<h1>Generator dokumenata</h1>
 <p class="meta">Ponuda, dopis ili opomena — iz predloška, s provjerom da brojke nisu izmišljene.</p>
 <form id="doc-form" class="stack">

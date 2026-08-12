@@ -137,10 +137,10 @@ def test_script_json_escapes_js_line_separators():
 
 def test_render_obveze_defense_in_depth_even_with_malicious_period():
     # belt-and-suspenders: even if a future caller forgets endpoint-level
-    # validation, render_obveze() itself must never let `period` break out
+    # validation, render_obligations() itself must never let `period` break out
     # of the inline <script> tag.
-    from atlas.web.templates_obveze import render_obveze
-    html_out = render_obveze("PDV", _XSS_PERIOD, [])
+    from atlas.web.templates_obveze import render_obligations
+    html_out = render_obligations("PDV", _XSS_PERIOD, [])
     assert "</script><script>alert(1)</script>" not in html_out
     assert "\\u003c" in html_out
 

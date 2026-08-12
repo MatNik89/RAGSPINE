@@ -1,6 +1,6 @@
 """Ispis (D): @media print pravila + gumb za ispis na ključnim ekranima."""
 from atlas.web import templates_ui
-from atlas.web.templates_obveze import render_obveze
+from atlas.web.templates_obveze import render_obligations
 
 
 def test_print_css_present():
@@ -15,9 +15,9 @@ def test_print_button_is_no_print_and_calls_print():
 
 
 def test_obveze_page_has_print_button():
-    html = render_obveze("PDV", "2026-08", rows=[])
+    html = render_obligations("PDV", "2026-08", rows=[])
     assert "window.print()" in html and "no-print" in html
 
 
 def test_klijent_page_has_print_button():
-    assert "window.print()" in templates_ui.klijent_page(1)
+    assert "window.print()" in templates_ui.client_page(1)

@@ -35,7 +35,7 @@ def bat_content(cert_url: str, https_url: str) -> bytes:
     return ("\r\n".join(lines) + "\r\n").encode("utf-8")
 
 
-def postavi_html(https_url: str, bat_name: str = BAT_NAME) -> str:
+def setup_html(https_url: str, bat_name: str = BAT_NAME) -> str:
     """The /postavi HTML page — 3 steps + an advanced (manual) section."""
     return f"""<!doctype html>
 <html lang="hr">
@@ -82,7 +82,7 @@ def _make_handler(cert_path: str, https_url: str, cert_url: str):
                 self.end_headers()
             elif self.path == "/postavi":
                 self._send(200, "text/html; charset=utf-8",
-                           postavi_html(https_url).encode("utf-8"))
+                           setup_html(https_url).encode("utf-8"))
             elif self.path == f"/{BAT_NAME}":
                 self._send(200, "application/octet-stream",
                            bat_content(cert_url, https_url),

@@ -99,7 +99,7 @@ loadRegistered();
 """
 
 
-def mape_page() -> str:
+def folders_page() -> str:
     body = f"""<h1>Mrežne mape</h1>
 <p class="meta"><a href="/ui/postavke">← Postavke</a> · Poveži NAS / Windows share, uđi u mapu pa joj dodijeli ulogu. ATLAS ih čita samo za čitanje.</p>
 <p class="meta" style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:.6rem .8rem">
