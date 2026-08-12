@@ -125,15 +125,21 @@ def recall(spine, org_id: int, user_id: int, query: str,
     persona = (p["persona"] if p else "") or ""
     qt = _tokens(query)
     scored = []
+    # recency (Paperclip decay-tier): atomi dohvaćeni/nastali nedavno rangiraju više na
+    # izjednačenom preklapanju; stari tonu ali se NE brišu (reheat na idući recall).
+    # sidro = zadnji recall ili, ako ga nema, vrijeme nastanka (svjež atom nije hladan).
     for a in spine.read().execute(
-            "SELECT id, content, recall_count FROM mem_l1 WHERE org_id=? AND user_id=?",
-            (org_id, user_id)).fetchall():
+            "SELECT id, content, recall_count, "
+            "CAST(julianday('now') - julianday(COALESCE(last_recalled_at, at)) AS REAL) AS age_days "
+            "FROM mem_l1 WHERE org_id=? AND user_id=?", (org_id, user_id)).fetchall():
         overlap = len(qt & _tokens(a["content"]))
-        if overlap:  # rang: preklapanje pa recall_count (zaslužni izbiju na izjednačenom)
-            scored.append((overlap, a["recall_count"] or 0, a["id"], a["content"]))
-    scored.sort(key=lambda x: (-x[0], -x[1]))
+        if overlap:  # rang: preklapanje > recency-tier > recall_count (zaslužni/svježi gore)
+            age = a["age_days"] if a["age_days"] is not None else 999
+            recency = 2 if age <= 7 else (1 if age <= 30 else 0)  # hot/warm/cold
+            scored.append((overlap, recency, a["recall_count"] or 0, a["id"], a["content"]))
+    scored.sort(key=lambda x: (-x[0], -x[1], -x[2]))
     atoms, used, hit_ids = [], 0, []
-    for _ov, _rc, aid, content in scored:
+    for _ov, _rec, _rc, aid, content in scored:
         if len(atoms) >= max_items or used + len(content) > max_chars:
             break
         atoms.append(content); used += len(content); hit_ids.append(aid)

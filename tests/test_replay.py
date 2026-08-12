@@ -29,6 +29,7 @@ def test_list_replayable_filters_and_parses(spine):
 
 
 def test_replay_reruns_through_run_tool(spine, monkeypatch):
+    replay._recent.clear()  # in-memory debounce je modul-globalan -> izoliraj test
     actor = _actor(spine)
     calls = []
     from atlas.rag import agent_tools
