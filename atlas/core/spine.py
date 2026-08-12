@@ -294,6 +294,8 @@ class Spine:
                                           "last_recalled_at": "TEXT"})
             c.execute("""CREATE TABLE IF NOT EXISTS agent_budget(day TEXT PRIMARY KEY,
                 llm INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0, writes INTEGER DEFAULT 0)""")
+            _ensure_columns(c, "skills", {"use_count": "INTEGER DEFAULT 0",
+                                          "last_used_at": "TEXT"})
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             _ensure_columns(c, "devices", {

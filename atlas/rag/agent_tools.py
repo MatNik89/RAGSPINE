@@ -247,6 +247,7 @@ def _run_ucitaj_vjestinu(spine, cfg, actor, args) -> dict:
     if match is None:
         return {"greska": f"nepoznata vještina: {args.get('ime')!r}",
                 "dostupne": [s["name"] for s in aktivne]}
+    skills_mod.mark_used(spine, match["id"])  # use_count za skill-health (mrtve/žive)
     return {"ime": match["name"], "koraci": match["steps"],
             "validacija": match.get("validation") or ""}
 

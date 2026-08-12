@@ -1088,6 +1088,13 @@ def create_app(spine, cfg) -> FastAPI:
     def skills_list(status: str | None = None, actor: Actor = Depends(require_actor_web)):
         return skills_mod.readable(skills_mod.list_skills(spine, actor.org_id, status), actor)
 
+    @app.get("/skills/health")
+    def skills_health(actor: Actor = Depends(require_actor_web)):
+        # uvid u zdravlje kataloga (mrtve/duplikati/manjkave) — SAMO izvještaj, ne
+        # automatsko brisanje; admin odlučuje. Vještine su ljudske procedure.
+        _require_admin(actor)
+        return skills_mod.health(spine, actor.org_id)
+
     @app.post("/skills")
     def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
         # vještina = procedura ureda; viewer (samo-čitač) je ne smije autorirati
