@@ -3,19 +3,19 @@
 # ponytail: no reduction of MIO contributions for low salaries (monthly
 # threshold) and no non-taxable receipts (bonuses, meals, transport...).
 # Upgrade path: add new override keys (e.g. "mio_reduction",
-# "neoporezivo.{vrsta}") when full precision is needed.
+# "non_taxable.{type}") when full precision is needed.
 
-OSNOVNI_ODBITAK = 600.0
-DIJETE_FAKTORI = [0.5, 0.7, 1.0]  # 1st, 2nd, 3rd child; 4th+ not modeled
-INVALIDNOST_FAKTOR = 0.3
-PRAG_OSNOVICE = 5000.0
-STOPA_NIZA_DEFAULT = 20.0
-STOPA_VISA_DEFAULT = 30.0
+BASIC_DEDUCTION = 600.0
+CHILD_FACTORS = [0.5, 0.7, 1.0]  # 1st, 2nd, 3rd child; 4th+ not modeled
+DISABILITY_FACTOR = 0.3
+BASE_THRESHOLD = 5000.0
+LOWER_RATE_DEFAULT = 20.0
+UPPER_RATE_DEFAULT = 30.0
 
 
 def _rate(spine, key: str, default: float) -> float:
     """Read a percentage override, tolerating '12%', ' 12 ', '21,5', or missing/garbage."""
-    raw = spine.get_override("kalkulator", key, None)
+    raw = spine.get_override("kalkulator", key, None)   # override namespace is stored-data -> kept
     if raw is None:
         return default
     try:
@@ -26,55 +26,57 @@ def _rate(spine, key: str, default: float) -> float:
 
 def gross_to_net(gross: float, city: str = "", children: int = 0,
                    disability: bool = False, spine=None) -> dict:
+    # response dict keys + detail strings are kept Croatian (data contract / user-facing
+    # breakdown); override-key namespaces (porez_niza/porez_visa/prirez) are stored-data -> kept.
     if gross is None or gross < 0:
         raise ValueError("gross mora biti >= 0")
 
-    detalji = []
+    details = []
 
-    doprinosi = round(gross * 0.20, 2)
-    detalji.append(f"doprinosi 20% (MIO I 15 + MIO II 5) = {doprinosi}")
+    contributions = round(gross * 0.20, 2)
+    details.append(f"doprinosi 20% (MIO I 15 + MIO II 5) = {contributions}")
 
-    dohodak = gross - doprinosi
+    income = gross - contributions
 
-    odbitak = OSNOVNI_ODBITAK
-    for i in range(min(children, len(DIJETE_FAKTORI))):
-        odbitak += DIJETE_FAKTORI[i] * OSNOVNI_ODBITAK
+    deduction = BASIC_DEDUCTION
+    for i in range(min(children, len(CHILD_FACTORS))):
+        deduction += CHILD_FACTORS[i] * BASIC_DEDUCTION
     if disability:
-        odbitak += INVALIDNOST_FAKTOR * OSNOVNI_ODBITAK
-    detalji.append(f"osobni odbitak = {odbitak}")
+        deduction += DISABILITY_FACTOR * BASIC_DEDUCTION
+    details.append(f"osobni odbitak = {deduction}")
 
-    osnovica = max(0.0, dohodak - odbitak)
+    base = max(0.0, income - deduction)
 
-    stopa_niza = STOPA_NIZA_DEFAULT
-    stopa_visa = STOPA_VISA_DEFAULT
+    lower_rate = LOWER_RATE_DEFAULT
+    upper_rate = UPPER_RATE_DEFAULT
     if spine is not None:
-        stopa_niza = _rate(spine, f"porez_niza.{city}", STOPA_NIZA_DEFAULT)
-        stopa_visa = _rate(spine, f"porez_visa.{city}", STOPA_VISA_DEFAULT)
+        lower_rate = _rate(spine, f"porez_niza.{city}", LOWER_RATE_DEFAULT)
+        upper_rate = _rate(spine, f"porez_visa.{city}", UPPER_RATE_DEFAULT)
 
-    niza_osnovica = min(osnovica, PRAG_OSNOVICE)
-    visa_osnovica = max(0.0, osnovica - PRAG_OSNOVICE)
-    porez = niza_osnovica * stopa_niza / 100 + visa_osnovica * stopa_visa / 100
-    detalji.append(f"porez: {niza_osnovica}@{stopa_niza}% + {visa_osnovica}@{stopa_visa}%")
+    lower_base = min(base, BASE_THRESHOLD)
+    upper_base = max(0.0, base - BASE_THRESHOLD)
+    tax = lower_base * lower_rate / 100 + upper_base * upper_rate / 100
+    details.append(f"porez: {lower_base}@{lower_rate}% + {upper_base}@{upper_rate}%")
 
     # legacy surtax (abolished in HR 2024, but the override is honored for compatibility)
     if spine is not None:
-        prirez = _rate(spine, f"prirez.{city}", None)
-        if prirez is not None:
-            porez *= 1 + prirez / 100
-            detalji.append(f"legacy prirez {prirez}% primijenjen")
+        surtax = _rate(spine, f"prirez.{city}", None)
+        if surtax is not None:
+            tax *= 1 + surtax / 100
+            details.append(f"legacy prirez {surtax}% primijenjen")
 
-    porez = round(porez, 2)
-    neto = round(dohodak - porez, 2)
+    tax = round(tax, 2)
+    net = round(income - tax, 2)
 
     return {
         "gross": gross,
-        "doprinosi": doprinosi,
-        "dohodak": round(dohodak, 2),
-        "odbitak": round(odbitak, 2),
-        "osnovica": round(osnovica, 2),
-        "porez": porez,
-        "neto": neto,
-        "stopa_niza": stopa_niza,
-        "stopa_visa": stopa_visa,
-        "detalji": detalji,
+        "doprinosi": contributions,
+        "dohodak": round(income, 2),
+        "odbitak": round(deduction, 2),
+        "osnovica": round(base, 2),
+        "porez": tax,
+        "neto": net,
+        "stopa_niza": lower_rate,
+        "stopa_visa": upper_rate,
+        "detalji": details,
     }
