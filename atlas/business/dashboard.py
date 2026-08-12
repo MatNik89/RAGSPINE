@@ -11,7 +11,7 @@ def _today() -> date:
 
 def _urgency(due_str: str, today: date) -> str:
     """past due -> bad; soon (<=7 days) -> warn; else -> ok.
-    Matches business/karton.py._urgency + .sdd/ui-DESIGN.md (soon(<=7d))."""
+    Matches business/client_card.py._urgency + .sdd/ui-DESIGN.md (soon(<=7d))."""
     delta = (date.fromisoformat(due_str) - today).days
     if delta < 0:
         return "bad"

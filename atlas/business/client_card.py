@@ -65,7 +65,7 @@ def _client_eracuni(spine, oib: str | None) -> dict:
     return {"count": count, "recent": [dict(r) for r in recent]}
 
 
-def karton_data(spine, cfg, client_id: int) -> dict:
+def client_card_data(spine, cfg, client_id: int) -> dict:
     row = spine.read().execute("SELECT * FROM clients WHERE id=?", (client_id,)).fetchone()
     if row is None:
         raise ValueError(f"nepoznat klijent: {client_id}")

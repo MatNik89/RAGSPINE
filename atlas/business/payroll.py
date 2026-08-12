@@ -24,22 +24,22 @@ def _rate(spine, key: str, default: float) -> float:
         return default
 
 
-def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
-                   invalidnost: bool = False, spine=None) -> dict:
-    if bruto is None or bruto < 0:
-        raise ValueError("bruto mora biti >= 0")
+def gross_to_net(gross: float, city: str = "", children: int = 0,
+                   disability: bool = False, spine=None) -> dict:
+    if gross is None or gross < 0:
+        raise ValueError("gross mora biti >= 0")
 
     detalji = []
 
-    doprinosi = round(bruto * 0.20, 2)
+    doprinosi = round(gross * 0.20, 2)
     detalji.append(f"doprinosi 20% (MIO I 15 + MIO II 5) = {doprinosi}")
 
-    dohodak = bruto - doprinosi
+    dohodak = gross - doprinosi
 
     odbitak = OSNOVNI_ODBITAK
     for i in range(min(children, len(DIJETE_FAKTORI))):
         odbitak += DIJETE_FAKTORI[i] * OSNOVNI_ODBITAK
-    if invalidnost:
+    if disability:
         odbitak += INVALIDNOST_FAKTOR * OSNOVNI_ODBITAK
     detalji.append(f"osobni odbitak = {odbitak}")
 
@@ -67,7 +67,7 @@ def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
     neto = round(dohodak - porez, 2)
 
     return {
-        "bruto": bruto,
+        "gross": gross,
         "doprinosi": doprinosi,
         "dohodak": round(dohodak, 2),
         "odbitak": round(odbitak, 2),

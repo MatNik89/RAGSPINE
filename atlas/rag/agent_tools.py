@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Callable
 
-from atlas.business import client_visibility, expiry, karton, notes, obligations, onboarding
+from atlas.business import client_visibility, expiry, client_card, notes, obligations, onboarding
 from atlas.core import security
 from atlas.rag import retrieval
 from atlas.web import websearch
@@ -99,7 +99,7 @@ def _run_popis_obveza(spine, cfg, actor, args) -> dict:
 
 def _run_stanje_klijenta(spine, cfg, actor, args) -> dict:
     row = _resolve_visible(spine, actor, args["kljuc"])
-    return karton.karton_data(spine, cfg, row["id"])
+    return client_card.client_card_data(spine, cfg, row["id"])
 
 
 # --- write tools -------------------------------------------------------

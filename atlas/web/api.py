@@ -21,7 +21,7 @@ from atlas.business import expiry as expiry_mod
 from atlas.business import feedback_learn
 from atlas.business import folders as folders_mod
 from atlas.business import deadline_calendar
-from atlas.business import karton as karton_mod
+from atlas.business import client_card as client_card_mod
 from atlas.business import bookkeeping  # noqa: F401 — register bookkeeping lane handler
 from atlas.business import model_settings
 from atlas.business import monthly
@@ -2709,7 +2709,7 @@ def create_app(spine, cfg) -> FastAPI:
     def client_karton(client_id: int, actor: Actor = Depends(require_actor_web)):
         _guard_client(actor, client_id)
         try:
-            return karton_mod.karton_data(spine, cfg, client_id)
+            return client_card_mod.client_card_data(spine, cfg, client_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
 
