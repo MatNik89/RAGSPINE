@@ -93,6 +93,10 @@ class UredPravilaBody(BaseModel):
     pravila: str = ""
 
 
+class BudgetBody(BaseModel):
+    caps: dict[str, int] = {}    # {llm|tokens|writes: plafon}; 0 = bez granice
+
+
 class ScheduledTaskBody(BaseModel):
     title: str = ""
     action_key: str
@@ -1329,6 +1333,23 @@ def create_app(spine, cfg) -> FastAPI:
         _require_owner(actor)
         agent.set_ured_pravila(spine, body.pravila, user=actor.username)
         return {"ok": True}
+
+    # --- Budžet-štit agenta (dnevni plafon; štiti od cost-runawaya autonomnih runova) ---
+    @app.get("/budget")
+    def budget_get(actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_budget
+        _require_admin(actor)  # potrošnja = operativni uvid (admin)
+        return {"budget": agent_budget.usage_today(spine)}
+
+    @app.post("/budget")
+    def budget_set(body: BudgetBody, actor: Actor = Depends(require_actor_web)):
+        from atlas.business import agent_budget
+        _require_owner(actor)  # plafoni = konfiguracija ureda (owner)
+        for k, v in body.caps.items():
+            if k in agent_budget.DEFAULTS:
+                spine.set_override("agent", f"budget_{k}", max(0, int(v)))
+        spine.audit(actor.username, "budget_set", "agent")
+        return {"ok": True, "budget": agent_budget.usage_today(spine)}
 
     # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
     @app.get("/zakazano")

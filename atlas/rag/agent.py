@@ -220,9 +220,18 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             out["parkirano"], out["izvrseno"] = parkirano, izvrseno
         return out
 
+    from atlas.business import agent_budget  # budžet-štit (cost-runaway, pos. unattended)
     for _ in range(max_steps):
+        try:
+            agent_budget.consume(spine, "llm", 1)  # dnevni plafon LLM-poziva
+        except agent_budget.BudgetError as e:
+            return _finish((last_text or "") + f"\n\n[Zaustavljeno: {e}]")
         result = llm.complete(messages, system=system, tools=tools)
         last_text = result.text
+        try:  # tokeni se broje NAKON poziva (soft-plafon za idući korak)
+            agent_budget.consume(spine, "tokens", agent_budget.tokens_of(result.usage))
+        except agent_budget.BudgetError as e:
+            return _finish(result.text + f"\n\n[Zaustavljeno: {e}]")
 
         if not result.tool_calls:
             return _finish(result.text)
@@ -291,7 +300,13 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
         # perzistentni grant: "potvrdi jednom, zapamti" -> auto-izvrši (SAMO low/med;
         # high nikad, safety-floor u can_auto_approve). Inače normalni propose->confirm.
         from atlas.business import agent_grants
-        if agent_grants.can_auto_approve(spine, actor, name, args):
+        auto = agent_grants.can_auto_approve(spine, actor, name, args)
+        if auto:
+            try:
+                agent_budget.consume(spine, "writes", 1)  # dnevni plafon auto-write-a
+            except agent_budget.BudgetError:
+                auto = False  # budžet iscrpljen -> tretiraj kao bez granta (parkiraj/predloži)
+        if auto:
             res = agent_tools.run_tool(spine, cfg, actor, name, args)
             spine.audit(actor.username, "agent_auto_grant", name,
                         json.dumps(args, ensure_ascii=False, default=str))
