@@ -211,6 +211,7 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
     seen_calls: set = set()  # potpisi USPJEŠNIH readonly poziva (loop-guard)
     parkirano: list = []     # id-evi parkiranih radnji (unattended)
     izvrseno: list = []      # alati auto-izvršeni po grantu (unattended)
+    run_writes: set = set()  # različite write-radnje u OVOM pokretanju (blast-radius cap)
 
     def _finish(text):  # dodaj upozorenje za neprovjerene OIB-ove u odgovoru
         out = {"text": agent_guards.append_evidence_caution(
@@ -295,6 +296,16 @@ def run_agent(spine, cfg, query: str, actor, llm, max_steps: int = 4,
             messages.append({"role": "user", "content":
                               f"Nevažeći argumenti za {name}: {err}. Ispravi i pokušaj ponovno."})
             continue
+
+        # blast-radius cap: jedan (nenadzirani) run smije dirnuti najviše N RAZLIČITIH
+        # write-radnji (Paperclip cross-issue-influence-limit) — budžet stopira volumen,
+        # ovo stopira rasap po knjizi. Bije samo u unattended (interaktivni staje na 1.).
+        wkey = agent_guards.loop_key(name, args)
+        cap = agent_budget.run_write_cap(spine)
+        if unattended and cap > 0 and wkey not in run_writes and len(run_writes) >= cap:
+            return _finish((last_text or "")
+                           + f"\n\n[Zaustavljeno: dosegnut limit izmjena po pokretanju ({cap})]")
+        run_writes.add(wkey)
 
         summary = summarize_action(name, args)
         risk = agent_tools.risk(name)

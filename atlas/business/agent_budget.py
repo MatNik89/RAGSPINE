@@ -7,6 +7,8 @@ Human-potvrđene radnje (confirm_pending) NISU budžetirane — cilj je autonomn
 runaway, ne ljudske radnje."""
 
 DEFAULTS = {"llm": 500, "tokens": 2_000_000, "writes": 200}  # velikodušno; štiti od runawaya
+WARN_FRACTION = 0.8            # upozori na 80% dnevnog plafona (prije hard-stopa; Paperclip warnPercent)
+RUN_WRITE_CAP_DEFAULT = 20     # najviše različitih izmjena po JEDNOM pokretanju (blast-radius; Paperclip)
 
 
 class BudgetError(Exception):
@@ -91,4 +93,18 @@ def usage_today(spine) -> dict:
         "SELECT llm, tokens, writes FROM agent_budget "
         "WHERE day=date('now','localtime')").fetchone()
     used = dict(row) if row else {}
-    return {k: {"used": used.get(k, 0) or 0, "cap": _cap(spine, k)} for k in DEFAULTS}
+    out = {}
+    for k in DEFAULTS:
+        u, cap = used.get(k, 0) or 0, _cap(spine, k)
+        out[k] = {"used": u, "cap": cap,
+                  "warn": bool(cap > 0 and u >= cap * WARN_FRACTION)}  # 80% -> upozorenje
+    return out
+
+
+def run_write_cap(spine) -> int:
+    """Najviše različitih write-radnji po jednom pokretanju agenta (0 = bez granice)."""
+    raw = spine.get_override("agent", "budget_run_writes", None)
+    try:
+        return int(raw) if raw is not None else RUN_WRITE_CAP_DEFAULT
+    except (ValueError, TypeError):
+        return RUN_WRITE_CAP_DEFAULT

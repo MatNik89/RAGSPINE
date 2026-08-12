@@ -160,15 +160,68 @@ def _due(row, now: datetime) -> bool:
     return row["last_run_date"] != now.date().isoformat()  # jednom po danu
 
 
+# transient-retry ljestvica (min) — Paperclip bounded backoff; kratka jer poller je 5 min
+_RETRY_BACKOFF_MIN = (2, 10, 30, 120)
+
+
+def _is_transient(e: Exception) -> bool:
+    """Samo PROLAZNE greške (LLM/mreža) idu na retry; logičke (validacija, uklonjena
+    akcija) NE — inače bismo beskonačno ponavljali krivu radnju."""
+    from atlas.core.llm import LLMError, LLMUnavailable
+    return isinstance(e, (LLMError, LLMUnavailable, ConnectionError, TimeoutError, OSError))
+
+
+def _schedule_retry(spine, task_id: int, attempt: int) -> bool:
+    """Zakaži idući pokušaj (UTC, datetime('now') konzistentno). False = ljestvica
+    iscrpljena -> pozivatelj dead-letteruje."""
+    if attempt >= len(_RETRY_BACKOFF_MIN):
+        return False
+    delay = _RETRY_BACKOFF_MIN[attempt]
+    with spine.write() as c:
+        c.execute("UPDATE scheduled_tasks SET retry_at=datetime('now', ?), retry_attempt=? "
+                  "WHERE id=?", (f"+{delay} minutes", attempt + 1, task_id))
+    return True
+
+
+def _clear_retry(spine, task_id: int) -> None:
+    with spine.write() as c:
+        c.execute("UPDATE scheduled_tasks SET retry_at=NULL, retry_attempt=0 WHERE id=?", (task_id,))
+
+
+def _execute(spine, cfg, r, fired: list) -> None:
+    """Pokreni jednu akciju. Uspjeh -> očisti retry. Prolazna greška + ljestvica ima
+    mjesta -> zakaži retry. Trajna greška ili iscrpljena ljestvica -> dead-letter."""
+    action = ACTIONS.get(r["action_key"])
+    params = json.loads(r["params_json"] or "{}")
+    status, detail = "ok", None
+    try:
+        if action is None:
+            raise ValueError(f"akcija uklonjena iz allowliste: {r['action_key']}")
+        res = action[2](spine, cfg, params, r["org_id"], r["created_by"])
+        detail = json.dumps(res, ensure_ascii=False, default=str)[:300]
+        _clear_retry(spine, r["id"])
+    except Exception as e:  # ne ruši ostale zadatke
+        attempt = r["retry_attempt"] or 0
+        if _is_transient(e) and _schedule_retry(spine, r["id"], attempt):
+            status = "retry"
+        else:
+            status = "error"
+            _clear_retry(spine, r["id"])
+            _notify(spine, r["org_id"], r["id"], type(e).__name__)
+    spine.audit(r["created_by"] or "sustav", "scheduled_run",
+                f"task:{r['id']}:{r['action_key']}", status)
+    fired.append({"id": r["id"], "status": status, "detail": detail})
+
+
 def run_due(spine, cfg, now: datetime | None = None) -> list[dict]:
-    """Fira dospjele zadatke. ATOMIČAN claim (UPDATE last_run WHERE last_run != danas)
-    PRIJE izvršenja -> dva paralelna pollera / pad nakon dijela slanja NE dupliraju
-    (at-most-once; Codex). Greška -> dead-letter u obavijesti, ostali se nastavljaju."""
+    """Fira dospjele zadatke + dospjele retry-pokušaje. ATOMIČAN claim PRIJE izvršenja
+    (dva paralelna pollera / pad NE dupliraju; at-most-once). Prolazna greška zakaže
+    retry po backoff-ljestvici umjesto tihog gubitka mjesečne akcije (Paperclip)."""
     now = _now(now)
     today = now.date().isoformat()
     fired = []
-    rows = spine.read().execute("SELECT * FROM scheduled_tasks WHERE enabled=1").fetchall()
-    for r in rows:
+    # 1) redovni dospjeli — dnevni claim
+    for r in spine.read().execute("SELECT * FROM scheduled_tasks WHERE enabled=1").fetchall():
         if not _due(r, now):
             continue
         with spine.write() as c:  # claim: samo jedan poller prođe
@@ -177,20 +230,18 @@ def run_due(spine, cfg, now: datetime | None = None) -> list[dict]:
                               (today, r["id"], today))
             if claim.rowcount != 1:
                 continue  # netko drugi već preuzeo danas
-        action = ACTIONS.get(r["action_key"])
-        params = json.loads(r["params_json"] or "{}")
-        status, detail = "ok", None
-        try:
-            if action is None:
-                raise ValueError(f"akcija uklonjena iz allowliste: {r['action_key']}")
-            res = action[2](spine, cfg, params, r["org_id"], r["created_by"])
-            detail = json.dumps(res, ensure_ascii=False, default=str)[:300]
-        except Exception as e:  # dead-letter, ne ruši ostale
-            status = "error"
-            _notify(spine, r["org_id"], r["id"], type(e).__name__)
-        spine.audit(r["created_by"] or "sustav", "scheduled_run",
-                    f"task:{r['id']}:{r['action_key']}", status)
-        fired.append({"id": r["id"], "status": status, "detail": detail})
+        _execute(spine, cfg, r, fired)
+    # 2) dospjeli retry-pokušaji — claim pomicanjem retry_at=NULL (UTC usporedba)
+    rrows = spine.read().execute(
+        "SELECT * FROM scheduled_tasks WHERE enabled=1 AND retry_at IS NOT NULL "
+        "AND retry_at <= datetime('now')").fetchall()
+    for r in rrows:
+        with spine.write() as c:  # claim retry: makni retry_at da ga drugi poller ne pokupi
+            claim = c.execute("UPDATE scheduled_tasks SET retry_at=NULL "
+                              "WHERE id=? AND retry_at IS NOT NULL", (r["id"],))
+            if claim.rowcount != 1:
+                continue
+        _execute(spine, cfg, r, fired)  # r još nosi retry_attempt (nije nuliran)
     return fired
 
 

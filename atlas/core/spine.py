@@ -296,6 +296,8 @@ class Spine:
                 llm INTEGER DEFAULT 0, tokens INTEGER DEFAULT 0, writes INTEGER DEFAULT 0)""")
             _ensure_columns(c, "skills", {"use_count": "INTEGER DEFAULT 0",
                                           "last_used_at": "TEXT"})
+            _ensure_columns(c, "scheduled_tasks", {"retry_at": "TEXT",
+                                                   "retry_attempt": "INTEGER DEFAULT 0"})
             _ensure_columns(c, "cjenik", {"key": "TEXT", "unit": "TEXT"})
             _ensure_columns(c, "folders", {"last_synced": "TEXT"})
             _ensure_columns(c, "devices", {
