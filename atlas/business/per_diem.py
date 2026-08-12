@@ -47,22 +47,24 @@ RATES: dict[str, float] = {
 }
 
 
-def obracun(country: str, full_days: int, half_days: int = 0,
-            smjestaj: float = 0, prijevoz: float = 0, spine=None) -> dict:
+def calculate(country: str, full_days: int, half_days: int = 0,
+              lodging: float = 0, transport: float = 0, spine=None) -> dict:
+    # override namespace "dnevnica" is a stored-data key -> kept; response dict keys
+    # are kept Croatian (data contract). ValueError is a domain message -> Croatian.
     override = spine.get_override("dnevnica", country) if spine is not None else None
     if override is not None:
-        iznos = float(str(override).replace(",", "."))
+        amount = float(str(override).replace(",", "."))
     elif country in RATES:
-        iznos = RATES[country]
+        amount = RATES[country]
     else:
         raise ValueError(f"Nepoznata država za dnevnicu: {country!r}")
 
-    ukupno_dnevnice = round(full_days * iznos + half_days * iznos * 0.5, 2)
-    ukupno = round(ukupno_dnevnice + smjestaj + prijevoz, 2)
+    per_diem_total = round(full_days * amount + half_days * amount * 0.5, 2)
+    total = round(per_diem_total + lodging + transport, 2)
 
     return {
         "country": country,
-        "dnevnica_iznos": round(iznos, 2),
-        "ukupno_dnevnice": ukupno_dnevnice,
-        "ukupno": ukupno,
+        "dnevnica_iznos": round(amount, 2),
+        "ukupno_dnevnice": per_diem_total,
+        "ukupno": total,
     }
