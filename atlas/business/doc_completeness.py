@@ -1,5 +1,6 @@
-"""Kompletnost obaveznih dokumenata: koje OBAVEZNE vrste (client_doc_types)
-klijent još nema (documents.doc_type). Koristi ga i AI alat i dashboard panel.
+"""Completeness of mandatory documents: which MANDATORY types (client_doc_types)
+a client does not yet have (documents.doc_type). Used by both the AI tool and the
+dashboard panel.
 """
 
 
@@ -12,7 +13,7 @@ def missing_for_client(spine, client_id: int) -> list[str]:
 
 
 def clients_missing_docs(spine, visible=None) -> list[dict]:
-    """Svi klijenti kojima nešto fali (vidljivost-scopeano). Za info panel."""
+    """All clients missing something (visibility-scoped). For the info panel."""
     out = []
     for r in spine.read().execute(
             "SELECT DISTINCT c.id, c.name FROM clients c "

@@ -1,7 +1,7 @@
-# Skills (TIER 1) — verzionirana izvršna sredstva; ideja posuđena iz Hermes/Tencent
-# Skill-modela, reimplementirano čisto + multi-tenant. Skill nije samo prompt: ima
-# opis, granicu okidanja (trigger), korake i validaciju, verziju i status. Org-scoped,
-# dijeljivo po vidljivosti (private/team/org/restricted) + ACL.
+# Skills (TIER 1) — versioned executable procedures; idea borrowed from the Hermes/Tencent
+# Skill model, reimplemented cleanly + multi-tenant. A skill is not just a prompt: it has
+# a description, a triggering boundary (trigger), steps and validation, a version and status.
+# Org-scoped, shareable by visibility (private/team/org/restricted) + ACL.
 
 import re
 
@@ -20,8 +20,8 @@ def create_skill(spine, org_id: int, name: str, description: str = "", trigger: 
     name = (name or "").strip()
     if not name:
         raise ValueError("naziv skilla je obavezan")
-    # cap duljine + broja (anti DoS/context-exhaustion: aktivne vještine idu u
-    # agent-prompt; neomeđen unos bi napunio SQLite i pojeo kontekst; Codex)
+    # cap length + count (anti DoS/context-exhaustion: active skills go into the
+    # agent prompt; unbounded input would fill SQLite and eat the context; Codex)
     name = name[:120]
     description, trigger = (description or "")[:300], (trigger or "")[:300]
     steps, validation = (steps or "")[:8000], (validation or "")[:2000]
@@ -83,8 +83,8 @@ def list_skills(spine, org_id: int, status: str | None = None) -> list[dict]:
 
 
 def mark_used(spine, skill_id: int) -> None:
-    """Zabilježi da je vještina UČITANA (agent povukao korake). use_count hrani
-    skill-health (mrtve vs žive procedure). Simetrično memorijskom recall_count."""
+    """Record that a skill was LOADED (the agent pulled its steps). use_count feeds
+    skill-health (dead vs live procedures). Symmetric to memory's recall_count."""
     with spine.write() as c:
         c.execute("UPDATE skills SET use_count=COALESCE(use_count,0)+1, "
                   "last_used_at=datetime('now') WHERE id=?", (skill_id,))
@@ -98,10 +98,10 @@ def _jaccard(a: str, b: str) -> float:
 
 
 def health(spine, org_id: int, dup_thresh: float = 0.7) -> dict:
-    """Izvještaj o zdravlju kataloga vještina — SAMO uvid, NE automatsko brisanje
-    (vještine su ljudske uredske procedure; auto-prune bi mogao izgubiti korisno).
-    Flagira: mrtve (aktivne, use_count=0), skoro-duplikate (naziv+opis Jaccard),
-    manjkave (aktivne bez koraka / prekratki koraci). Owner odlučuje."""
+    """Health report for the skills catalog — INSIGHT ONLY, NOT automatic deletion
+    (skills are human office procedures; auto-prune could lose something useful).
+    Flags: dead (active, use_count=0), near-duplicates (name+description Jaccard),
+    malformed (active with no steps / too-short steps). The owner decides."""
     rows = [dict(r) for r in spine.read().execute(
         "SELECT id, name, description, steps, use_count FROM skills "
         "WHERE org_id=? AND status='active' ORDER BY name COLLATE NOCASE", (org_id,)).fetchall()]
@@ -121,9 +121,9 @@ def health(spine, org_id: int, dup_thresh: float = 0.7) -> dict:
 
 
 def readable(rows: list[dict], actor) -> list[dict]:
-    """Vidljivost-filtar preko ACL fast patha (private/team/org + owner/admin).
-    ponytail: 'restricted' skill bez učitanog ACL-a ostaje skriven — upgrade
-    path je acl.can() po retku kad restricted skillovi počnu postojati u praksi."""
+    """Visibility filter via the ACL fast path (private/team/org + owner/admin).
+    ponytail: a 'restricted' skill with no loaded ACL stays hidden — the upgrade
+    path is acl.can() per row once restricted skills start existing in practice."""
     from atlas.business.acl import Asset, check
     return [s for s in rows if check(actor, Asset(
         "skill", s["id"], s["org_id"], s["owner_user_id"] or 0,
@@ -131,8 +131,8 @@ def readable(rows: list[dict], actor) -> list[dict]:
 
 
 def match(spine, org_id: int, query: str, k: int = 3, actor=None) -> list[dict]:
-    """Aktivni skillovi čiji naziv/okidač/opis leksički preklapaju upit. Org-scoped;
-    s actorom dodatno filtrirano po vidljivosti."""
+    """Active skills whose name/trigger/description lexically overlap the query. Org-scoped;
+    with an actor, additionally filtered by visibility."""
     qt = _tokens(query)
     if not qt:
         return []

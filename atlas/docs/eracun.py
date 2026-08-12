@@ -110,15 +110,16 @@ def autosort(spine, cfg, xml_path: str, pdf_path: str | None = None) -> str | No
             )
         return None
 
-    # isti two-root guard kao svi ostali konzumenti nas_folder-a — klijent u
-    # registriranoj KLIJENTI mapi (apsolutni nas_folder) inače bude odbijen
+    # same two-root guard as all other consumers of nas_folder — a client in the
+    # registered KLIJENTI folder (absolute nas_folder) would otherwise be rejected
     from atlas.business.onboarding import _client_dir
     dest_dir = _client_dir(spine, cfg, client["id"])
     os.makedirs(dest_dir, exist_ok=True)
 
-    # collision guard: e-račun s imenom priloga koje već postoji u mapi ne smije
-    # tiho pregaziti postojeći (napadač šalje prilog "racun.xml" da uništi ranije
-    # zavedeni) — uniquify kao onboarding.add_document (stem_2.ext, ...).
+    # collision guard: an e-invoice with an attachment name that already exists in
+    # the folder must not silently overwrite the existing one (an attacker sends an
+    # attachment "racun.xml" to destroy a previously filed one) — uniquify like
+    # onboarding.add_document (stem_2.ext, ...).
     dest_xml = _uniquify(dest_dir, os.path.basename(xml_path))
     shutil.move(xml_path, dest_xml)
     if pdf_path:

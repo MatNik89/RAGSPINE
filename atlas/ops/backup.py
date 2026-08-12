@@ -1,6 +1,6 @@
-"""Sigurnosne kopije baze. VACUUM INTO daje konzistentan, kompaktan snapshot i
-uz živu WAL bazu (bez zaustavljanja servera). Restore ide preko CLI-ja dok je
-server zaustavljen — živi restore uz otvorene konekcije nije siguran."""
+"""Database backups. VACUUM INTO produces a consistent, compact snapshot even
+against a live WAL database (without stopping the server). Restore runs via the
+CLI while the server is stopped — a live restore with open connections is not safe."""
 import glob
 import os
 import shutil
@@ -15,25 +15,25 @@ def _backup_dir(cfg) -> str:
     d = os.path.join(cfg.data_dir, "backups")
     os.makedirs(d, exist_ok=True)
     try:
-        os.chmod(d, 0o700)  # sadrži pun PII snapshot
+        os.chmod(d, 0o700)  # contains a full PII snapshot
     except OSError:
         pass
     return d
 
 
 def create_backup(cfg, stamp: str | None = None) -> dict:
-    """Konzistentan snapshot preko VACUUM INTO. Piše u .tmp pa atomski os.replace
-    (Codex: izravan upis u konačno ime može ostaviti nepotpun fajl na prekidu)."""
+    """Consistent snapshot via VACUUM INTO. Writes to .tmp then atomic os.replace
+    (Codex: writing directly to the final name can leave an incomplete file on interruption)."""
     dest_dir = _backup_dir(cfg)
     stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     name = f"{_PREFIX}{stamp}{_SUFFIX}"
     dest = os.path.join(dest_dir, name)
     tmp = os.path.join(dest_dir, f".{_PREFIX}{stamp}.{os.getpid()}.tmp")
     if os.path.exists(tmp):
-        os.unlink(tmp)  # VACUUM INTO traži nepostojeći cilj
+        os.unlink(tmp)  # VACUUM INTO requires a non-existent target
     con = sqlite3.connect(cfg.db_path, timeout=60)
     try:
-        con.execute("VACUUM INTO ?", (tmp,))  # SQLite ≥3.27; Python 3.11 ima noviji
+        con.execute("VACUUM INTO ?", (tmp,))  # SQLite >=3.27; Python 3.11 ships a newer one
     finally:
         con.close()
     if not verify_backup(tmp):
@@ -46,7 +46,7 @@ def create_backup(cfg, stamp: str | None = None) -> dict:
         os.chmod(tmp, 0o600)
     except OSError:
         pass
-    os.replace(tmp, dest)  # atomski unutar iste mape
+    os.replace(tmp, dest)  # atomic within the same directory
     return {"name": name, "path": dest, "size": os.path.getsize(dest)}
 
 
@@ -60,10 +60,10 @@ def list_backups(cfg) -> list[dict]:
 
 
 def prune(cfg, keep: int = 14) -> int:
-    """Zadrži zadnjih `keep` kopija, ostale obriši. Vraća broj obrisanih."""
-    keep = max(1, keep)  # nikad ne obriši SVE kopije (Codex: keep=0 rubni slučaj)
+    """Keep the last `keep` backups, delete the rest. Returns the number deleted."""
+    keep = max(1, keep)  # never delete ALL backups (Codex: keep=0 edge case)
     d = _backup_dir(cfg)
-    files = sorted(glob.glob(os.path.join(d, f"{_PREFIX}*{_SUFFIX}")))  # stariji prvi
+    files = sorted(glob.glob(os.path.join(d, f"{_PREFIX}*{_SUFFIX}")))  # oldest first
     removed = 0
     for p in files[:-keep] if len(files) > keep else []:
         try:
@@ -78,9 +78,9 @@ _REQUIRED_TABLES = {"users", "clients", "documents"}
 
 
 def verify_backup(path: str) -> bool:
-    """Valjan ATLAS snapshot: postojeća datoteka, quick_check ok, i sadrži
-    ATLAS shemu. Otvara read-only da sqlite3.connect NE stvori praznu bazu na
-    tipfeleru (Codex: prazna baza bi inače prošla quick_check)."""
+    """A valid ATLAS snapshot: existing file, quick_check ok, and contains the
+    ATLAS schema. Opens read-only so sqlite3.connect does NOT create an empty
+    database on a typo (Codex: an empty database would otherwise pass quick_check)."""
     if not os.path.isfile(path):
         return False
     try:
@@ -99,9 +99,9 @@ def verify_backup(path: str) -> bool:
 
 
 def resolve_backup(cfg, name: str) -> str:
-    """Sigurna razrješba imena kopije na putanju UNUTAR backup mape (bez traversala)."""
+    """Safely resolve a backup name to a path INSIDE the backup directory (no traversal)."""
     d = os.path.realpath(_backup_dir(cfg))
-    safe = os.path.basename(name)  # odbaci sve komponente putanje
+    safe = os.path.basename(name)  # drop all path components
     path = os.path.realpath(os.path.join(d, safe))
     if os.path.dirname(path) != d or not os.path.isfile(path):
         raise ValueError(f"nepoznata sigurnosna kopija: {name!r}")
@@ -109,10 +109,10 @@ def resolve_backup(cfg, name: str) -> str:
 
 
 def restore_backup(cfg, path: str) -> dict:
-    """Zamijeni živu bazu kopijom. SAMO dok je server zaustavljen (CLI). Codex
-    hardening: verificira ATLAS shemu (ne samo quick_check), konzistentan
-    prerestore snapshot (VACUUM INTO — uključuje WAL), kopira u temp pa ATOMSKI
-    os.replace (prekid ne ostavlja polovičnu bazu)."""
+    """Replace the live database with a backup. ONLY while the server is stopped
+    (CLI). Codex hardening: verifies the ATLAS schema (not just quick_check),
+    a consistent prerestore snapshot (VACUUM INTO — includes WAL), copies to a
+    temp file then ATOMIC os.replace (an interruption leaves no half database)."""
     if not verify_backup(path):
         raise ValueError("nije valjana ATLAS baza (nepostojeća / prazna / kriva shema)")
     db = cfg.db_path
@@ -122,7 +122,7 @@ def restore_backup(cfg, path: str) -> dict:
             os.unlink(pre)
         con = sqlite3.connect(db, timeout=60)
         try:
-            con.execute("VACUUM INTO ?", (pre,))  # konzistentno, uklj. WAL
+            con.execute("VACUUM INTO ?", (pre,))  # consistent, incl. WAL
         except Exception:
             shutil.copy2(db, pre)  # fallback
         finally:
@@ -133,7 +133,7 @@ def restore_backup(cfg, path: str) -> dict:
         os.chmod(tmp, 0o600)
     except OSError:
         pass
-    os.replace(tmp, db)  # atomski
+    os.replace(tmp, db)  # atomic
     for ext in ("-wal", "-shm"):
         try:
             os.unlink(db + ext)

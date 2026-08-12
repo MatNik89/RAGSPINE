@@ -1,9 +1,9 @@
-# Arhitektura mapa (D2): NIŠTA se ne izmišlja u kodu — struktura se DOGOVARA
-# s korisnikom (chat lane "arhitektura" ili Postavke) i sprema u bazu
-# (config_overrides modul 'arhitektura'). Izvor istine za klijente je stvarna
-# KLIJENTI mapa na NAS-u (registrirana s role='klijenti'): svaka podmapa =
-# klijent. learn_structure() čita POSTOJEĆE stanje kao polazište dogovora.
-# propose() je read-only preview; apply() na potvrdu kreira SAMO nedostajuće.
+# Folder architecture (D2): NOTHING is invented in code — the structure is AGREED
+# with the user (chat lane "arhitektura" or Settings) and stored in the database
+# (config_overrides module 'arhitektura'). The source of truth for clients is the real
+# KLIJENTI folder on the NAS (registered with role='klijenti'): each subfolder =
+# a client. learn_structure() reads the EXISTING state as the starting point for the agreement.
+# propose() is a read-only preview; apply() on confirmation creates ONLY what is missing.
 
 import json
 import os
@@ -13,9 +13,9 @@ from atlas.business.onboarding import klijenti_root
 from atlas.core import security
 
 _MODULE = "arhitektura"
-# ime mape: bez separatora, traversala, kontrolnih znakova; Windows-safe
+# folder name: no separators, no traversal, no control characters; Windows-safe
 _BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
-# rezervirana DOS imena (i s ekstenzijom, npr. CON.txt) — Windows ih odbija
+# reserved DOS names (also with an extension, e.g. CON.txt) — Windows rejects them
 _DOS_RESERVED = {"con", "prn", "aux", "nul",
                  *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
 _MAX_NAME = 100
@@ -26,7 +26,7 @@ def _root(cfg) -> str:
 
 
 def _subdirs(path: str, base: str) -> list:
-    """Direktne podmape; simlink koji resolvea izvan base preskočen (fail-closed)."""
+    """Direct subfolders; a symlink that resolves outside base is skipped (fail-closed)."""
     out = []
     try:
         with os.scandir(path) as it:
@@ -43,9 +43,9 @@ def _subdirs(path: str, base: str) -> list:
 
 
 def learn_structure(spine, cfg) -> dict:
-    """Pročitaj kako je KLIJENTI mapa VEĆ organizirana: broj klijenata (podmapa)
-    + frekvencija njihovih child-podmapa. Polazište za dogovor, ne dira disk."""
-    root = klijenti_root(spine, cfg)  # ValueError (nedostupna) propagira pozivatelju
+    """Read how the KLIJENTI folder is ALREADY organized: number of clients (subfolders)
+    + the frequency of their child-subfolders. A starting point for the agreement, does not touch disk."""
+    root = klijenti_root(spine, cfg)  # ValueError (unavailable) propagates to the caller
     if root is None:
         return {"root": None, "n_clients": 0, "subdir_counts": {}}
     counts: dict[str, int] = {}
@@ -62,7 +62,7 @@ def _valid_names(names) -> list[str]:
     for n in names or []:
         if not isinstance(n, str):
             raise ValueError("ime mape mora biti string")
-        n = n.strip().rstrip(".")  # NTFS strippa završnu točku — ne dopuštamo je
+        n = n.strip().rstrip(".")  # NTFS strips a trailing dot — we do not allow it
         if (not n or n in (".", "..") or _BAD_NAME.search(n) or len(n) > _MAX_NAME
                 or n.split(".")[0].lower() in _DOS_RESERVED):
             raise ValueError(f"nedozvoljeno ime mape: {n!r}")
@@ -74,8 +74,8 @@ def _valid_names(names) -> list[str]:
 
 
 def get_template(spine) -> dict:
-    """Dogovoreni template: {'office': [...], 'client_subdirs': [...]}.
-    Default PRAZAN — dok se ne dogovorimo, ništa se ne predlaže."""
+    """The agreed template: {'office': [...], 'client_subdirs': [...]}.
+    Default EMPTY — until an agreement is made, nothing is proposed."""
     raw = spine.get_override(_MODULE, "template", "")
     try:
         data = json.loads(raw) if raw else {}
@@ -86,7 +86,7 @@ def get_template(spine) -> dict:
 
 
 def set_template(spine, office=None, client_subdirs=None, user: str = "?") -> dict:
-    """Spremi dogovor (None = ne diraj tu polovicu). Vraća novi template."""
+    """Save the agreement (None = do not touch that half). Returns the new template."""
     cur = get_template(spine)
     if office is not None:
         cur["office"] = _valid_names(office)
@@ -100,18 +100,18 @@ def set_template(spine, office=None, client_subdirs=None, user: str = "?") -> di
 def _entry(root: str, path: str, name: str) -> dict | None:
     rp = os.path.realpath(path)
     if not security.path_under(rp, root):
-        return None  # escape (../, simlink, drugi disk) — preskoči, fail-closed
+        return None  # escape (../, symlink, another disk) — skip, fail-closed
     return {"name": name, "path": rp, "exists": os.path.isdir(rp)}
 
 
 def propose(spine, cfg) -> dict:
-    """Read-only preview iz DOGOVORENOG templatea: uredske mape pod korijenom,
-    dogovorene podmape za svakog klijenta iz stvarne KLIJENTI mape (disk)."""
+    """Read-only preview from the AGREED template: office folders under the root,
+    the agreed subfolders for each client from the real KLIJENTI folder (disk)."""
     tpl = get_template(spine)
     root = _root(cfg)
     must = [e for n in tpl["office"] if (e := _entry(root, os.path.join(root, n), n))]
     clients = []
-    kroot = klijenti_root(spine, cfg)  # ValueError (nedostupna) propagira — bolje nego kriva stabla
+    kroot = klijenti_root(spine, cfg)  # ValueError (unavailable) propagates — better than the wrong trees
     if kroot and tpl["client_subdirs"]:
         for c in _subdirs(kroot, kroot):
             subs = [e for s in tpl["client_subdirs"]
@@ -125,8 +125,8 @@ def propose(spine, cfg) -> dict:
 
 
 def apply(spine, cfg, user: str = "?") -> dict:
-    """Kreiraj nedostajuće iz dogovorenog prijedloga. Idempotentno; nikad ne
-    briše/premješta. n_created odgovara n_missing iz preview-a."""
+    """Create what is missing from the agreed proposal. Idempotent; never
+    deletes/moves. n_created matches n_missing from the preview."""
     prop = propose(spine, cfg)
     created = []
     try:
@@ -140,20 +140,20 @@ def apply(spine, cfg, user: str = "?") -> dict:
                     os.makedirs(e["path"], exist_ok=True)
                     created.append(e["path"])
     finally:
-        # i djelomično stvoreno (pad na kasnijoj mapi) mora u audit
+        # even a partial creation (failure on a later folder) must go into the audit
         if created:
             spine.audit(user, "folder_architecture_apply", f"created:{len(created)}")
     return {"created": created, "n_created": len(created)}
 
 
-# --- chat lane: dogovor kroz razgovor -----------------------------------------
-# "dogovor mape po klijentu: Ugovori, Izvodi" -> spremi client_subdirs
-# "dogovor uredske mape: PROPISI, SCANNER"    -> spremi office
-# sve ostalo s eksplicitnim arhitektura-intentom -> pregled naučenog + dogovora
-# Admin-only (kao API): lane sprema stanje i otkriva NAS putanje/klijente.
+# --- chat lane: agreement through conversation --------------------------------
+# "dogovor mape po klijentu: Ugovori, Izvodi" -> save client_subdirs
+# "dogovor uredske mape: PROPISI, SCANNER"    -> save office
+# anything else with an explicit architecture-intent -> overview of what was learned + agreed
+# Admin-only (like the API): the lane saves state and reveals NAS paths/clients.
 
-# SIDRENO na cijeli upit (fullmatch) — "u navodu 'dogovor mape...' nemoj" ili
-# rep rečenice iza popisa NE smiju postati konfiguracija datotečnog sustava
+# ANCHORED to the whole query (fullmatch) — "in the quote 'dogovor mape...' do not" or
+# a sentence tail after the list MUST NOT become filesystem configuration
 _SET_CLIENT = re.compile(r"\s*dogovor\s+map[ae]\s+po\s+klijentu\s*:\s*([^.?!]+)[.?!]?\s*",
                          re.IGNORECASE)
 _SET_OFFICE = re.compile(r"\s*dogovor\s+uredsk\w*\s+map[ae]\s*:\s*([^.?!]+)[.?!]?\s*",

@@ -1,23 +1,26 @@
-"""Perzistentni approval-grantovi: "potvrdi jednom, zapamti" za ponovljivu radnju
-(MateClaw ApprovalGrant + AutoGrantSafetyFloor, prilagođeno ATLAS-u).
+"""Persistent approval grants: "approve once, remember" for a repeatable action
+(MateClaw ApprovalGrant + AutoGrantSafetyFloor, adapted for ATLAS).
 
-SIGURNOSNI POD (tvrdo, nepromjenjivo): alat VISOKOG rizika (vanjska nuspojava —
-poruka klijentu, pokretanje/buđenje stanice, dohvat s weba) NIKAD ne prolazi
-automatski, čak i uz postojeći grant. Auto-odobrenje moguće SAMO za low/med.
+SAFETY FLOOR (hard, immutable): a HIGH-risk tool (external side effect -- a
+message to a client, powering on/waking a workstation, fetching from the web)
+NEVER passes automatically, even with an existing grant. Auto-approval is
+possible ONLY for low/med.
 
-Grant veže: scope (user|org) + TOČAN alat + TOČAN cilj (klijent/obveza) + max_risk
-(low|med) + rok. Exact-target: bez jasnog cilj-arga koristi se cijeli skup
-argumenata (nikad "bilo koji cilj za ovaj alat")."""
+A grant binds: scope (user|org) + the EXACT tool + the EXACT target
+(client/obligation) + max_risk (low|med) + expiry. Exact-target: without a clear
+target arg, the entire set of arguments is used (never "any target for this
+tool")."""
 import json
 
 from atlas.business.acl import ROLE_RANK
 
 _RANK = {"low": 0, "med": 1, "high": 2}
 
-# cilj-ključevi po alatu (identitet radnje); ako ih nema -> cijeli args (exact).
-# NAPOMENA: oznaci_obvezu/zakazi_rok NAMJERNO ne uključuju period/datum — grant je
-# "za ovog klijenta+vrstu kroz razdoblja" (rekurencija je smisao "zapamti"); radnje
-# su reverzibilne+interne i safety-floor jamči da nikad ne okinu vanjski efekt.
+# target keys per tool (action identity); if absent -> the whole args (exact).
+# NOTE: oznaci_obvezu/zakazi_rok DELIBERATELY do not include period/date -- the
+# grant is "for this client+type across periods" (recurrence is the point of
+# "remember"); the actions are reversible+internal and the safety floor
+# guarantees they never trigger an external effect.
 _TARGET_KEYS = {
     "oznaci_obvezu": ("klijent", "vrsta"),
     "zakazi_rok": ("klijent", "vrsta"),
@@ -31,29 +34,30 @@ _TARGET_KEYS = {
 
 
 def target_for(name: str, args: dict) -> str:
-    """Kanonski JSON cilja (bez '|' kolizije; Codex). Za alate s cilj-ključevima
-    uzmi taj podskup, inače cijeli args (exact-target)."""
+    """Canonical target JSON (no '|' collision; Codex). For tools with target
+    keys take that subset, otherwise the whole args (exact-target)."""
     keys = _TARGET_KEYS.get(name)
     src = {k: (args or {}).get(k, "") for k in keys} if keys else (args or {})
     return json.dumps(src, sort_keys=True, ensure_ascii=False, default=str)
 
 
 def _target_empty(name: str, args: dict) -> bool:
-    """True ako cilj nema nijednu značajnu vrijednost (npr. dodaj_klijenta bez
-    naziva) -> grant bi bio wildcard; to se ODBIJA (Codex)."""
+    """True if the target has no significant value (e.g. dodaj_klijenta without
+    a name) -> the grant would be a wildcard; that is REJECTED (Codex)."""
     keys = _TARGET_KEYS.get(name)
     if not keys:
-        return not (args or {})  # bez cilj-ključeva: prazan args = wildcard
+        return not (args or {})  # without target keys: empty args = wildcard
     return not any(str((args or {}).get(k, "")).strip() for k in keys)
 
 
 def can_auto_approve(spine, actor, name: str, args: dict) -> bool:
-    """Smije li se `name(args)` automatski izvršiti bez potvrde? SAMO ako: rizik
-    nije high (safety-floor) I postoji važeći grant (scope/alat/cilj/rizik)."""
+    """May `name(args)` be executed automatically without confirmation? ONLY if:
+    the risk is not high (safety floor) AND a valid grant exists
+    (scope/tool/target/risk)."""
     from atlas.rag import agent_tools
     risk = agent_tools.risk(name)
     if _RANK.get(risk, 2) >= _RANK["high"]:
-        return False  # SAFETY FLOOR: high nikad auto
+        return False  # SAFETY FLOOR: high is never auto
     target = target_for(name, args)
     row = spine.read().execute(
         """SELECT 1 FROM agent_grants
@@ -69,12 +73,12 @@ def can_auto_approve(spine, actor, name: str, args: dict) -> bool:
 
 def create_grant(spine, actor, name: str, args: dict, scope: str = "user",
                  days: int | None = None, user: str = "?") -> int:
-    """Stvori grant za (alat, cilj). max_risk = rizik alata; ODBIJ ako je high
-    (safety-floor: high se ne može ni zapamtiti). org-scope traži owner/admin
-    (provjerava se u ruti). `days` None = trajno."""
+    """Create a grant for (tool, target). max_risk = the tool's risk; REJECT if
+    high (safety floor: high cannot even be remembered). org-scope requires
+    owner/admin (checked in the route). `days` None = permanent."""
     from atlas.rag import agent_tools
     if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
-        raise ValueError("za pravilo odobrenja potrebna je barem member uloga")  # Codex
+        raise ValueError("za pravilo odobrenja potrebna je barem member uloga")  # Codex: at least member role required for an approval rule
     if name not in agent_tools.TOOLS:
         raise ValueError(f"nepoznat alat: {name!r}")
     risk = agent_tools.risk(name)
@@ -82,8 +86,9 @@ def create_grant(spine, actor, name: str, args: dict, scope: str = "user",
         raise ValueError("radnja visokog rizika ne može se automatski odobriti (uvijek traži potvrdu)")
     if scope not in ("user", "org"):
         raise ValueError("scope mora biti 'user' ili 'org'")
-    # grant nosi SAMO cilj (klijent/obveza), ne pun poziv -> ne validiramo sve
-    # obavezne args-e; dovoljno je da cilj NIJE prazan (inače wildcard; Codex)
+    # the grant carries ONLY the target (client/obligation), not the full call ->
+    # we do not validate all required args; it is enough that the target is NOT
+    # empty (otherwise a wildcard; Codex)
     if _target_empty(name, args):
         raise ValueError("pravilo mora imati konkretan cilj (nije dopušten wildcard)")
     target = target_for(name, args)
@@ -99,14 +104,14 @@ def create_grant(spine, actor, name: str, args: dict, scope: str = "user",
 
 
 def list_grants(spine, actor) -> list[dict]:
-    """Grantovi koji vrijede za ovog actora (svoji user + org), neopozvani."""
+    """Grants that apply to this actor (their own user + org), not revoked."""
     rows = spine.read().execute(
         "SELECT id, scope, tool, target, max_risk, expire_at, created_by, created_at "
         "FROM agent_grants WHERE revoked=0 AND org_id=? "
         "AND (scope='org' OR (scope='user' AND user_id=?)) ORDER BY id DESC",
         (actor.org_id, actor.user_id)).fetchall()
-    # org-cilj može sadržavati ime/OIB klijenta kojeg restringirani radnik ne smije
-    # vidjeti -> maskiraj ne-adminu (Codex; vlastiti user-grantovi ostaju vidljivi)
+    # an org target may contain a client's name/OIB that a restricted worker must
+    # not see -> mask it for non-admins (Codex; the actor's own user grants stay visible)
     is_admin = ROLE_RANK.get(actor.role, 0) >= ROLE_RANK["admin"]
     out = []
     for r in rows:
@@ -118,7 +123,7 @@ def list_grants(spine, actor) -> list[dict]:
 
 
 def revoke_grant(spine, actor, grant_id: int, is_owner: bool, user: str = "?") -> bool:
-    """Opozovi grant. Vlastiti user-grant smije vlasnik granta; org-grant samo owner."""
+    """Revoke a grant. The grant's owner may revoke their own user grant; an org grant only the owner."""
     row = spine.read().execute(
         "SELECT scope, user_id FROM agent_grants WHERE id=? AND org_id=? AND revoked=0",
         (grant_id, actor.org_id)).fetchone()

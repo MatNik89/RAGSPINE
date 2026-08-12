@@ -1,8 +1,10 @@
-# AI sidebar za DODAJ NOVOG KLIJENTA wizard (piece F): gleda draft dok se
-# tipka i vraća — deterministička pravila (brojke iz quickref registra, NE
-# hardkod), popis obrazaca institucija za situaciju, RAG citate iz propisa i
-# (opcionalno) kratki LLM sažetak grundan ISKLJUČIVO na tim izvorima.
-# Bez LLM-a radi jednako — samo bez sažetka (isti hibridni duh kao C3).
+# AI sidebar for the ADD NEW CLIENT wizard (piece F): watches the draft as the
+# user types and returns — deterministic rules (numbers from the quickref
+# registry, NOT hardcoded), a list of institution forms for the situation, RAG
+# citations from regulations and (optionally) a short LLM summary grounded
+# EXCLUSIVELY on those sources.
+# Without an LLM it works the same — just without the summary (same hybrid
+# spirit as C3).
 
 import logging
 
@@ -12,8 +14,8 @@ _log = logging.getLogger(__name__)
 
 LEGAL_FORMS = ("", "obrt", "poduzece")
 
-# Standardni koraci/obrasci pri otvaranju — kratko i općenito; detalji i
-# aktualne brojke dolaze iz RAG citata i quickref registra, ne odavde.
+# Standard steps/forms when opening — short and general; details and current
+# figures come from RAG citations and the quickref registry, not from here.
 _FORMS = {
     "obrt": ["Upis u Obrtni registar (obrtnica)",
              "Prijava u registar poreznih obveznika (RPO / Porezna uprava)",
@@ -40,7 +42,7 @@ def _qref(spine, key: str) -> dict | None:
 
 
 def _rules(spine, draft: dict) -> tuple[list[str], list[str], list[str], list[str]]:
-    """(warnings, suggestions, forms, rag_queries) iz drafta."""
+    """(warnings, suggestions, forms, rag_queries) from the draft."""
     warnings, suggestions, forms, queries = [], [], [], []
     legal = (draft.get("legal_form") or "").strip()
     regime = (draft.get("regime") or "").strip()
@@ -85,7 +87,7 @@ def _rules(spine, draft: dict) -> tuple[list[str], list[str], list[str], list[st
 
 
 def assist(spine, cfg, draft: dict, llm=None, actor=None) -> dict:
-    # trim slobodnih polja — assist ne smije biti kanal za kilometarske ulaze
+    # trim free-text fields — assist must not become a channel for kilometer-long inputs
     draft = {k: (v[:200] if isinstance(v, str) else v) for k, v in (draft or {}).items()}
     warnings, suggestions, forms, queries = _rules(spine, draft)
 
@@ -96,7 +98,7 @@ def assist(spine, cfg, draft: dict, llm=None, actor=None) -> dict:
         seen = set()
         for q in queries[:3]:
             for hit in retrieval.search(spine, q, k=2, org_id=org_id):
-                # samo propisi — klijentski dokumenti ne cure u sidebar
+                # regulations only — client documents do not leak into the sidebar
                 cr = spine.read().execute(
                     "SELECT client_id FROM documents WHERE id=?", (hit.doc_id,)).fetchone()
                 if cr is not None and cr["client_id"] is not None:
@@ -107,12 +109,13 @@ def assist(spine, cfg, draft: dict, llm=None, actor=None) -> dict:
                 seen.add(key)
                 sources.append({"title": hit.title, "snippet": hit.text[:240]})
         sources = sources[:4]
-    except Exception:  # RAG je best-effort — sidebar nikad ne ruši tipkanje
+    except Exception:  # RAG is best-effort — the sidebar never breaks typing
         sources = []
 
-    # LLM tek kad draft ima SADRŽAJ (prazan ekran ne troši model) i SAMO s
-    # enum/bool poljima — slobodan tekst (naziv!) ne ulazi u prompt, a izvori
-    # su delimitirani kao podaci, ne upute (anti prompt-injection).
+    # LLM only when the draft has CONTENT (an empty screen does not spend the
+    # model) and ONLY with enum/bool fields — free text (the name!) does not
+    # enter the prompt, and the sources are delimited as data, not instructions
+    # (anti prompt-injection).
     facts = {k: draft.get(k) for k in ("legal_form", "regime", "pdv_status", "has_employees")
              if draft.get(k)}
     llm_note = None
@@ -132,7 +135,7 @@ def assist(spine, cfg, draft: dict, llm=None, actor=None) -> dict:
         except Exception as e:
             _log.warning("assist LLM preskočen: %s", e)
 
-    # dedup uz očuvan redoslijed
+    # dedup while preserving order
     forms = list(dict.fromkeys(forms))
     return {"warnings": warnings, "suggestions": suggestions, "forms": forms,
             "sources": sources, "llm_note": llm_note}

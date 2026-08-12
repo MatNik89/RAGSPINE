@@ -12,7 +12,7 @@ def _stub(args) -> int:
 
 
 def _net_overrides(spine, cfg):
-    """Mrežne postavke iz config_overrides(module='net') s cfg fallbackom."""
+    """Network settings from config_overrides(module='net') with a cfg fallback."""
     host = spine.get_override("net", "host") or cfg.host
     try:
         port = int(spine.get_override("net", "port") or cfg.port)
@@ -24,8 +24,9 @@ def _net_overrides(spine, cfg):
 
 
 def _start_bootstrap(cert: str, host: str, port: int) -> None:
-    """Bootstrap HTTP server za radnike (uz HTTPS server) — pomoć, ne uvjet:
-    ATLAS_BOOTSTRAP_PORT="0" isključuje, bind greška samo upozori (log)."""
+    """Bootstrap HTTP server for workstations (alongside the HTTPS server) — a
+    convenience, not a requirement: ATLAS_BOOTSTRAP_PORT="0" disables it, a bind
+    error only warns (logged)."""
     from atlas import config
     from atlas.ops import certs, preflight
     from atlas.web.bootstrap_http import start_bootstrap_server
@@ -38,9 +39,9 @@ def _start_bootstrap(cert: str, host: str, port: int) -> None:
     except ValueError:
         bport = 8080
     url_host = preflight.local_ip() if host == "0.0.0.0" else host
-    # nalaz: display ime mora biti usklađeno sa SAN-om POSTOJEĆEG certa (v.
-    # certs.verified_display_host) — inače stara instalacija nudi ime koje
-    # cert uopće ne pokriva -> browser warning i nakon instalacije certa.
+    # finding: the display name must match the SAN of the EXISTING cert (see
+    # certs.verified_display_host) — otherwise an old install offers a name the
+    # cert does not cover at all -> browser warning even after installing the cert.
     display = certs.verified_display_host(cert, certs.friendly_names(), url_host)
     https_url = f"https://{display}:{port}"
     thread = start_bootstrap_server(cert, https_url, host, port=bport)
@@ -56,7 +57,7 @@ def _cmd_serve(args) -> int:
 
     cfg = get_config()
     spine = init_spine(cfg.db_path)
-    # server_header=False: ne curi "uvicorn" verziju; middleware već šalje Server: ATLAS
+    # server_header=False: don't leak the "uvicorn" version; middleware already sends Server: ATLAS
     host, port, cert, key = _net_overrides(spine, cfg)
     ssl_kw = {}
     if cert and key:
@@ -66,13 +67,13 @@ def _cmd_serve(args) -> int:
             print(f"⚠ Cert/key ne postoje ({cert}, {key}) — pokrećem bez HTTPS-a.")
     if ssl_kw:
         _start_bootstrap(cert, host, port)
-    _start_mdns(port)  # objavi _atlas._tcp da radne stanice nađu server bez ručnog upisa
+    _start_mdns(port)  # advertise _atlas._tcp so workstations find the server without manual entry
     uvicorn.run(create_app(spine, cfg), host=host, port=port,
                 server_header=False, **ssl_kw)
     return 0
 
 
-def _local_ip() -> str:  # pragma: no cover — mreža
+def _local_ip() -> str:  # pragma: no cover — network
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
@@ -84,7 +85,7 @@ def _local_ip() -> str:  # pragma: no cover — mreža
         s.close()
 
 
-def _start_mdns(port: int) -> None:  # pragma: no cover — mreža/thread
+def _start_mdns(port: int) -> None:  # pragma: no cover — network/thread
     import threading
 
     import atlas
@@ -96,7 +97,7 @@ def _start_mdns(port: int) -> None:  # pragma: no cover — mreža/thread
 
 
 def _cmd_discover(args) -> int:
-    """Nađi ATLAS servere na mreži (radna stanica prije upisa adrese)."""
+    """Find ATLAS servers on the network (workstation, before entering an address)."""
     import json as _json
 
     from atlas.core import mdns
@@ -106,8 +107,8 @@ def _cmd_discover(args) -> int:
 
 
 def _dashboard_url(spine, cfg) -> str:
-    """URL ATLAS nadzorne ploče iz net-overridea + cert SAN. Installer ga otvara
-    nakon instalacije servisa (umjesto da nagađa port/host)."""
+    """ATLAS dashboard URL from the net override + cert SAN. The installer opens
+    it after installing the service (instead of guessing the port/host)."""
     from atlas.ops import certs
     host, port, cert, key = _net_overrides(spine, cfg)
     scheme = "https" if (cert and key and Path(cert).exists()) else "http"
@@ -118,7 +119,7 @@ def _dashboard_url(spine, cfg) -> str:
 
 
 def _cmd_open(args) -> int:
-    """Otvori (ili ispiši) ATLAS nadzornu ploču u pregledniku."""
+    """Open (or print) the ATLAS dashboard in the browser."""
     from atlas.config import get_config
     from atlas.core.spine import init_spine
     cfg = get_config()
@@ -240,7 +241,7 @@ def _cmd_setup(args) -> int:
     from atlas.ops import seeds, wizard, wizard_state
     if getattr(args, "reset", False):
         wizard_state.reset(spine)
-    seeds.all(spine, date.today().year)  # baza (kontni plan, watch izvori...) — idempotentno, kao stari setup.run
+    seeds.all(spine, date.today().year)  # base data (chart of accounts, watch sources...) — idempotent, like the old setup.run
     wizard.run(spine, cfg)
     return 0
 
@@ -411,8 +412,8 @@ def _cmd_trust(args) -> int:
 
 
 def _elevated() -> bool:
-    """Windows: admin preko shell32 (ctypes.windll ne postoji izvan Windowsa
-    -> AttributeError, uhvaćeno). POSIX: root (uid 0)."""
+    """Windows: admin via shell32 (ctypes.windll does not exist outside Windows
+    -> AttributeError, caught). POSIX: root (uid 0)."""
     if os.name == "nt":
         try:
             import ctypes
@@ -424,8 +425,8 @@ def _elevated() -> bool:
 
 def _cmd_servis(args) -> int:
     """atlas servis <install|uninstall|status> — WinSW (Windows) / systemd
-    (Linux) servis oko `atlas serve` (spec 2026-08-08). install/uninstall
-    traže elevaciju; status ne."""
+    (Linux) service wrapping `atlas serve` (spec 2026-08-08). install/uninstall
+    require elevation; status does not."""
     from atlas.business import folders
     from atlas.config import get_config
     from atlas.core.spine import init_spine

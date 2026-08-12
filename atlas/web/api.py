@@ -79,14 +79,14 @@ class ChatBody(BaseModel):
 
 class PendingTokenBody(BaseModel):
     token: str
-    remember: bool = False  # "potvrdi i zapamti" -> stvori user-grant (osim high-rizika)
+    remember: bool = False  # "confirm and remember" -> create a user-grant (except high-risk)
 
 
 class GrantBody(BaseModel):
     tool: str
     args: dict = {}
-    scope: str = "user"          # 'user' (svoj) ili 'org' (cijeli ured; owner)
-    days: int | None = None      # None = trajno
+    scope: str = "user"          # 'user' (own) or 'org' (whole office; owner)
+    days: int | None = None      # None = permanent
 
 
 class UredPravilaBody(BaseModel):
@@ -94,7 +94,7 @@ class UredPravilaBody(BaseModel):
 
 
 class BudgetBody(BaseModel):
-    caps: dict[str, int] = {}    # {llm|tokens|writes: plafon}; 0 = bez granice
+    caps: dict[str, int] = {}    # {llm|tokens|writes: cap}; 0 = no limit
 
 
 class ScheduledTaskBody(BaseModel):
@@ -106,8 +106,8 @@ class ScheduledTaskBody(BaseModel):
 
 
 class PowerConfigBody(BaseModel):
-    # 'armed' NAMJERNO izostavljen — naoružavanje ide samo kroz /napajanje/arm
-    # (jedno mjesto, auditirano). Inače bi config-POST tiho naoružao gašenje.
+    # 'armed' DELIBERATELY omitted — arming goes only through /napajanje/arm
+    # (one place, audited). Otherwise a config-POST would silently arm shutdown.
     enabled: bool | None = None
     nut_host: str | None = None
     nut_port: int | None = None
@@ -153,10 +153,10 @@ class FieldValueBody(BaseModel):
     value: str | float | int | bool | None = None
 
 
-_AGENT_ROLES = ("member", "admin", "owner")  # viewer ostaje na retrieval putu
+_AGENT_ROLES = ("member", "admin", "owner")  # viewer stays on the retrieval path
 _PENDING_TTL_MIN = 10
 
-# ── PWA (omota web UI kao instalabilnu aplikaciju) ────────────────────────
+# ── PWA (wraps the web UI as an installable application) ──────────────────
 _PWA_THEME = "#4f46e5"
 _PWA_MANIFEST = json.dumps({
     "name": "ATLAS", "short_name": "ATLAS",
@@ -170,8 +170,8 @@ _PWA_MANIFEST = json.dumps({
     ],
 }, ensure_ascii=False)
 
-# Minimalan SW: cache-first za /static/, network-first za navigacije uz offline
-# fallback. NIKAD ne kešira authed HTML (freshness/privatnost).
+# Minimal SW: cache-first for /static/, network-first for navigations with an
+# offline fallback. NEVER caches authed HTML (freshness/privacy).
 _PWA_SW_JS = """
 const CACHE = 'atlas-v1';
 const SHELL = ['/static/icons/icon-192.png', '/static/icons/favicon.svg',
@@ -261,7 +261,7 @@ class ConnectorStatusBody(BaseModel):
 
 
 class SetupOwnerBody(BaseModel):
-    # min 8 = osnovna jačina; max 128 = štiti PBKDF2 od golemog inputa (Codex)
+    # min 8 = basic strength; max 128 = protects PBKDF2 from huge input (Codex)
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=8, max_length=128)
 
@@ -613,48 +613,48 @@ _DUMMY_PW_HASH = hash_password("nexus-dummy-pw-for-timing-only")
 
 
 def create_app(spine, cfg) -> FastAPI:
-    # /docs + /redoc + /openapi.json ugašeni: Swagger UI vuče JS/CSS s CDN-a (pada
-    # pod strogim CSP-om), a interaktivni API explorer je bespotrebna neautenti-
-    # cirana enumeracija površine na produkcijskom LAN-u.
+    # /docs + /redoc + /openapi.json disabled: Swagger UI pulls JS/CSS from a CDN
+    # (fails under a strict CSP), and the interactive API explorer is a needless
+    # unauthenticated surface enumeration on a production LAN.
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.spine = spine
     app.state.cfg = cfg
     app.state.bridge = Bridge()
-    # DB-odabir modela (wizard/postavke) mora vrijediti i izvan LLM request-puta —
-    # embed._get_model() čita globalni get_config() izravno (nema pristup spineu),
-    # pa se override primijeni jednom ovdje. Idempotentno: model_settings.apply na
-    # već-primijenjenom cfg-u je no-op ako DB izbor nije promijenjen otad.
+    # The DB model choice (wizard/settings) must apply outside the LLM request path
+    # too — embed._get_model() reads the global get_config() directly (no access to
+    # spine), so the override is applied once here. Idempotent: model_settings.apply
+    # on an already-applied cfg is a no-op if the DB choice hasn't changed since.
     from atlas.config import set_config
     set_config(model_settings.apply(spine, cfg))
-    tenancy.backfill_org(spine)  # idempotentno: postojeći dokumenti/znanje → default org
+    tenancy.backfill_org(spine)  # idempotent: existing documents/knowledge -> default org
     limiter = RateLimiter()
-    _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob tek kad zatreba
+    _LOGIN_PER_MIN, _LOGIN_IP_PER_MIN, _CHAT_PER_MIN = 10, 30, 30  # ponytail: config knob only when needed
     from atlas.business.connector_adapters import register_builtin
-    register_builtin()  # registrira mail/telegram/whatsapp tipove (idempotentno)
+    register_builtin()  # registers mail/telegram/whatsapp types (idempotent)
 
-    # Sigurnosna zaglavlja (defense-in-depth): clickjacking, MIME-sniff, referrer
-    # leak, base-tag hijack. CSP dopušta 'unsafe-inline' jer je UI inline-script,
-    # ali bez 'unsafe-eval' (nema eval/Function) i bez vanjskih izvora (LAN/offline).
+    # Security headers (defense-in-depth): clickjacking, MIME-sniff, referrer
+    # leak, base-tag hijack. CSP allows 'unsafe-inline' because the UI is inline-script,
+    # but no 'unsafe-eval' (no eval/Function) and no external sources (LAN/offline).
     _CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; "
             "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
             "connect-src 'self'; object-src 'none'; base-uri 'none'; "
             "frame-ancestors 'none'; form-action 'self'")
 
-    _MAX_BODY = 64 * 1024 * 1024  # 64MB: iznad 25MB base64 uploada (~34MB), ispod DoS-a
+    _MAX_BODY = 64 * 1024 * 1024  # 64MB: above 25MB base64 upload (~34MB), below DoS territory
 
     @app.middleware("http")
     async def _security_headers(request: Request, call_next):
-        # pre-decode gate: Starlette bufferira cijelo tijelo prije handlera, pa
-        # 1GB JSON = 1.75GB RAM prije 400 — odbij po Content-Lengthu odmah.
-        # ponytail: hvata samo zahtjeve s Content-Lengthom; chunked/streaming bez
-        # njega prolazi — pravi hard-limit je na reverse-proxyju (deploy doc), ovo
-        # je jeftin prvi filter za tipičan JSON-bomb.
+        # pre-decode gate: Starlette buffers the whole body before the handler, so
+        # 1GB JSON = 1.75GB RAM before a 400 — reject by Content-Length immediately.
+        # ponytail: catches only requests with a Content-Length; chunked/streaming
+        # without it passes — the real hard limit is on the reverse proxy (deploy
+        # doc), this is a cheap first filter for a typical JSON bomb.
         clen = request.headers.get("content-length")
         if clen and clen.isdigit() and int(clen) > _MAX_BODY:
             return JSONResponse({"detail": "tijelo zahtjeva preveliko", "max_bytes": _MAX_BODY},
                                 status_code=413)
-        # first-run gatekeeper: dok ne postoji nijedan korisnik, navigacija ide
-        # na wizard (/ui/setup). Uzor Open WebUI (has_users()==False).
+        # first-run gatekeeper: while no user exists yet, navigation goes to the
+        # wizard (/ui/setup). Modeled on Open WebUI (has_users()==False).
         from atlas.web import firstrun
         if request.method == "GET" and firstrun._redirect_target(request.url.path) \
                 and firstrun.needs_setup(spine):
@@ -673,8 +673,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/health")
     def health():
-        # Javno: installer/monitoring provjeravaju da JE ovo ATLAS server (opcija B:
-        # radna stanica se veže tek kad server odgovori atlas=true + setup gotov).
+        # Public: installer/monitoring check that this IS an ATLAS server (option B:
+        # the workstation binds only once the server answers atlas=true + setup done).
         import atlas
         from atlas.ops import wizard_state
         return {"status": "ok", "atlas": True, "version": atlas.__version__,
@@ -693,8 +693,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/login/step")
     def login_step(body: LoginStepBody, request: Request):
-        """Prvi korak dvokoračnog logina: bez otkrivanja postoje li useri —
-        nepoznat user vraća isto 'password' stanje kao i već aktiviran."""
+        """First step of the two-step login: without revealing whether users exist —
+        an unknown user returns the same 'password' state as an already-activated one."""
         ip = request.client.host if request.client else "?"
         if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
             raise HTTPException(429, "previše pokušaja — pričekajte minutu")
@@ -707,10 +707,10 @@ def create_app(spine, cfg) -> FastAPI:
         return {"state": "password"}
 
     def _is_admin_tier_pending(user_id: int, sys_role: str) -> bool:
-        """C1: sprječava samoposlužnu aktivaciju admin/owner računa — napadač koji
-        pogodi pending username ne smije POST /login/activate pretvoriti u puno
-        preuzimanje ureda bez ijednog tokena. Provjerava i sys-role stupac (kako
-        /radnici POST bilježi rolu) i stvarnu org-člansku ulogu (owner/admin)."""
+        """C1: prevents self-service activation of an admin/owner account — an attacker
+        who guesses a pending username must not be able to turn POST /login/activate
+        into a full office takeover without any token. Checks both the sys-role column
+        (how the /radnici POST records the role) and the actual org membership role (owner/admin)."""
         if sys_role == "admin":
             return True
         m = spine.read().execute(
@@ -738,8 +738,8 @@ def create_app(spine, cfg) -> FastAPI:
                                      "neka te postojeći administrator uvede (admin-kao-radnik ulaz)")
         new_hash = hash_password(body.password)
         with spine.write() as c:
-            # WHERE pw_hash IS NULL = atomski utrka-guard: ako je netko drugi
-            # već aktivirao između SELECT-a i ovog UPDATE-a, rowcount je 0.
+            # WHERE pw_hash IS NULL = atomic race guard: if someone else already
+            # activated between the SELECT and this UPDATE, rowcount is 0.
             cur = c.execute("UPDATE users SET pw_hash=? WHERE id=? AND pw_hash IS NULL",
                              (new_hash, row["id"]))
             if cur.rowcount == 0:
@@ -765,9 +765,9 @@ def create_app(spine, cfg) -> FastAPI:
         if not username or not password:
             raise HTTPException(400, "neispravan zahtjev")
         ip = request.client.host if request.client else "?"
-        # IP-only limiter uz per-user: bez njega napadač churnom junk-usernameova
-        # napuni limiter preko capa i evicta žrtvin blokirani bucket (Codex r3).
-        # 30/min po IP-u ograničava i stopu stvaranja novih ključeva.
+        # IP-only limiter alongside per-user: without it an attacker churning junk
+        # usernames fills the limiter past its cap and evicts the victim's blocked
+        # bucket (Codex r3). 30/min per IP also caps the rate of new key creation.
         if not limiter.allow(f"login-ip:{ip}", _LOGIN_IP_PER_MIN):
             raise HTTPException(429, "previše pokušaja prijave s ove adrese — pričekajte minutu")
         if not limiter.allow(f"login:{ip}:{username}", _LOGIN_PER_MIN):
@@ -775,15 +775,15 @@ def create_app(spine, cfg) -> FastAPI:
         row = spine.read().execute(
             "SELECT id, pw_hash, role FROM users WHERE username=?", (username,)
         ).fetchone()
-        # I1 (timing enumeracija): admin-fallback petlja niže radi N dodatnih
-        # verify_password poziva za POZNAT usera s krivom lozinkom (N = broj
-        # admin/owner članova u njegovom orgu) — bez ekvivalentnog rada za
-        # NEPOZNAT username ta razlika u broju PBKDF2 poziva otkriva postojanje
-        # računa kroz latenciju, poništavajući anti-enumeraciju /login/stepa.
-        # Fix: nepoznat username odradi ISTI oblik posla — dummy "vlastita"
-        # provjera + dummy fallback petlja duljine kao default-org admin/owner
-        # broj (jedini org do kojeg app doseže kroz javni API — vidi
-        # tenancy.default_org_id/resolve_login_org).
+        # I1 (timing enumeration): the admin-fallback loop below does N extra
+        # verify_password calls for a KNOWN user with a wrong password (N = number
+        # of admin/owner members in their org) — without equivalent work for an
+        # UNKNOWN username that difference in the count of PBKDF2 calls reveals the
+        # existence of an account through latency, defeating the anti-enumeration
+        # of /login/step. Fix: an unknown username does the SAME shape of work — a
+        # dummy "own" check + a dummy fallback loop of the same length as the
+        # default-org admin/owner count (the only org the app reaches through the
+        # public API — see tenancy.default_org_id/resolve_login_org).
         def _admin_tier_count(org_id: int) -> int:
             return spine.read().execute(
                 "SELECT COUNT(*) AS n FROM memberships WHERE org_id=? AND role IN ('admin','owner')",
@@ -794,22 +794,23 @@ def create_app(spine, cfg) -> FastAPI:
             for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
                 verify_password(password, _DUMMY_PW_HASH)
             raise HTTPException(401, "invalid credentials")
-        # Admin-kao-radnik: vlastita lozinka prvo; padne li (ili je pw_hash NULL
-        # jer radnik čeka aktivaciju), probaj OWNER/ADMIN hasheve ISTOG orga —
-        # uspjeh = prijava KAO radnik (rola dolazi svježe iz membershipa niže,
-        # ne raste ovim putem), samo audit + impersonated_by claim pamte tko je ušao.
-        # I1(a) (re-review): pw_hash NULL (pending radnik/admin) kroz
-        # verify_password kratko spaja BEZ ijednog PBKDF2 poziva (security.py
-        # guard) — svaka provjera protiv "moguće nepostojećeg hasha" mora
-        # uvijek potrošiti točno jedan pravi PBKDF2, inače pending curi kao
-        # mjerljivo brži. NE smije se samo staviti "stored or _DUMMY_PW_HASH":
-        # _DUMMY_PW_HASH je poznata konstanta u izvoru — bez ovog wrappera bi
-        # napadač koji pošalje TOČNO tu dummy-lozinku dobio matched=True na bilo
-        # kojem pending računu (pa i crash na row['pw_hash'].startswith(None)).
+        # Admin-as-worker: own password first; if it fails (or pw_hash is NULL
+        # because the worker awaits activation), try the OWNER/ADMIN hashes of the
+        # SAME org — success = login AS the worker (the role comes fresh from
+        # membership below, it does not escalate this way), only audit +
+        # impersonated_by claim record who logged in.
+        # I1(a) (re-review): pw_hash NULL (pending worker/admin) short-circuits
+        # through verify_password WITHOUT any PBKDF2 call (security.py guard) —
+        # every check against a "possibly non-existent hash" must always spend
+        # exactly one real PBKDF2, otherwise a pending account leaks as measurably
+        # faster. You must NOT just use "stored or _DUMMY_PW_HASH": _DUMMY_PW_HASH
+        # is a known constant in the source — without this wrapper an attacker who
+        # sends EXACTLY that dummy password would get matched=True on any pending
+        # account (and even a crash on row['pw_hash'].startswith(None)).
         def _verify_always_pbkdf2(pw: str, stored: str | None) -> bool:
             if stored:
                 return verify_password(pw, stored)
-            verify_password(pw, _DUMMY_PW_HASH)  # cijena, rezultat se odbacuje
+            verify_password(pw, _DUMMY_PW_HASH)  # cost, result is discarded
             return False
 
         impersonated_by = None
@@ -821,36 +822,37 @@ def create_app(spine, cfg) -> FastAPI:
                 "SELECT org_id, role FROM memberships WHERE user_id=? ORDER BY id LIMIT 1",
                 (row["id"],)).fetchone()
             if m is not None:
-                # I1(b) (re-review): NE isključuje sebe (aktivan admin/owner cilj
-                # mora se i dalje pojaviti u ovoj petlji — inače admin-tier cilj
-                # ima jedan PBKDF2 poziv manje od membera/nepoznatog usera, opet
-                # mjerljivo "brži"). Redundantan re-check vlastitog hasha je
-                # bezopasan (deterministički već promašen u own_ok gore).
+                # I1(b) (re-review): does NOT exclude itself (an active admin/owner
+                # target must still appear in this loop — otherwise an admin-tier
+                # target has one PBKDF2 call fewer than a member/unknown user, again
+                # measurably "faster"). A redundant re-check of one's own hash is
+                # harmless (deterministically already missed in own_ok above).
                 admins = spine.read().execute(
                     """SELECT u.id AS imp_uid, u.username, u.pw_hash, mm.role AS imp_role
                        FROM memberships mm JOIN users u ON u.id = mm.user_id
                        WHERE mm.org_id=? AND mm.role IN ('admin','owner')""",
                     (m["org_id"],)).fetchall()
                 for a in admins:
-                    # NE break-a nakon matcha — svaki kandidat troši točno jedan PBKDF2
-                    # (inače rank-denied 401 (1+k) je mjerljivo drukčiji od invalid
-                    # (1+N) i otkriva da je pogođena povlaštena lozinka; Codex).
+                    # Does NOT break after a match — every candidate spends exactly one
+                    # PBKDF2 (otherwise a rank-denied 401 (1+k) is measurably different
+                    # from invalid (1+N) and reveals that a privileged password was hit; Codex).
                     matched = _verify_always_pbkdf2(password, a["pw_hash"])
                     if matched and a["username"] != username and impersonated_by is None:
                         impersonated_by = a["username"]
                         imp_role = a["imp_role"]
                         imp_uid = a["imp_uid"]
             else:
-                # bez membershipa (legacy CLI račun): nema ciljni org za pravu
-                # provjeru, ali i dalje odradi dummy petlju iste duljine kao
-                # default org — inače OVAJ known-user grana opet curi timing.
+                # without membership (legacy CLI account): no target org for a real
+                # check, but still do a dummy loop of the same length as the default
+                # org — otherwise THIS known-user branch leaks timing again.
                 for _ in range(_admin_tier_count(tenancy.default_org_id(spine))):
                     verify_password(password, _DUMMY_PW_HASH)
-            # eskalacija-gate (post-match, ne dira timing): impersonator mora STROGO
-            # nadmašiti ulogu cilja — admin smije aktivirati member/viewer, NIKAD
-            # owner ni drugog admina (inače adminovom lozinkom -> owner sesija).
-            # Cilj-uloga iz MEMBERSHIPA (m['role']) — users.role ('radnik') je drugi
-            # vokabular pa se ne smije uspoređivati s membership-ulogom impersonatora.
+            # escalation gate (post-match, does not affect timing): the impersonator
+            # must STRICTLY outrank the target's role — an admin may activate a
+            # member/viewer, NEVER an owner or another admin (otherwise an admin's
+            # password -> owner session). Target role comes from MEMBERSHIP (m['role'])
+            # — users.role ('radnik') is a different vocabulary so it must not be
+            # compared with the impersonator's membership role.
             target_role = m["role"] if m is not None else "owner"
             if impersonated_by is not None and (
                     ROLE_RANK.get(imp_role, -1) <= ROLE_RANK.get(target_role, 99)):
@@ -861,19 +863,19 @@ def create_app(spine, cfg) -> FastAPI:
             if impersonated_by is None:
                 raise HTTPException(401, "invalid credentials")
         if own_ok and not row["pw_hash"].startswith("pbkdf2$"):
-            # legacy 200k hash (bez prefiksa): rehash na aktualne parametre
-            # pri uspješnoj prijavi — lozinku imamo samo sada, u plaintextu.
-            # Vrijedi SAMO za vlastitu lozinku — admin fallback ne dira radnikov hash.
+            # legacy 200k hash (no prefix): rehash to current parameters on a
+            # successful login — we only have the password now, in plaintext.
+            # Applies ONLY to the own password — the admin fallback does not touch the worker's hash.
             with spine.write() as c:
                 c.execute("UPDATE users SET pw_hash=? WHERE id=?",
                           (hash_password(password), row["id"]))
-        # uid+org_id su pokazivači za Actor lookup; org-uloga se NE stavlja u
-        # token (čita se svježa iz memberships na svakom zahtjevu).
+        # uid+org_id are pointers for the Actor lookup; the org role is NOT put in
+        # the token (it is read fresh from memberships on every request).
         org_id, _ = tenancy.resolve_login_org(spine, row["id"], row["role"])
         payload = {"sub": username, "role": row["role"], "uid": row["id"], "org_id": org_id}
         if impersonated_by:
             payload["impersonated_by"] = impersonated_by
-            payload["imp_uid"] = imp_uid  # trajni ceiling: provjerava se SVAKI zahtjev
+            payload["imp_uid"] = imp_uid  # permanent ceiling: checked on EVERY request
             spine.audit(impersonated_by, "impersonate", f"user:{username}",
                         f"admin {impersonated_by} ušao kao {username}")
         token = jwt_encode(payload, cfg.jwt_secret)
@@ -895,20 +897,20 @@ def create_app(spine, cfg) -> FastAPI:
         return actor
 
     def _require_owner(actor: Actor) -> Actor:
-        # Napajanje/gašenje je STROJNO (jedan fizički UPS/server) i globalno za
-        # instalaciju — ne po organizaciji. Zato mutacije traže NAJVIŠU ulogu
-        # (owner), ne bilo kojeg tenant-admina.
+        # Power/shutdown is MACHINE-level (one physical UPS/server) and global to
+        # the installation — not per organization. So mutations require the HIGHEST
+        # role (owner), not just any tenant-admin.
         if actor.role != "owner":
             raise HTTPException(403, "potrebna owner uloga (strojno napajanje)")
         return actor
 
     def _active_owner_count(org_id: int) -> int:
-        """I2 (re-review): broji SAMO owner-članove s postavljenom lozinkom.
-        Pending owner (pw_hash NULL) ne može se prijaviti niti ga admin-kao-radnik
-        pokrene bez ijednog DRUGOG admina/ownera — brojati ga kao "pokriće" bio
-        bi zaobilazak: promoviraj pending membera u ownera (count=2 uključi
-        pending), obriši sebe (prođe last-owner check), ostane samo pending
-        owner kojeg C1 blokira od samoaktivacije → trajni lockout."""
+        """I2 (re-review): counts ONLY owner members with a password set.
+        A pending owner (pw_hash NULL) can neither log in nor be started by an
+        admin-as-worker without any OTHER admin/owner — counting them as "cover"
+        would be a bypass: promote a pending member to owner (count=2 includes the
+        pending one), delete yourself (passes the last-owner check), leaving only a
+        pending owner whom C1 blocks from self-activation -> permanent lockout."""
         return spine.read().execute(
             """SELECT COUNT(*) AS n FROM memberships mm JOIN users u ON u.id = mm.user_id
                WHERE mm.org_id=? AND mm.role='owner' AND u.pw_hash IS NOT NULL""",
@@ -932,9 +934,9 @@ def create_app(spine, cfg) -> FastAPI:
                                  (body.username,)).fetchone()
         if u is None:
             raise HTTPException(404, "nepoznat korisnik — prvo mu kreiraj račun")
-        # add je insert-only: postojećem članu se uloga mijenja ISKLJUČIVO kroz
-        # /org/members/{id}/role (koji nosi owner-only + last-owner guardove) —
-        # inače bi admin upsertom "dodavanja" mogao degradirati ownera.
+        # add is insert-only: an existing member's role is changed EXCLUSIVELY
+        # through /org/members/{id}/role (which carries owner-only + last-owner
+        # guards) — otherwise an admin could demote an owner via an "add" upsert.
         if tenancy.role_of(spine, actor.org_id, u["id"]) is not None:
             raise HTTPException(409, "već je član — ulogu mijenjaj kroz promjenu uloge")
         tenancy.add_member(spine, actor.org_id, u["id"], body.role, user=actor.username)
@@ -949,7 +951,7 @@ def create_app(spine, cfg) -> FastAPI:
         current = tenancy.role_of(spine, actor.org_id, member_id)
         if current is None:
             raise HTTPException(404, "nije član organizacije")
-        # owner ulogu dira samo owner; zadnji owner je nedegradabilan
+        # only an owner touches the owner role; the last owner is non-demotable
         if (current == "owner" or body.role == "owner") and actor.role != "owner":
             raise HTTPException(403, "samo owner mijenja owner ulogu")
         if current == "owner" and body.role != "owner" and _active_owner_count(actor.org_id) <= 1:
@@ -976,8 +978,8 @@ def create_app(spine, cfg) -> FastAPI:
                                      body.client_ids, actor_name=actor.username)
         return {"ok": True}
 
-    # /radnici — račun-razina upravljanja radnicima (Postavke → Radnici), za
-    # razliku od /workers gore koji upravlja samo vidljivošću klijenata.
+    # /radnici — account-level worker management (Settings -> Radnici), unlike
+    # /workers above which manages only client visibility.
     @app.get("/radnici")
     def radnici_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import devices as devices_mod
@@ -1010,11 +1012,10 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": uid, "user": username, "role": body.role, "aktivan": False, "device": None}
 
     def _block_last_owner(org_id: int, role: str) -> None:
-        """I2: zrcali last-owner guard iz /org/members/{id}/role — reset/ukloni
-        zadnjeg AKTIVNOG ownera bi ostavio org bez ijedne uprave, i (nakon C1)
-        bez ikoga tko se smije samoposlužno aktivirati preko /login/activate →
-        trajni lockout bez UI oporavka. Broji SAMO aktivne (pw_hash != NULL) —
-        vidi _active_owner_count."""
+        """I2: mirrors the last-owner guard from /org/members/{id}/role — resetting/removing
+        the last ACTIVE owner would leave the org without any management, and (after C1)
+        without anyone allowed to self-activate via /login/activate -> permanent lockout
+        without UI recovery. Counts ONLY active ones (pw_hash != NULL) — see _active_owner_count."""
         if role != "owner":
             return
         if _active_owner_count(org_id) <= 1:
@@ -1080,7 +1081,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(404, "nepoznat skill")
         asset = Asset("skill", s["id"], s["org_id"], s["owner_user_id"] or 0,
                       s["visibility"] or "org", s["team_id"])
-        if not can(spine, actor, asset, action):  # tvrda org-izolacija + ACL
+        if not can(spine, actor, asset, action):  # hard org isolation + ACL
             raise HTTPException(404 if actor.org_id != s["org_id"] else 403, "nedozvoljeno")
         return s
 
@@ -1090,15 +1091,15 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/skills/health")
     def skills_health(actor: Actor = Depends(require_actor_web)):
-        # uvid u zdravlje kataloga (mrtve/duplikati/manjkave) — SAMO izvještaj, ne
-        # automatsko brisanje; admin odlučuje. Vještine su ljudske procedure.
+        # insight into catalog health (dead/duplicate/incomplete) — REPORT ONLY, no
+        # automatic deletion; the admin decides. Skills are human procedures.
         _require_admin(actor)
         return skills_mod.health(spine, actor.org_id)
 
     @app.post("/skills")
     def skills_create(body: SkillBody, actor: Actor = Depends(require_actor_web)):
-        # vještina = procedura ureda; viewer (samo-čitač) je ne smije autorirati
-        # (inače kroz aktivaciju ide u prompt višeg ranga = stored injection; Codex)
+        # a skill = an office procedure; a viewer (read-only) must not author one
+        # (otherwise via activation it enters a higher-rank prompt = stored injection; Codex)
         if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
             raise HTTPException(403, "za kreiranje vještine potrebna je barem member uloga")
         if body.visibility not in VISIBILITIES:
@@ -1125,8 +1126,8 @@ def create_app(spine, cfg) -> FastAPI:
     def skills_status(skill_id: int, body: SkillStatusBody,
                       actor: Actor = Depends(require_actor_web)):
         s = _skill_or_404(skill_id, actor, "manage")
-        # aktivacija NE-private vještine ulazi u agent-prompt SVIH u orgu -> admin+
-        # (private aktivna vještina vidljiva je samo vlasniku; Codex stored-injection)
+        # activating a NON-private skill enters the agent prompt of EVERYONE in the org -> admin+
+        # (a private active skill is visible only to its owner; Codex stored-injection)
         if body.status == "active" and (s["visibility"] or "org") != "private" \
                 and ROLE_RANK.get(actor.role, 0) < ROLE_RANK["admin"]:
             raise HTTPException(403, "aktivaciju dijeljene vještine odobrava admin/owner")
@@ -1151,15 +1152,15 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/chat")
     def chat(body: ChatBody, actor: Actor = Depends(require_actor_web)):
-        # require_actor_web: prima i cookie i Bearer — web UI šalje cookie
-        # (E2E nalaz: require_actor je samo-Bearer pa je web chat uvijek 401).
+        # require_actor_web: accepts both cookie and Bearer — the web UI sends a cookie
+        # (E2E finding: require_actor is Bearer-only so web chat is always 401).
         _chat_gate(actor)
-        # Agentski put samo za korisnike koji smiju akcije I samo za slobodni
-        # "chat" lane. Determinističke lane (reject, sql, ocr, greeting...) se
-        # rješavaju bez LLM-a kroz _answer — inače bi svaki upit gradio LLM
-        # klijenta i pokušavao mrežu (skupo + rate-limit prozor sklizne).
-        # LLM izlaz je nepovjerljiv: write se NE izvršava, samo sprema kao
-        # jednokratni vlasnički token za /chat/potvrdi.
+        # Agent path only for users allowed to take actions AND only for the free
+        # "chat" lane. Deterministic lanes (reject, sql, ocr, greeting...) are
+        # handled without an LLM through _answer — otherwise every query would build
+        # an LLM client and try the network (expensive + the rate-limit window slips).
+        # LLM output is untrusted: the write is NOT executed, only stored as a
+        # one-time owner token for /chat/potvrdi.
         if actor.role not in _AGENT_ROLES or router_mod.route(body.q) != "chat":
             return _answer(body.q, actor, fresh=body.fresh)
         llm = model_settings.build_llm(spine, cfg)
@@ -1178,8 +1179,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/chat/potvrdi")
     def chat_potvrdi(body: PendingTokenBody, actor: Actor = Depends(require_actor_web)):
-        # dvostruko klikanje ne izvrši dvaput (atomični consume u confirm_pending);
-        # ovlasti se ponovo provjere u run_tool sad, ne na vrijeme prijedloga.
+        # double-clicking does not execute twice (atomic consume in confirm_pending);
+        # permissions are re-checked in run_tool now, not at proposal time.
         try:
             out = agent.confirm_pending(spine, cfg, body.token, actor, _PENDING_TTL_MIN,
                                         remember=body.remember)
@@ -1193,11 +1194,11 @@ def create_app(spine, cfg) -> FastAPI:
         agent.cancel_pending(spine, body.token, actor)
         return {"ok": True}
 
-    # --- Parkirane radnje (autonomni run pripremi, vlasnik odobri) ---
+    # --- Parked actions (an autonomous run prepares, the owner approves) ---
     @app.get("/parkirano")
     def parkirano_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import parked
-        _require_owner(actor)  # red za odobrenje = vlasnik ureda
+        _require_owner(actor)  # approval queue = office owner
         return {"radnje": parked.list_pending(spine, actor.org_id)}
 
     @app.post("/parkirano/{park_id}/odobri")
@@ -1215,7 +1216,7 @@ def create_app(spine, cfg) -> FastAPI:
         _require_owner(actor)
         return {"ok": parked.reject(spine, park_id, actor)}
 
-    # --- Approval-grantovi ("potvrdi jednom, zapamti"; high-rizik NIKAD auto) ---
+    # --- Approval grants ("confirm once, remember"; high-risk NEVER auto) ---
     @app.get("/grants")
     def grants_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import agent_grants
@@ -1224,7 +1225,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/grants")
     def grants_create(body: GrantBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import agent_grants
-        if body.scope == "org":  # pravilo za cijeli ured = owner
+        if body.scope == "org":  # a rule for the whole office = owner
             _require_owner(actor)
         try:
             gid = agent_grants.create_grant(spine, actor, body.tool, body.args,
@@ -1243,7 +1244,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(403, str(e)) from e
         return {"ok": ok}
 
-    # --- Napajanje (UPS/NUT + gašenje redom) — sve admin-only ---
+    # --- Power (UPS/NUT + ordered shutdown) — all admin-only ---
     @app.get("/napajanje/config")
     def napajanje_config_get(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
@@ -1259,7 +1260,7 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         changed = {k: after[k] for k in fields if before.get(k) != after.get(k)}
-        if changed:  # svaka promjena uvjeta gašenja u audit
+        if changed:  # every change to the shutdown conditions goes to audit
             spine.audit(actor.username, "napajanje_config", "", str(changed))
         return after
 
@@ -1268,13 +1269,13 @@ def create_app(spine, cfg) -> FastAPI:
         _require_admin(actor)
         pc = power_mod.get_config(spine)
         st = power_mod.read_status(pc["nut_host"], pc["nut_port"], pc["ups_name"])
-        st["flags"] = sorted(st.get("flags", []))  # set -> JSON lista
+        st["flags"] = sorted(st.get("flags", []))  # set -> JSON list
         return st
 
     @app.get("/napajanje/plan")
     def napajanje_plan(actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
-        return power_mod.shutdown_plan(spine)  # dry-run: samo pregled reda
+        return power_mod.shutdown_plan(spine)  # dry-run: just a preview of the order
 
     @app.post("/napajanje/arm")
     def napajanje_arm(body: ArmBody, actor: Actor = Depends(require_actor_web)):
@@ -1283,9 +1284,9 @@ def create_app(spine, cfg) -> FastAPI:
         spine.audit(actor.username, "napajanje_arm", "", "1" if body.armed else "0")
         return {"armed": body.armed}
 
-    # --- Radnička flota: agent protokol + izdavanje tokena + naredbe ---
+    # --- Worker fleet: agent protocol + token issuing + commands ---
     def _require_device(request: Request) -> int:
-        """Auth radničkog agenta preko device-tokena (odlazna veza, bez JWT-a)."""
+        """Auth of the worker agent via a device token (outbound connection, no JWT)."""
         did = fleet.verify_token(spine, request.headers.get("Authorization", ""))
         if did is None:
             raise HTTPException(401, "nevažeći token uređaja")
@@ -1297,42 +1298,42 @@ def create_app(spine, cfg) -> FastAPI:
         cmd = fleet.next_command(spine, did)
         if cmd is None:
             return Response(status_code=204)
-        cmd["sig"] = fleet.sign_command(spine, did, cmd, cfg)  # per-uređaj potpis; agent provjeri
+        cmd["sig"] = fleet.sign_command(spine, did, cmd, cfg)  # per-device signature; the agent verifies
         return cmd
 
     @app.post("/agent/result")
     def agent_result(body: AgentResultBody, request: Request):
         did = _require_device(request)
-        # Zatvori SAMO vlastitu naredbu koja je 'in_progress' — inače agent bi
-        # mogao preskočiti izvršenje ili prepisati već završen rezultat.
+        # Close ONLY your own command that is 'in_progress' — otherwise an agent
+        # could skip execution or overwrite an already-finished result.
         if not fleet.complete(spine, body.id, did, {"ok": body.ok, "detail": body.detail}):
             raise HTTPException(404, "naredba nije aktivna za ovaj uređaj")
         spine.audit("agent", "agent_result", f"device:{did}",
                     f"cmd:{body.id}:{'ok' if body.ok else 'fail'}")
         return {"ok": True}
 
-    # --- samo-prijava agenta (bez ručnog tokena): javi se -> owner odobri -> preuzmi ---
+    # --- agent self-enrollment (no manual token): announce -> owner approves -> pick up ---
     def _require_tls_enroll(request: Request) -> None:
-        # enrollment nosi tajnu/kredencijale -> ne preko cleartext http-a kad je
-        # https obavezan (MITM na LAN-u bi ukrao secret; Codex nalaz). X-Forwarded-Proto
-        # vjerujemo SAMO kad je iza konfiguriranog proxyja — inače bi ga bilo tko slao
-        # da zaobiđe provjeru (Codex nalaz).
+        # enrollment carries a secret/credentials -> not over cleartext http when
+        # https is required (a MITM on the LAN would steal the secret; Codex finding).
+        # We trust X-Forwarded-Proto ONLY when behind a configured proxy — otherwise
+        # anyone could send it to bypass the check (Codex finding).
         scheme = request.url.scheme
-        # trust_proxy uključiti SAMO kad je izravan pristup backendu izvana blokiran
-        # (proxy jedini put unutra) — inače bilo tko šalje X-Forwarded-Proto (Codex #2)
+        # enable trust_proxy ONLY when direct external access to the backend is
+        # blocked (the proxy is the only way in) — otherwise anyone sends X-Forwarded-Proto (Codex #2)
         if getattr(cfg, "trust_proxy", False):
             scheme = request.headers.get("x-forwarded-proto") or scheme
         if getattr(cfg, "https_only", False) and scheme != "https":
             raise HTTPException(400, "upis agenta samo preko https")
 
-    # --- Pravila ureda (owner tipka; uvijek u agent promptu) ---
-    # NAPOMENA: ured_pravila su u config_overrides (module=agent) koji je — kao SVE
-    # ostale postavke (model/napajanje/fleet) — instalacijski-globalne, ne po org.
-    # ATLAS je jedan ured; multi-tenant org-scoping config_overrides je pre-postojeći
-    # širi zahvat. _require_owner je isti gate kao napajanje/enrollment/scheduler.
+    # --- Office rules (owner types them; always in the agent prompt) ---
+    # NOTE: ured_pravila live in config_overrides (module=agent) which — like ALL
+    # other settings (model/power/fleet) — is installation-global, not per org.
+    # ATLAS is a single office; multi-tenant org-scoping of config_overrides is a
+    # pre-existing larger change. _require_owner is the same gate as power/enrollment/scheduler.
     @app.get("/ured-pravila")
     def ured_pravila_get(actor: Actor = Depends(require_actor_web)):
-        _require_owner(actor)  # pravila su konfiguracija ureda -> owner (Codex)
+        _require_owner(actor)  # rules are office configuration -> owner (Codex)
         return {"pravila": agent.get_ured_pravila(spine)}
 
     @app.post("/ured-pravila")
@@ -1341,28 +1342,28 @@ def create_app(spine, cfg) -> FastAPI:
         agent.set_ured_pravila(spine, body.pravila, user=actor.username)
         return {"ok": True}
 
-    # --- Budžet-štit agenta (dnevni plafon; štiti od cost-runawaya autonomnih runova) ---
+    # --- Agent budget shield (daily cap; protects against cost-runaway of autonomous runs) ---
     @app.get("/budget")
     def budget_get(actor: Actor = Depends(require_actor_web)):
         from atlas.business import agent_budget
-        _require_admin(actor)  # potrošnja = operativni uvid (admin)
+        _require_admin(actor)  # spend = operational insight (admin)
         return {"budget": agent_budget.usage_today(spine)}
 
     @app.post("/budget")
     def budget_set(body: BudgetBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import agent_budget
-        _require_owner(actor)  # plafoni = konfiguracija ureda (owner)
+        _require_owner(actor)  # caps = office configuration (owner)
         for k, v in body.caps.items():
             if k in agent_budget.DEFAULTS:
                 spine.set_override("agent", f"budget_{k}", max(0, int(v)))
         spine.audit(actor.username, "budget_set", "agent")
         return {"ok": True, "budget": agent_budget.usage_today(spine)}
 
-    # --- Replay: ponovi ranije izvršenu agent-radnju iz audit-traga (owner) ---
+    # --- Replay: repeat a previously executed agent action from the audit trail (owner) ---
     @app.get("/replay")
     def replay_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import replay
-        _require_owner(actor)  # ponavljanje radnji = vlasnička operacija
+        _require_owner(actor)  # repeating actions = owner operation
         return {"radnje": replay.list_replayable(spine)}
 
     @app.post("/replay/{audit_id}")
@@ -1374,11 +1375,11 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
-    # --- Zakazani zadaci (owner; akcija iz allowliste, nema arbitrary koda) ---
+    # --- Scheduled tasks (owner; action from an allowlist, no arbitrary code) ---
     @app.get("/zakazano")
     def zakazano_list(actor: Actor = Depends(require_actor_web)):
         from atlas.business import scheduler_tasks
-        _require_owner(actor)  # zadaci nose poruke/rasporede -> samo vlasnik (Codex)
+        _require_owner(actor)  # tasks carry messages/schedules -> owner only (Codex)
         return {"zadaci": scheduler_tasks.list_tasks(spine, actor.org_id),
                 "akcije": scheduler_tasks.action_labels()}
 
@@ -1415,7 +1416,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/uredjaji/enrollments/open")
     def uredjaj_enroll_open(actor: Actor = Depends(require_actor_web)):
-        _require_owner(actor)  # sparivanje otvara SAMO vlasnik (fail-closed po defaultu)
+        _require_owner(actor)  # only the owner opens pairing (fail-closed by default)
         until = fleet.open_enrollment(spine, actor.username)
         return {"open_until": until}
 
@@ -1428,7 +1429,7 @@ def create_app(spine, cfg) -> FastAPI:
         try:
             enroll_id, secret = fleet.enroll_request(spine, body.name or "", source=ip)
         except ValueError as e:
-            # zatvoreno sparivanje -> 403 (fail-closed); cap na čekanju -> 429
+            # closed pairing -> 403 (fail-closed); cap on the waiting queue -> 429
             code = 403 if "sparivanje" in str(e) else 429
             raise HTTPException(code, str(e)) from e
         return {"enroll_id": enroll_id, "secret": secret}
@@ -1460,19 +1461,20 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/uredjaji/{device_id}/aktivnost")
     def uredjaj_aktivnost(device_id: int, actor: Actor = Depends(require_actor_web)):
-        _require_owner(actor)  # nadzor flote = vlasnik; UI poll-a za "uživo" prikaz
+        _require_owner(actor)  # fleet monitoring = owner; the UI polls for a "live" view
         return {"aktivnost": fleet.device_activity(spine, device_id)}
 
     @app.post("/uredjaji/{device_id}/token")
     def uredjaj_token_issue(device_id: int, actor: Actor = Depends(require_actor_web)):
-        _require_owner(actor)  # izdavanje tokena = strojno, owner-only
+        _require_owner(actor)  # token issuing = machine-level, owner-only
         try:
             token = fleet.issue_token(spine, device_id)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
         spine.audit(actor.username, "device_token_issue", f"device:{device_id}")
-        # PER-UREĐAJ sign_key ide uz token (agent njime provjerava potpis) — master
-        # nikad ne napušta server; dostavlja se pri instalaciji, odvojeno od runtimea
+        # the PER-DEVICE sign_key ships with the token (the agent verifies signatures
+        # with it) — the master never leaves the server; it is delivered at install
+        # time, separately from the runtime
         return {"token": token, "sign_key": fleet.device_sign_key(spine, device_id, cfg)}
 
     @app.delete("/uredjaji/{device_id}/token")
@@ -1485,7 +1487,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/uredjaji/{device_id}/naredba")
     def uredjaj_naredba(device_id: int, body: NaredbaBody,
                         actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)  # dnevno pokretanje/gašenje = admin+ (uz audit)
+        _require_admin(actor)  # daily start/stop = admin+ (with audit)
         from atlas.business import devices as devices_mod
         if device_id not in {d["id"] for d in devices_mod.list_devices(spine)}:
             raise HTTPException(404, "nepoznat uređaj")
@@ -1499,12 +1501,12 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/fleet/programi")
     def fleet_programi_list(actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)  # čitanje allowliste admin+
+        _require_admin(actor)  # reading the allowlist admin+
         return fleet.list_programs(spine)
 
     @app.post("/fleet/programi")
     def fleet_programi_add(body: ProgramBody, actor: Actor = Depends(require_actor_web)):
-        _require_owner(actor)  # definiranje ŠTO smije ikad raditi = sigurnosna politika
+        _require_owner(actor)  # defining WHAT it may ever run = security policy
         try:
             key = fleet.add_program(spine, body.key, body.label, user=actor.username)
         except ValueError as e:
@@ -1533,7 +1535,7 @@ def create_app(spine, cfg) -> FastAPI:
             "usage": {},
         }
 
-    # require_user_web: prima i cookie (UI) i Bearer (API klijenti)
+    # require_user_web: accepts both cookie (UI) and Bearer (API clients)
     @app.post("/watchlist/run")
     def watchlist_run(user: str = Depends(require_user_web)):
         return [dataclasses.asdict(c) for c in watchlist.check_all(spine, cfg)]
@@ -1541,7 +1543,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/watchlist/sources")
     def watchlist_list_sources(actor: Actor = Depends(require_actor_web)):
         rows = spine.read().execute("SELECT * FROM watch_sources").fetchall()
-        # klijentski-vezan izvor ne curi restringiranom radniku (zakon/RSS = NULL ostaje)
+        # a client-linked source doesn't leak to a restricted worker (law/RSS = NULL stays)
         return _visible_rows(actor, [dict(r) for r in rows])
 
     @app.post("/watchlist/sources")
@@ -1598,7 +1600,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/dashboard.json")
     def dashboard_json(actor: Actor = Depends(require_actor_web)):
-        # restringiran radnik ne vidi obveze/istek/fali-dokumente tuđih klijenata
+        # a restricted worker doesn't see obligations/expiry/missing-documents of others' clients
         visible = client_visibility.visible_ids(spine, actor.user_id, actor.role)
         return dashboard.home_data(spine, visible=visible)
 
@@ -1711,7 +1713,7 @@ def create_app(spine, cfg) -> FastAPI:
         from atlas.web.templates_devices import devices_page
         return devices_page()
 
-    # --- PWA: omota web UI da se instalira kao aplikacija (bez novih ekrana) ---
+    # --- PWA: wraps the web UI so it installs as an application (no new screens) ---
     @app.get("/manifest.webmanifest")
     def pwa_manifest():
         return Response(content=_PWA_MANIFEST, media_type="application/manifest+json",
@@ -1719,7 +1721,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/sw.js")
     def pwa_service_worker():
-        # SW na rootu -> scope '/'; no-cache jer se SW mora osvježiti odmah
+        # SW at the root -> scope '/'; no-cache because the SW must refresh immediately
         return Response(content=_PWA_SW_JS, media_type="application/javascript",
                         headers={"Cache-Control": "no-cache"})
 
@@ -1739,23 +1741,23 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/obveze/aktivnost")
     def obveze_aktivnost(since: str | None = None, worker: str | None = None,
                          actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)  # tko-što-radi je nadzorni uvid
+        _require_admin(actor)  # who-does-what is monitoring insight
         if worker:
             return obveze.worker_closed(spine, worker, since=since)
         return obveze.worker_activity(spine, since=since)
 
-    # --- user-defined polja obveza (registar + JSON meta, core zaključan) ---
+    # --- user-defined obligation fields (registry + JSON meta, core locked) ---
     @app.get("/obveze/polja")
     def obveze_polja_list(actor: Actor = Depends(require_actor_web)):
-        # čitanje definicija polja = svaki prijavljeni (radnik treba znati stupce
-        # da popuni vrijednost / renderira tablicu); definiranje je owner-only
+        # reading field definitions = any logged-in user (a worker needs to know the
+        # columns to fill a value / render the table); defining is owner-only
         from atlas.business import obligation_fields
         return obligation_fields.list_fields(spine)
 
     @app.post("/obveze/polja")
     def obveze_polja_add(body: ObligationFieldBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import obligation_fields
-        _require_owner(actor)  # definiranje "stupaca" = strukturna politika
+        _require_owner(actor)  # defining "columns" = structural policy
         try:
             key = obligation_fields.add_field(spine, body.label, body.type, user=actor.username)
         except ValueError as e:
@@ -1773,14 +1775,14 @@ def create_app(spine, cfg) -> FastAPI:
     def obveze_polje_set(obligation_id: int, body: FieldValueBody,
                          actor: Actor = Depends(require_actor_web)):
         from atlas.business import obligation_fields
-        # punjenje vrijednosti = svakodnevni rad (member+); definiranje je owner
+        # filling values = everyday work (member+); defining is owner
         if ROLE_RANK.get(actor.role, 0) < ROLE_RANK["member"]:
             raise HTTPException(403, "potrebna barem članska uloga")
         row = spine.read().execute(
             "SELECT client_id FROM obligations WHERE id=?", (obligation_id,)).fetchone()
         if row is None:
             raise HTTPException(404, "nepoznata obveza")
-        if row["client_id"] is not None:  # obveza vezana na klijenta -> provjeri vidljivost (anti-IDOR)
+        if row["client_id"] is not None:  # obligation linked to a client -> check visibility (anti-IDOR)
             _guard_client(actor, row["client_id"])
         try:
             meta = obligation_fields.set_value(spine, obligation_id, body.key, body.value,
@@ -1813,7 +1815,7 @@ def create_app(spine, cfg) -> FastAPI:
             actor = require_actor_web(request)
         except HTTPException:
             return RedirectResponse("/login", status_code=303)
-        _require_owner(actor)  # izdavanje agenta = strojno, owner-only
+        _require_owner(actor)  # agent issuing = machine-level, owner-only
         from atlas.web.templates_ui import postavi_agent_page
         return postavi_agent_page()
 
@@ -1885,8 +1887,8 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/telegram/pairing")
     def telegram_pairing(actor: Actor = Depends(require_actor_web)):
-        # self-service: token veže Telegram na TOG korisnika (ne admin za drugoga —
-        # inače radnik dobije adminove ovlasti). Svaki prijavljeni korisnik svoj token.
+        # self-service: the token binds Telegram to THIS user (not admin for someone else —
+        # otherwise the worker gets the admin's permissions). Each logged-in user has their own token.
         from atlas.business.telegram_gateway import create_pairing_token
         token = create_pairing_token(spine, actor.user_id, actor.org_id)
         return {"token": token, "command": f"/start {token}"}
@@ -1928,7 +1930,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.get("/ui/racunalo", response_class=HTMLResponse)
     def ui_racunalo(request: Request):
-        # stanje sustava + software inventory = admin (ne svaki radnik)
+        # system state + software inventory = admin (not every worker)
         try:
             _require_admin(require_actor_web(request))
         except HTTPException:
@@ -1943,8 +1945,8 @@ def create_app(spine, cfg) -> FastAPI:
         if not firstrun.needs_onboarding(spine):
             _require_admin(require_actor_web(request))  # nakon setupa: admin-only, puni prikaz
             return preflight.summary(cfg)
-        # anonimni onboarding: rate-limit + reducirano (bez točnih putanja/OS/GPU
-        # detalja koje bi LAN promatrač skupljao) — Codex nalaz
+        # anonymous onboarding: rate-limit + reduced (without exact paths/OS/GPU
+        # details a LAN observer would collect) — Codex finding
         ip = request.client.host if request.client else "?"
         if not limiter.allow(f"preflight:{ip}", limit=20, window_s=60.0):
             raise HTTPException(429, "previše zahtjeva — pričekajte minutu")
@@ -2050,9 +2052,9 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/model")
     def model_save(body: ModelSettingsBody, actor: Actor = Depends(require_actor_web)):
-        # Codex nalaz #7: mijenjanje LLM endpointa je exfiltracijski vektor
-        # (bilo koji radnik preusmjeri "mozak" na tuđi server i procuri sve
-        # upite) — smije samo admin/vlasnik ureda.
+        # Codex finding #7: changing the LLM endpoint is an exfiltration vector
+        # (any worker redirects the "brain" to someone else's server and leaks all
+        # queries) — only the admin/office owner may do it.
         _require_admin(actor)
         try:
             return model_settings.save(spine, body.provider, body.model, body.base_url,
@@ -2071,7 +2073,7 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/model/fallbacks")
     def model_fallbacks_set(body: FallbacksBody, actor: Actor = Depends(require_actor_web)):
-        # isti exfiltracijski vektor kao primarni model -> admin/owner
+        # same exfiltration vector as the primary model -> admin/owner
         _require_admin(actor)
         try:
             model_settings.set_fallbacks(
@@ -2096,8 +2098,8 @@ def create_app(spine, cfg) -> FastAPI:
         from atlas.business import folder_sync
         return folder_sync.sync_all(spine, cfg)
 
-    # registar mapa mijenja samo admin/owner — role='klijenti' preusmjerava
-    # gdje onboarding PIŠE, pa običan radnik ne smije preregistrirati mape
+    # only admin/owner changes the folder registry — role='klijenti' redirects
+    # where onboarding WRITES, so an ordinary worker must not re-register folders
     @app.post("/folders")
     def folders_register(body: FolderBody, actor: Actor = Depends(require_actor_web)):
         _require_admin(actor)
@@ -2162,7 +2164,7 @@ def create_app(spine, cfg) -> FastAPI:
         base = folders_mod._scoped(cfg, row["path"])
         res = ocr_mod.bulk_ocr(spine, cfg, base)
         from atlas.business import folder_scan as fs
-        fs.scan(spine, cfg, folder_id)  # osvježi brojke — dugme ne smije ostati stale
+        fs.scan(spine, cfg, folder_id)  # refresh the numbers — the button must not stay stale
         name = row["label"] or row["path"]
         body = f"OCR gotov za „{name}\": {res['processed']} obrađeno, {res['skipped']} preskočeno."
         if res.get("signed"):
@@ -2240,7 +2242,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, f"nepoznat kind: {kind!r}")
         period = period or date.today().strftime("%Y-%m")
         _require_valid_period(period)
-        # restringirani radnik ne vidi obveze (ni meta) tuđih klijenata
+        # a restricted worker doesn't see obligations (nor meta) of others' clients
         return _visible_rows(actor, obveze.list_period(spine, kind, period))
 
     @app.get("/obveze/tipovi")
@@ -2275,14 +2277,14 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/extract")
     def extract_run(body: ExtractBody, actor: Actor = Depends(require_actor_web)):
         from atlas.docs import extraction as extraction_mod
-        # radnik ne smije ekstraktati tuđi dokument ni pripisati ga tuđem klijentu
+        # a worker must not extract someone else's document nor assign it to another's client
         drow = spine.read().execute("SELECT client_id FROM documents WHERE id=?",
                                     (body.doc_id,)).fetchone()
         if drow is not None and drow["client_id"] is not None:
             _guard_client(actor, drow["client_id"])
         if body.client_id is not None:
             _guard_client(actor, body.client_id)
-        # LLM je fallback — bez konfiguriranog providera ekstrakcija ide regex-only
+        # the LLM is a fallback — without a configured provider extraction goes regex-only
         try:
             llm = model_settings.build_llm(spine, cfg)
         except Exception:
@@ -2293,8 +2295,8 @@ def create_app(spine, cfg) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
 
-    # Uređaji (E): registar mijenja admin; sken/print koristi svaki radnik
-    # (uz odabir uređaja pri akciji).
+    # Devices (E): the admin changes the registry; scan/print is used by every
+    # worker (with device selection at action time).
     @app.get("/devices")
     def devices_list(kind: str | None = None, actor: Actor = Depends(require_actor_web)):
         from atlas.business import devices as devices_mod
@@ -2366,7 +2368,7 @@ def create_app(spine, cfg) -> FastAPI:
         if row is None:
             raise HTTPException(400, "nepoznat dokument")
         if row["client_id"] is not None:
-            _guard_client(actor, row["client_id"])  # radnik ne printa tuđe klijente
+            _guard_client(actor, row["client_id"])  # a worker doesn't print others' clients
         try:
             return devices_mod.print_doc(spine, cfg, device_id, body.doc_id,
                                          user=actor.username)
@@ -2375,9 +2377,9 @@ def create_app(spine, cfg) -> FastAPI:
         except (lan.LanBlocked, RuntimeError) as e:
             raise HTTPException(502, str(e)) from e
 
-    # Arhitektura mapa (D2): dogovor o strukturi ureda = admin/owner posao.
-    # Preview lista SVE klijente s diska (KLIJENTI mapa) pa nije za
-    # restringirane radnike.
+    # Folder architecture (D2): agreeing on the office structure = admin/owner work.
+    # The preview lists ALL clients from disk (the KLIJENTI folder) so it is not
+    # for restricted workers.
     @app.get("/folder-architecture")
     def folder_architecture_preview(actor: Actor = Depends(require_actor_web)):
         from atlas.business import folder_architecture as fa
@@ -2417,7 +2419,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/folder-architecture/apply")
     def folder_architecture_apply(actor: Actor = Depends(require_actor_web)):
         from atlas.business import folder_architecture as fa
-        _require_admin(actor)  # kreira mape za SVE klijente — samo admin/owner
+        _require_admin(actor)  # creates folders for ALL clients — admin/owner only
         try:
             return fa.apply(spine, cfg, user=actor.username)
         except ValueError as e:
@@ -2457,7 +2459,7 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(400, f"nepoznat porezni sustav: {body.regime!r}")
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
-        # samo proslijeđena polja se mijenjaju; izostavljena ostaju netaknuta
+        # only the passed fields change; omitted ones stay untouched
         sets, vals = [], []
         if body.has_employees is not None:
             sets.append("has_employees=?"); vals.append(1 if body.has_employees else 0)
@@ -2536,7 +2538,7 @@ def create_app(spine, cfg) -> FastAPI:
             _guard_client(actor, client_id)
         rows = [dict(r) for r in notes.search(spine, term=q, client_id=client_id)]
         vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-        if vis is not None:  # restringirani radnik ne vidi bilješke tuđih klijenata
+        if vis is not None:  # a restricted worker doesn't see notes of others' clients
             rows = [r for r in rows if r.get("client_id") in vis]
         return rows
 
@@ -2565,13 +2567,13 @@ def create_app(spine, cfg) -> FastAPI:
 
     @app.post("/messaging/send")
     def messaging_send(body: MessagingSendBody, actor: Actor = Depends(require_actor_web)):
-        _guard_client(actor, body.client_id)  # radnik ne šalje poruke tuđim klijentima
+        _guard_client(actor, body.client_id)  # a worker doesn't send messages to others' clients
         return messaging.send_to_client(spine, cfg, body.client_id, body.subject, body.body,
                                          dry_run=body.dry_run)
 
     @app.post("/messaging/campaign")
     def messaging_campaign(body: MessagingCampaignBody, actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)  # masovni izlaz prema svim klijentima = admin posao
+        _require_admin(actor)  # mass outbound to all clients = admin work
         kw = {"days": body.days}
         if body.kind is not None:
             kw["kind"] = body.kind
@@ -2596,7 +2598,7 @@ def create_app(spine, cfg) -> FastAPI:
             ).fetchall()
         out = [dict(r) for r in rows]
         vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
-        if vis is not None:  # restringirani radnik ne vidi log tuđih klijenata
+        if vis is not None:  # a restricted worker doesn't see the log of others' clients
             out = [r for r in out if r.get("client_id") in vis]
         return out
 
@@ -2605,8 +2607,8 @@ def create_app(spine, cfg) -> FastAPI:
             raise HTTPException(403, "nemate pristup ovom klijentu")
 
     def _visible_rows(actor: Actor, rows: list) -> list:
-        """Odbaci retke skrivenih klijenata (client_id IS NULL = uredski, ostaje
-        svima). Zajednički filtar za agregatne read-liste (expiry, notifications)."""
+        """Drop rows of hidden clients (client_id IS NULL = office-wide, stays for
+        everyone). Shared filter for aggregate read-lists (expiry, notifications)."""
         vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
         if vis is None:
             return rows
@@ -2615,7 +2617,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.post("/clients/assist")
     def client_assist(body: ClientAssistBody, actor: Actor = Depends(require_actor_web)):
         from atlas.business import client_assist
-        # server-side throttle — klijentski debounce se da zaobići, LLM košta
+        # server-side throttle — the client debounce can be bypassed, the LLM costs money
         if not limiter.allow(f"assist:{actor.user_id}", limit=20, window_s=60.0):
             raise HTTPException(429, "previše assist zahtjeva — uspori tipkanje")
         try:
@@ -2637,7 +2639,7 @@ def create_app(spine, cfg) -> FastAPI:
             result = onboarding.create_client(spine, cfg, body.model_dump(), actor.username)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-        # restringirani kreator inače ne bi vidio vlastito djelo
+        # otherwise a restricted creator wouldn't see their own creation
         vis = client_visibility.visible_ids(spine, actor.user_id, actor.role)
         if vis is not None:
             client_visibility.grant(spine, actor.user_id, result["id"], actor.username)
@@ -2646,7 +2648,7 @@ def create_app(spine, cfg) -> FastAPI:
     @app.get("/clients/discover")
     def clients_discover(folder_id: int, actor: Actor = Depends(require_actor_web)):
         from atlas.business import client_discovery
-        _require_admin(actor)  # enumeracija/kreiranje klijenata iz NAS mape = admin
+        _require_admin(actor)  # enumeration/creation of clients from the NAS folder = admin
         try:
             return client_discovery.discover(spine, cfg, folder_id)
         except ValueError as e:
@@ -2722,8 +2724,8 @@ def create_app(spine, cfg) -> FastAPI:
         if spine.read().execute("SELECT 1 FROM clients WHERE id=?", (client_id,)).fetchone() is None:
             raise HTTPException(404, "nepoznat klijent")
         from atlas.business import secretbox
-        # target nosi lozinku -> šifriraj u bazi (backup ne curi kredencijal);
-        # shema je već provjerena na plaintextu gore
+        # target carries a password -> encrypt in the DB (a backup doesn't leak the
+        # credential); the scheme was already validated on the plaintext above
         stored_target = secretbox.encrypt(body.target, cfg) if body.target else body.target
         with spine.write() as c:
             c.execute(
@@ -2874,8 +2876,8 @@ def create_app(spine, cfg) -> FastAPI:
     def audit_search(client: str | None = None, user: str | None = None,
                       action: str | None = None,
                       actor: Actor = Depends(require_actor_web)):
-        _require_admin(actor)  # audit trag otkriva tuđe akcije — nije za svakog člana
-        # Codex nalaz: bez org-filtra admin org-a A vidi audit org-a B
+        _require_admin(actor)  # the audit trail reveals others' actions — not for every member
+        # Codex finding: without an org filter, an admin of org A sees the audit of org B
         rows = auditlog.search(spine, client=client, user=user, action=action,
                                org_id=actor.org_id)
         return [dict(r) for r in rows]
@@ -2962,7 +2964,7 @@ def create_app(spine, cfg) -> FastAPI:
         return {"id": sop_id, "status": "rejected"}
 
     def _guard_sop(actor: Actor, sop_id: int) -> None:
-        # SOP vezan uz klijenta ne smije se otkriti restringiranom radniku
+        # a SOP linked to a client must not be revealed to a restricted worker
         r = spine.read().execute("SELECT client_id FROM sop_pages WHERE id=?", (sop_id,)).fetchone()
         if r is not None and r["client_id"] is not None:
             _guard_client(actor, r["client_id"])
@@ -3004,7 +3006,7 @@ def create_app(spine, cfg) -> FastAPI:
     def sop_image_get(image_id: int, actor: Actor = Depends(require_actor_web)):
         r = spine.read().execute("SELECT sop_id FROM sop_images WHERE id=?", (image_id,)).fetchone()
         if r is not None:
-            _guard_sop(actor, r["sop_id"])  # slika naslijedi vidljivost svog SOP-a/klijenta
+            _guard_sop(actor, r["sop_id"])  # the image inherits the visibility of its SOP/client
         result = sop_images.image_bytes(spine, cfg, image_id)
         if result is None:
             raise HTTPException(404, "slika nije pronađena")
@@ -3042,14 +3044,14 @@ def create_app(spine, cfg) -> FastAPI:
     def browser_agent(body: BrowserAgentBody, user: str = Depends(require_user_web)):
         return agent_mod.run_task(cfg, body.task, body.url)
 
-    # Determinističke lane koje ODMAH mijenjaju stanje (bez agent-potvrde) ne
-    # smiju se okinuti s telefona — inače "nauči s <URL>" / "kod Ane otvori X"
-    # izvrše write bez potvrde (Codex nalaz).
+    # Deterministic lanes that change state IMMEDIATELY (without agent confirmation)
+    # must not be triggered from the phone — otherwise "learn from <URL>" / "at Ana's
+    # open X" would execute a write without confirmation (Codex finding).
     _TG_SIDE_EFFECT_LANES = ("learn", "flota", "arhitektura")
 
     def _telegram_answer(query: str, actor: Actor) -> dict:
-        """Telegram kroz AGENTA (telefon dobiva READ akcije). Write (agent pending
-        ILI side-effect lane) se NE izvršava preko Telegrama — bounce na potvrdu."""
+        """Telegram through the AGENT (the phone gets READ actions). A write (agent pending
+        OR a side-effect lane) is NOT executed over Telegram — bounced to confirmation."""
         _chat_gate(actor)
         lane = router_mod.route(query)
         if lane in _TG_SIDE_EFFECT_LANES:
@@ -3065,13 +3067,13 @@ def create_app(spine, cfg) -> FastAPI:
         from atlas.business import telegram_gateway as _tgw
         out = {"answer": _tgw.format_agent_reply(res), "sources": res.get("sources", [])}
         pending = res.get("pending")
-        if pending:  # write se potvrđuje inline tipkama na Telegramu (vlasnički token)
+        if pending:  # the write is confirmed with inline buttons on Telegram (owner token)
             out["pending_token"] = agent.stash_pending(spine, actor, pending)
         return out
 
     def _maybe_start_telegram():
-        """Ako je telegram_gateway konektor uključen, pokreni poll-thread. Bez
-        konfiguriranog konektora (npr. u testovima) ne pokreće ništa."""
+        """If the telegram_gateway connector is enabled, start the poll thread. Without
+        a configured connector (e.g. in tests) it starts nothing."""
         import threading
         from atlas.business import connectors as cx
         from atlas.business import telegram_gateway as tgw
@@ -3088,7 +3090,7 @@ def create_app(spine, cfg) -> FastAPI:
         app.state.tg_stop = stop
         app.state.tg_thread = threading.Thread(
             target=tgw.poll_loop, args=(spine, cfg, token, _telegram_answer, stop),
-            kwargs={"limiter": limiter, "key": f"c{row['id']}"},  # jedinstven offset po konektoru
+            kwargs={"limiter": limiter, "key": f"c{row['id']}"},  # unique offset per connector
             daemon=True, name="telegram-gateway")
         app.state.tg_thread.start()
 

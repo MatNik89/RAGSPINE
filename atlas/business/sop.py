@@ -1,8 +1,8 @@
-# SOP (Standard Operating Procedure) editorial workflow: interno znanje
-# ("kako radimo X za klijenta Y") ide draft -> submitted -> approved/rejected.
-# Odobreni SOP se ingestira u RAG korpus (doc_type='sop') pa postaje
-# pretraživ/citabilan (authority.detect_authority prepoznaje "SOP:" naslov
-# kao interna_procedura).
+# SOP (Standard Operating Procedure) editorial workflow: internal knowledge
+# ("how we do X for client Y") goes draft -> submitted -> approved/rejected.
+# An approved SOP is ingested into the RAG corpus (doc_type='sop') and thus
+# becomes searchable/citable (authority.detect_authority recognizes a "SOP:"
+# title as interna_procedura).
 from atlas.business import sop_images
 from atlas.docs.ingest import ingest_text
 

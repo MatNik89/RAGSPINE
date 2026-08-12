@@ -1,4 +1,4 @@
-"""OCR: rasterize PDF, OCR via tesseract (lokalno) ili VLM server, invisible text
+"""OCR: rasterize PDF, OCR via tesseract (local) or VLM server, invisible text
 layer, bulk skip-if-text."""
 import base64
 import json
@@ -30,7 +30,7 @@ _UNICODE_FONT_CANDIDATES = [
     # macOS
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
     "/Library/Fonts/Arial Unicode.ttf",
-    # Windows (%WINDIR% se ekspandira pri probi)
+    # Windows (%WINDIR% is expanded during probing)
     "%WINDIR%\\Fonts\\arial.ttf",
     "%WINDIR%\\Fonts\\calibri.ttf",
 ]
@@ -69,8 +69,8 @@ def has_text_layer(path: str, min_chars: int = 100) -> bool:
 
 
 def pdf_is_signed(path: str) -> bool:
-    """True ako PDF ima digitalni potpis (sigflags > 0). In-place OCR bi ga
-    poništio — potpisani dokumenti (e-računi) se preskaču."""
+    """True if the PDF has a digital signature (sigflags > 0). In-place OCR would
+    invalidate it — signed documents (e-invoices) are skipped."""
     fitz = _fitz()
     try:
         doc = fitz.open(path)
@@ -124,8 +124,8 @@ def tesseract_available() -> bool:
 
 
 def ocr_page_tesseract(png: bytes, cfg) -> str:
-    """Lokalni OCR jedne stranice tesseractom (jezik iz cfg.ocr_langs). Nikad ne
-    baca — vrati "" na grešci/nedostupno."""
+    """Local OCR of a single page with tesseract (language from cfg.ocr_langs). Never
+    raises — returns "" on error/unavailable."""
     exe = winpath.find_binary("tesseract")
     if not exe:
         return ""
@@ -151,8 +151,8 @@ _MIN_OK_CHARS = 20
 
 
 def ocr_page_best(png: bytes, cfg, transport=None):
-    """Vrati (tekst, motor). tesseract prvo; ako je prekratak i ocr_url je zadan,
-    probaj VLM i uzmi dulji. motor ∈ 'tesseract'|'vlm'|'none'."""
+    """Return (text, engine). tesseract first; if too short and ocr_url is set,
+    try the VLM and take the longer one. engine in 'tesseract'|'vlm'|'none'."""
     t = ocr_page_tesseract(png, cfg)
     if len(t.strip()) >= _MIN_OK_CHARS:
         return t, "tesseract"
@@ -222,21 +222,21 @@ def write_text_layer(path: str, page_texts: list[str], out_path: str | None = No
                 _insert_all(page, text, fontname=fontname, fontfile=fontfile)
         out = out_path or f"{os.path.splitext(path)[0]}_ocr.pdf"
         if os.path.realpath(out) == os.path.realpath(path):
-            # fitz ne da save preko otvorenog originala — save u temp pa atomično zamijeni.
-            # pid u imenu: dva konkurentna OCR-a istog PDF-a si ne gaze temp.
+            # fitz won't save over the open original — save to a temp then atomically replace.
+            # pid in the name: two concurrent OCRs of the same PDF don't clobber each other's temp.
             tmp = f"{out}.{os.getpid()}.ocrtmp"
             try:
                 doc.save(tmp)
                 doc.close()
                 try:
-                    # zadrži mode originala — doc.save stvara fajl s default umaskom
+                    # keep the original's mode — doc.save creates a file with the default umask
                     os.chmod(tmp, os.stat(out).st_mode & 0o7777)
                 except OSError:
                     pass
                 os.replace(tmp, out)
             finally:
                 try:
-                    os.unlink(tmp)  # ostatak samo ako je save/replace pukao
+                    os.unlink(tmp)  # leftover only if save/replace failed
                 except OSError:
                     pass
         else:
@@ -249,9 +249,9 @@ def write_text_layer(path: str, page_texts: list[str], out_path: str | None = No
 
 
 def resolve_scoped_path(cfg, path: str) -> str:
-    """Resolve path and require it to live inside a mount_root (spojene mape),
-    nas_root ili data_dir — blocks arbitrary file read/write via a client-supplied
-    path (OCR piše u isti PDF, a tekst ide u DIJELJENI RAG indeks)."""
+    """Resolve path and require it to live inside a mount_root (mounted shares),
+    nas_root or data_dir — blocks arbitrary file read/write via a client-supplied
+    path (OCR writes into the same PDF, and the text goes into the SHARED RAG index)."""
     roots = [os.path.realpath(r) for r in (cfg.mount_roots or [])]
     roots.append(os.path.realpath(cfg.nas_root or cfg.data_dir))
     resolved = os.path.realpath(path)
@@ -274,20 +274,20 @@ def ocr_pdf(spine, cfg, path: str, transport=None, force: bool = False) -> dict:
         engines[e] = engines.get(e, 0) + 1
     full_text = "\n\n".join(t for t in page_texts if t)
     if not full_text.strip():
-        # ništa pročitano — NE prepisuj original (prazan sloj = besmislen rewrite)
+        # nothing was read — do NOT rewrite the original (empty layer = pointless rewrite)
         return {"skipped": False, "pages": len(page_texts), "out": path,
                 "ocr_empty": True, "engines": engines}
-    # indeks PRIJE prepisivanja PDF-a: padne li ingest, original ostaje netaknut
-    # i retry radi; padne li upis sloja, dokument je već u indeksu (sha-dedup
-    # čini ponovni ingest no-opom).
+    # index BEFORE rewriting the PDF: if ingest fails, the original stays intact
+    # and retry works; if writing the layer fails, the document is already in the index
+    # (sha-dedup makes a repeated ingest a no-op).
     ingest_text(spine, full_text, title=os.path.basename(path), path=path)
-    write_text_layer(path, page_texts, out_path=path)  # pretraživi sloj U ISTI PDF
+    write_text_layer(path, page_texts, out_path=path)  # searchable layer INTO THE SAME PDF
     return {"skipped": False, "pages": len(page_texts), "out": path, "engines": engines}
 
 
 def _walk_pdfs(base: str):
-    """PDF-ovi ispod base; simlink koji resolvea izvan base se preskače
-    (audit ne smije čitati, a bulk ne smije pisati izvan tražene mape)."""
+    """PDFs under base; a symlink that resolves outside base is skipped
+    (audit must not read, and bulk must not write outside the requested folder)."""
     for root, _d, files in os.walk(base):
         for f in files:
             if not f.lower().endswith(".pdf"):
@@ -299,7 +299,7 @@ def _walk_pdfs(base: str):
 
 
 def audit_folder(cfg, base: str) -> dict:
-    """Read-only: koliko PDF-ova u mapi treba OCR (nemaju tekstualni sloj)."""
+    """Read-only: how many PDFs in the folder need OCR (have no text layer)."""
     base = resolve_scoped_path(cfg, base)
     n_pdf = n_no = 0
     sample = []
@@ -328,7 +328,7 @@ def bulk_ocr(spine, cfg, folder: str, transport=None) -> dict:
         if res["skipped"]:
             result["signed" if res.get("reason") == "signed" else "skipped"] += 1
         elif res.get("ocr_empty"):
-            result["ocr_empty"] += 1  # ništa pročitano — nije "obrađen"
+            result["ocr_empty"] += 1  # nothing read — not "processed"
         else:
             result["processed"] += 1
         for eng, n in (res.get("engines") or {}).items():

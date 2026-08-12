@@ -1,11 +1,11 @@
-# NUT (Network UPS Tools) klijent nad stdlib socketom — bez ovisnosti.
-# Protokol upsd (port 3493) je linijski tekst: `GET VAR <ups> <var>` -> `VAR
-# <ups> <var> "<vrijednost>"` ili `ERR <kod>`. Čita se SAMO (nikad SET), pa je
-# read-only prema UPS-u.
+# NUT (Network UPS Tools) client over a stdlib socket — no dependencies.
+# The upsd protocol (port 3493) is line text: `GET VAR <ups> <var>` -> `VAR
+# <ups> <var> "<value>"` or `ERR <code>`. Only READ (never SET), so it is
+# read-only toward the UPS.
 #
-# Fail-closed: svaka greška (host nije LAN, spoj pukne, ERR, malformed) vraća
-# {"ok": False, ...} — NIKAD se tiho ne tumači kao "struja je OK". Pozivatelj
-# (business/power.evaluate) na ok=False NE gasi ništa, samo alarmira.
+# Fail-closed: any error (host not LAN, connection breaks, ERR, malformed) returns
+# {"ok": False, ...} — NEVER silently interpreted as "power is OK". The caller
+# (business/power.evaluate) shuts nothing down on ok=False, only raises an alarm.
 import math
 import socket
 
@@ -19,26 +19,26 @@ def _default_connect(ip: str, port: int, timeout: float):
 
 
 def _readline(sock) -> str | None:
-    """Pročitaj jednu \\n-terminiranu liniju s NUT socketa (bounded). Vrati None
-    ako veza padne bez potpune linije ili je linija oversize — oboje je
-    malformed i NE smije se tumačiti kao valjan odgovor (fail-closed)."""
+    """Read one \\n-terminated line from the NUT socket (bounded). Return None
+    if the connection drops without a complete line or the line is oversize — both
+    are malformed and MUST NOT be interpreted as a valid response (fail-closed)."""
     buf = bytearray()
     while b"\n" not in buf:
         chunk = sock.recv(256)
         if not chunk:
-            return None  # veza zatvorena bez terminirane linije
+            return None  # connection closed without a terminated line
         buf.extend(chunk)
-        if len(buf) > 4096:  # NUT linije su kratke; oversize = smeće
+        if len(buf) > 4096:  # NUT lines are short; oversize = garbage
             return None
     return buf.split(b"\n", 1)[0].decode("utf-8", "replace").strip()
 
 
 def _get_var(sock, ups: str, var: str) -> str | None:
-    """Vrati vrijednost varijable ili None (ERR/nepodržano/malformed)."""
+    """Return the variable value or None (ERR/unsupported/malformed)."""
     sock.sendall(f"GET VAR {ups} {var}\n".encode())
     line = _readline(sock)
     if not line or not line.startswith("VAR "):
-        return None  # ERR ..., oversize, nepotpuno ili neočekivano
+        return None  # ERR ..., oversize, incomplete or unexpected
     q = line.find('"')
     if q == -1:
         return None
@@ -50,10 +50,10 @@ def _get_int(sock, ups: str, var: str) -> int | None:
     if val is None:
         return None
     try:
-        f = float(val)  # battery.runtime zna biti "1800.0"
+        f = float(val)  # battery.runtime can be "1800.0"
     except ValueError:
         return None
-    if not math.isfinite(f):  # "inf"/"nan" -> odbaci (int(inf) baca OverflowError)
+    if not math.isfinite(f):  # "inf"/"nan" -> reject (int(inf) raises OverflowError)
         return None
     try:
         return int(f)
@@ -64,8 +64,8 @@ def _get_int(sock, ups: str, var: str) -> int | None:
 def read_status(host: str, port: int = _DEFAULT_PORT, ups: str = "ups",
                 timeout: float = 3.0, connect=None) -> dict:
     try:
-        ip = lan.assert_lan_host(host, port)  # spoj se na VRAĆENI ip (anti-rebind)
-    except Exception as e:  # LanBlocked i sve ostalo -> fail-closed
+        ip = lan.assert_lan_host(host, port)  # connect to the RETURNED ip (anti-rebind)
+    except Exception as e:  # LanBlocked and everything else -> fail-closed
         return {"ok": False, "error": f"host nije LAN: {e}"}
     connect = connect or _default_connect
     try:

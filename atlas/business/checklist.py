@@ -1,4 +1,4 @@
-# Kompletnost dosjea klijenta — koliko podataka/dokumenata nedostaje.
+# Completeness of a client's file — how much data/documentation is missing.
 
 FIELDS = (
     ("oib", "OIB"),
@@ -45,7 +45,7 @@ def score_client(spine, client_id: int) -> dict:
 def worst_first(spine, visible=None) -> list[dict]:
     ids = [r["id"] for r in spine.read().execute(
         "SELECT id FROM clients WHERE active=1").fetchall()]
-    if visible is not None:  # restringiran radnik ne vidi tuđe klijente
+    if visible is not None:  # a restricted worker does not see other people's clients
         ids = [i for i in ids if i in visible]
     scored = [score_client(spine, cid) for cid in ids]
     scored.sort(key=lambda r: r["score"])

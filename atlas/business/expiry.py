@@ -1,4 +1,4 @@
-# Praćenje isteka dokumenata po klijentu (osobne, dozvole, certifikati...).
+# Tracking document expiry per client (IDs, permits, certificates...).
 
 from datetime import date, timedelta
 
@@ -17,8 +17,8 @@ def _today() -> date:
 
 
 def send_expiry_reminder(spine, cfg, item_id: int, dry_run: bool = False) -> dict:
-    """Pošalji klijentu podsjetnik da dokument ističe (uz PRISTANAK — messaging
-    to gata). Vrati ishod slanja (status). Nepoznat item -> ValueError."""
+    """Send the client a reminder that a document is expiring (with CONSENT — messaging
+    gates that). Return the send outcome (status). Unknown item -> ValueError."""
     row = spine.read().execute(
         "SELECT client_id, label, expires FROM expiry_items WHERE id=?", (item_id,)).fetchone()
     if row is None:

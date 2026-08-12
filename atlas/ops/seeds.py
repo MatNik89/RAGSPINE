@@ -2,9 +2,9 @@
 from atlas.business import cjenik, dnevnice, kalendar, quickref
 from atlas.web.watchlist import DEFAULT_RSS, add_source
 
-# ponytail: plausible RRIF-style konto raspored (razred = prva znamenka), ne
-# službena tablica. Operater dopunjuje/ispravlja kroz izravni INSERT ili
-# buduću watchlist na RRIF izvor.
+# ponytail: plausible RRIF-style konto layout (razred = first digit), not the
+# official table. The operator supplements/corrects via a direct INSERT or
+# a future watchlist on the RRIF source.
 KONTNI_PLAN: list[tuple[str, str, str]] = [
     ("0010", "Zemljište", "0"),
     ("0020", "Građevinski objekti", "0"),
@@ -55,33 +55,33 @@ KONTNI_PLAN: list[tuple[str, str, str]] = [
     ("9030", "Gubitak razdoblja", "9"),
 ]
 
-# Provjereni izvori (2026-08-01, svi vraćaju HTTP 200). Porezna uprava nema
-# zasebnu "kalendar" stranicu — nove stope/pravilnici/obavijesti objavljuju se na
-# stranici vijesti; hash-diff + law_diff + extract_rates hvataju promjene odatle.
+# Verified sources (2026-08-01, all return HTTP 200). The Tax Administration has no
+# separate "calendar" page — new rates/regulations/notices are published on the
+# news page; hash-diff + law_diff + extract_rates catch changes from there.
 POREZNA_VIJESTI_URL = "https://porezna-uprava.gov.hr/hr/vijesti/8"
 
-# Narodne novine (nema RSS-a): prati listu izdanja po dijelovima kao 'page'.
-# sortiraj=4 = po datumu (najnovije gore), kategorija: 1=službeni, 2=međunarodni, 3=oglasni.
+# Narodne novine (no RSS): track the list of editions by parts as 'page'.
+# sortiraj=4 = by date (newest on top), kategorija: 1=official, 2=international, 3=classifieds.
 NN_LISTINGS = [
     ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=1", "nn-sluzbeni"),
     ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=2", "nn-medjunarodni"),
     ("https://narodne-novine.nn.hr/search.aspx?sortiraj=4&kategorija=3", "nn-oglasni"),
 ]
 
-# Izvori po djelatnostima — službene stranice ministarstava/agencija/zavoda,
-# svi provjereni HTTP 200 bez redirecta (2026-08-01; safe_fetch blokira 3xx).
-# category = djelatnost(i) na koje se odnosi; check_source prefiksira notifikaciju
-# s [category] pa radnik odmah vidi koga se tiče. Prate se kao 'page' (hash-diff).
+# Sources by industry — official pages of ministries/agencies/institutes,
+# all verified HTTP 200 without redirect (2026-08-01; safe_fetch blocks 3xx).
+# category = industry(ies) it applies to; check_source prefixes the notification
+# with [category] so the worker immediately sees whom it concerns. Tracked as 'page' (hash-diff).
 INDUSTRY_SOURCES = [
-    # cross-industry (tiču se svih klijenata)
-    ("https://dzs.gov.hr/vijesti/8", "place-statistika"),        # DZS: minimalac, prosječne plaće
-    ("https://www.mirovinsko.hr/hr/novosti/8", "doprinosi-hzmo"),  # HZMO: mirovinsko, doprinosi
-    # djelatnosti
-    ("https://mint.gov.hr/vijesti/8", "ugostiteljstvo-turizam"),  # Ministarstvo turizma
-    ("https://www.apprrr.hr/otvoreni-natjecaji-prrrh/", "poljoprivreda"),  # APPRRR: potpore/natječaji
-    ("https://mpgi.gov.hr/pristup-informacijama-16/zakoni-i-ostali-propisi/88", "gradevina"),  # MPGI propisi
-    ("https://mingo.gov.hr/vijesti/8", "trgovina-proizvodnja-it"),  # Ministarstvo gospodarstva
-    ("https://mmpi.gov.hr/more-86/vijesti-100/100", "prijevoz"),  # MMPI: promet
+    # cross-industry (concern all clients)
+    ("https://dzs.gov.hr/vijesti/8", "place-statistika"),        # DZS: minimum wage, average salaries
+    ("https://www.mirovinsko.hr/hr/novosti/8", "doprinosi-hzmo"),  # HZMO: pension, contributions
+    # industries
+    ("https://mint.gov.hr/vijesti/8", "ugostiteljstvo-turizam"),  # Ministry of Tourism
+    ("https://www.apprrr.hr/otvoreni-natjecaji-prrrh/", "poljoprivreda"),  # APPRRR: subsidies/tenders
+    ("https://mpgi.gov.hr/pristup-informacijama-16/zakoni-i-ostali-propisi/88", "gradevina"),  # MPGI regulations
+    ("https://mingo.gov.hr/vijesti/8", "trgovina-proizvodnja-it"),  # Ministry of Economy
+    ("https://mmpi.gov.hr/more-86/vijesti-100/100", "prijevoz"),  # MMPI: transport
 ]
 
 

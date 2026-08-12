@@ -1,9 +1,9 @@
-"""Faza 5: radnička flota — tokeni uređaja, program-allowlista, red naredbi.
+"""Phase 5: worker fleet — device tokens, program allowlist, command queue.
 
-Token = "<device_id>.<secret>": device_id je javan pokazivač, hash tajne se
-sprema po device_id -> verify je O(1) (bez enumeracije/timing curenja). Server
-NIKAD ne šalje naredbeni string agentu — samo `program_key` iz allowliste; agent
-drži vlastitu key->argv mapu i odbija nepoznato.
+Token = "<device_id>.<secret>": device_id is a public pointer, the secret's hash is
+stored by device_id -> verify is O(1) (no enumeration/timing leak). The server
+NEVER sends a command string to the agent — only a `program_key` from the allowlist;
+the agent keeps its own key->argv map and rejects anything unknown.
 """
 import hashlib
 import hmac
@@ -11,42 +11,42 @@ import json
 import re
 import secrets
 
-# Tvrda allowlista radnji — i server i agent je provjeravaju
+# Hard allowlist of actions — both server and agent check it
 ACTIONS = ("run_program", "shutdown", "enable_wol", "status")
 
 
 def _master_signing_key(spine, cfg) -> str:
-    """Per-instalacija MASTER ključ (tajna, ne izlazi iz servera). Atomičan
-    get-or-create (INSERT OR IGNORE pa re-read) — dvije paralelne prve izdaje
-    ne mogu dati različite ključeve (Codex nalaz)."""
+    """Per-installation MASTER key (secret, never leaves the server). Atomic
+    get-or-create (INSERT OR IGNORE then re-read) — two parallel first issuances
+    cannot produce different keys (Codex finding)."""
     from atlas.business import secretbox
     with spine.write() as c:
-        # master ključ se sprema ŠIFRIRAN (secretbox, ključ iz jwt_secreta u datoteci,
-        # ne u bazi) — ukradeni DB backup ne otkriva ključ za potpis naredbi (Codex nalaz)
+        # the master key is stored ENCRYPTED (secretbox, key from jwt_secret in a file,
+        # not in the DB) — a stolen DB backup does not reveal the command-signing key (Codex finding)
         c.execute("INSERT OR IGNORE INTO config_overrides(module,key,value,updated_at) "
                   "VALUES('fleet','signing_key',?,datetime('now'))",
                   (secretbox.encrypt(secrets.token_urlsafe(32), cfg),))
     raw = spine.get_override("fleet", "signing_key", "")
-    val = secretbox.decrypt(raw, cfg)  # fallback vraća stari plaintext zapis kakav jest
+    val = secretbox.decrypt(raw, cfg)  # fallback returns the old plaintext record as-is
     if raw.startswith("enc:") and not val:
-        # dešifriranje palo (npr. razišao se jwt_secret) -> NE potpisuj praznim ključem
-        # (inače tih fleet-lockout / lažno valjani potpisi); fail-closed (Codex nalaz)
+        # decryption failed (e.g. jwt_secret diverged) -> do NOT sign with an empty key
+        # (otherwise silent fleet-lockout / falsely valid signatures); fail-closed (Codex finding)
         raise RuntimeError("master signing_key se ne može dešifrirati (provjeri jwt_secret)")
-    if raw and not raw.startswith("enc:"):  # migracija: stari plaintext -> šifriraj u mjestu
+    if raw and not raw.startswith("enc:"):  # migration: old plaintext -> encrypt in place
         spine.set_override("fleet", "signing_key", secretbox.encrypt(val, cfg))
     return val
 
 
 def device_sign_key(spine, device_id: int, cfg) -> str:
-    """PER-UREĐAJ ključ = HMAC(master, device_id). Kompromitacija jednog uređaja
-    ne daje mogućnost potpisa za DRUGI (master nikad ne napušta server); opoziv
-    je vezan uz uređaj (Codex nalaz: dijeljeni simetrični ključ = fleet-wide forge)."""
+    """PER-DEVICE key = HMAC(master, device_id). Compromising one device does
+    not grant the ability to sign for ANOTHER (the master never leaves the server);
+    revocation is tied to the device (Codex finding: a shared symmetric key = fleet-wide forge)."""
     return hmac.new(_master_signing_key(spine, cfg).encode(), str(device_id).encode(),
                     hashlib.sha256).hexdigest()
 
 
 def _canon(device_id: int, cmd: dict) -> bytes:
-    # potpis veže i device_id i id (monotoni, anti-replay se provjerava kod agenta)
+    # the signature binds both device_id and id (monotonic, anti-replay is checked at the agent)
     return json.dumps({"device_id": int(device_id), "id": cmd.get("id"),
                        "action": cmd.get("action"), "program_key": cmd.get("program_key")},
                       sort_keys=True, separators=(",", ":")).encode()
@@ -57,19 +57,19 @@ def sign_command(spine, device_id: int, cmd: dict, cfg) -> str:
                     _canon(device_id, cmd), hashlib.sha256).hexdigest()
 
 
-# --- samo-prijava + odobri (agent se javi kao "na čekanju", owner odobri) ----
+# --- self-enrollment + approve (agent reports in as "pending", owner approves) ----
 
-_ENROLL_TTL_MIN = 30       # zahtjev istekne ako ga owner ne odobri
-_ENROLL_MAX_PENDING = 50   # globalni cap protiv DB-DoS-a javnim endpointom
-_ENROLL_MAX_PER_SRC = 5    # po-izvoru (IP) cap: jedan host ne puni cijeli red
-_ENROLL_WINDOW_MIN = 15    # koliko dugo ostaje otvoreno "sparivanje" nakon što owner klikne
+_ENROLL_TTL_MIN = 30       # request expires if the owner does not approve it
+_ENROLL_MAX_PENDING = 50   # global cap against DB-DoS via the public endpoint
+_ENROLL_MAX_PER_SRC = 5    # per-source (IP) cap: one host cannot fill the whole queue
+_ENROLL_WINDOW_MIN = 15    # how long "pairing" stays open after the owner clicks
 _EXPIRED = f"datetime('now', '-{_ENROLL_TTL_MIN} minutes')"
 
 
 def open_enrollment(spine, user: str, minutes: int = _ENROLL_WINDOW_MIN) -> str:
-    """Owner otvori prozor za sparivanje. BEZ otvorenog prozora javni /agent/enroll
-    je zatvoren (fail-closed) — neautentificirani LAN host ne može ni puniti red ni
-    provocirati DoS dok owner ne kaže 'sad dodajem računalo' (Codex nalaz)."""
+    """Owner opens the pairing window. WITHOUT an open window the public /agent/enroll
+    is closed (fail-closed) — an unauthenticated LAN host can neither fill the queue nor
+    provoke a DoS until the owner says 'now I'm adding a computer' (Codex finding)."""
     m = max(1, min(int(minutes), 120))
     until = spine.read().execute(
         "SELECT datetime('now', ?) AS t", (f"+{m} minutes",)).fetchone()["t"]
@@ -87,22 +87,22 @@ def enrollment_open(spine) -> bool:
 
 
 def enroll_request(spine, device_name: str, source: str = "") -> tuple[str, str]:
-    """Agent traži upis. Vrati (enroll_id, secret) — agent čuva secret i njime
-    kasnije preuzme kredencijale nakon što owner odobri. NIŠTA se ne izda dok
-    owner ne klikne Odobri."""
+    """Agent requests enrollment. Return (enroll_id, secret) — the agent keeps the secret
+    and later uses it to pick up credentials once the owner approves. NOTHING is issued
+    until the owner clicks Approve."""
     if not enrollment_open(spine):
         raise ValueError("sparivanje nije otvoreno — zamolite vlasnika da otvori upis")
     src = (source or "")[:64]
     enroll_id = secrets.token_urlsafe(12)
     secret = secrets.token_urlsafe(24)
     with spine.write() as c:
-        # cleanup: makni preuzete i ISTEKLE PENDING (istek vrijedi SAMO za pending —
-        # inače bi javni endpoint obrisao approved-neuzet red i ostavio siroti
-        # uređaj/token; Codex nalaz)
+        # cleanup: remove consumed and EXPIRED PENDING (expiry applies ONLY to pending —
+        # otherwise the public endpoint would delete an approved-unclaimed row and leave an
+        # orphaned device/token; Codex finding)
         c.execute(f"DELETE FROM agent_enrollments WHERE status='consumed' "
                   f"OR (status='pending' AND created_at < {_EXPIRED})")
-        # per-source cap: jedan LAN host ne može sam ispuniti globalni red i tako
-        # blokirati legitimno sparivanje unutar prozora (Codex #5)
+        # per-source cap: one LAN host cannot fill the global queue by itself and thereby
+        # block legitimate pairing within the window (Codex #5)
         if src:
             per = c.execute("SELECT COUNT(*) AS n FROM agent_enrollments "
                             "WHERE status='pending' AND source=?", (src,)).fetchone()["n"]
@@ -125,12 +125,12 @@ def list_pending_enrollments(spine, limit: int = 100) -> list[dict]:
 
 
 def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user: str) -> int:
-    """Owner odobri: kreira uređaj, izda token + sign_key, spremi ih ŠIFRIRANO
-    uz enrollment (agent ih preuzme jednom). Vrati device_id."""
+    """Owner approves: creates the device, issues token + sign_key, stores them ENCRYPTED
+    alongside the enrollment (the agent picks them up once). Return device_id."""
     from atlas.business import devices, secretbox
-    # 1) atomično preuzmi red pending -> approving. Uvjetni UPDATE + rowcount==1
-    #    znači da SAMO jedan istovremeni approve prođe (nema TOCTOU dvostrukog
-    #    izdavanja), i istekli pending se odbija ovdje (Codex nalaz).
+    # 1) atomically claim the row pending -> approving. Conditional UPDATE + rowcount==1
+    #    means ONLY one concurrent approve passes (no TOCTOU double
+    #    issuance), and an expired pending is rejected here (Codex finding).
     with spine.write() as c:
         row = c.execute("SELECT device_name FROM agent_enrollments WHERE id=?",
                         (enroll_id,)).fetchone()
@@ -145,7 +145,7 @@ def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user
                           "WHERE id=? AND status='pending'", (enroll_id,))
         if claim.rowcount != 1:
             raise ValueError("zahtjev je već obrađen")
-    # 2) sada jedinstveni vlasnik reda -> kreiraj uređaj + kredencijale, pa finaliziraj
+    # 2) now the sole owner of the row -> create device + credentials, then finalize
     name = (device_name or row["device_name"] or "Radna stanica").strip()
     dev = devices.add_device(spine, "radna-stanica", name, user=user)
     token = issue_token(spine, dev["id"])
@@ -159,15 +159,15 @@ def approve_enrollment(spine, cfg, enroll_id: str, device_name: str | None, user
 
 
 def poll_enrollment(spine, cfg, enroll_id: str, secret: str) -> dict:
-    """Agent poll: {status:'pending'} dok owner ne odobri; kad odobri vrati
-    token+sign_key JEDNOM (pa označi consumed). Kriv secret/nepoznat -> greška."""
+    """Agent poll: {status:'pending'} until the owner approves; on approval return
+    token+sign_key ONCE (then mark consumed). Wrong secret/unknown -> error."""
     from atlas.business import secretbox
     row = spine.read().execute(
         "SELECT secret_hash, status, device_id, token_enc, signkey_enc "
         "FROM agent_enrollments WHERE id=?", (enroll_id,)).fetchone()
     if row is None or not secrets.compare_digest(_digest(secret or ""), row["secret_hash"] or ""):
         raise ValueError("nevažeći zahtjev za upis")
-    if row["status"] in ("pending", "approving"):  # 'approving' = owner upravo izdaje
+    if row["status"] in ("pending", "approving"):  # 'approving' = owner is issuing right now
         if row["status"] == "pending":
             exp = spine.read().execute(
                 f"SELECT 1 FROM agent_enrollments WHERE id=? AND created_at < {_EXPIRED}",
@@ -177,7 +177,7 @@ def poll_enrollment(spine, cfg, enroll_id: str, secret: str) -> dict:
         return {"status": "pending"}
     if row["status"] != "approved":
         raise ValueError("kredencijali su već preuzeti")
-    with spine.write() as c:  # jednokratno: approved -> consumed
+    with spine.write() as c:  # one-shot: approved -> consumed
         cur = c.execute("UPDATE agent_enrollments SET status='consumed' "
                         "WHERE id=? AND status='approved'", (enroll_id,))
         if cur.rowcount != 1:
@@ -188,9 +188,9 @@ def poll_enrollment(spine, cfg, enroll_id: str, secret: str) -> dict:
 
 
 def _digest(secret: str) -> str:
-    # Tajna je nasumičnih 256 bita -> PBKDF2 (spor, anti-bruteforce) NIJE potreban
-    # i stvara CPU-DoS amplifikaciju po pollu; SHA-256 + constant-time usporedba
-    # je dovoljna i brza (Codex T1 nalaz).
+    # The secret is a random 256 bits -> PBKDF2 (slow, anti-bruteforce) is NOT needed
+    # and would create CPU-DoS amplification per poll; SHA-256 + constant-time comparison
+    # is sufficient and fast (Codex T1 finding).
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
@@ -209,7 +209,7 @@ def _norm_key(key: str) -> str:
 # --- tokeni ----------------------------------------------------------------
 
 def issue_token(spine, device_id: int) -> str:
-    """Izdaj (ili rotiraj) token uređaja. Plaintext se vraća JEDNOM."""
+    """Issue (or rotate) a device token. The plaintext is returned ONCE."""
     with spine.write() as c:
         if c.execute("SELECT 1 FROM devices WHERE id=?", (device_id,)).fetchone() is None:
             raise ValueError(f"nepoznat uređaj: {device_id}")
@@ -228,7 +228,7 @@ def revoke_token(spine, device_id: int) -> None:
 
 
 def verify_token(spine, token: str):
-    """Vrati device_id ako token vrijedi i nije opozvan, inače None (svježe)."""
+    """Return device_id if the token is valid and not revoked, otherwise None (fresh)."""
     if not token or "." not in token:
         return None
     did_s, _, secret = token.partition(".")
@@ -266,8 +266,8 @@ def remove_program(spine, key: str) -> None:
     key = _norm_key(key)
     with spine.write() as c:
         c.execute("DELETE FROM fleet_programs WHERE key=?", (key,))
-        # ownerovo opozivanje mora odmah otkazati već enqueueane naredbe tog
-        # programa — inače admin unaprijed napuni red pa opoziv nema učinka
+        # the owner's revocation must immediately cancel already-enqueued commands for that
+        # program — otherwise an admin pre-fills the queue and the revocation has no effect
         c.execute("UPDATE agent_commands SET status='cancelled' "
                   "WHERE action='run_program' AND program_key=? AND status='pending'", (key,))
 
@@ -292,9 +292,9 @@ def enqueue(spine, device_id: int, action: str, program_key: str | None = None) 
 
 
 def next_command(spine, device_id: int) -> dict | None:
-    """Najstariji pending za uređaj -> in_progress. JEDNA atomska claim naredba
-    (UPDATE ... RETURNING) — dva istovremena polla ne mogu dobiti istu naredbu
-    (drugi UPDATE ne pogodi red jer više nije 'pending'). (Codex T1 nalaz.)"""
+    """Oldest pending for the device -> in_progress. ONE atomic claim statement
+    (UPDATE ... RETURNING) — two concurrent polls cannot get the same command
+    (the second UPDATE misses the row because it is no longer 'pending'). (Codex T1 finding.)"""
     with spine.write() as c:
         while True:
             row = c.execute(
@@ -305,15 +305,15 @@ def next_command(spine, device_id: int) -> dict | None:
                 (device_id,)).fetchone()
             if row is None:
                 return None
-            # claim-time re-provjera allowliste: ako je program u međuvremenu
-            # maknut, NE isporuči ga (ownerov opoziv je autoritativan)
+            # claim-time re-check of the allowlist: if the program was removed in the
+            # meantime, do NOT deliver it (the owner's revocation is authoritative)
             if row["action"] == "run_program" and c.execute(
                     "SELECT 1 FROM fleet_programs WHERE key=?", (row["program_key"],)).fetchone() is None:
                 c.execute(
                     "UPDATE agent_commands SET status='cancelled', result=?, done_at=datetime('now') "
                     "WHERE id=?",
                     (json.dumps({"ok": False, "detail": "program uklonjen s allowliste"}), row["id"]))
-                continue  # preskoči, uzmi idući pending
+                continue  # skip, take the next pending
             return {"id": row["id"], "action": row["action"], "program_key": row["program_key"]}
 
 
@@ -321,20 +321,20 @@ _ROLE_RANK = {"viewer": 0, "member": 1, "admin": 2, "owner": 3}
 
 
 def _worker_matches(worker_username: str, name: str) -> bool:
-    """Labavo poklapanje imena radnika (podnosi hrvatsku deklinaciju: 'Ane'->
-    'ana'): jedno je prefiks drugog ili dijele prve 3 slova."""
+    """Loose matching of a worker's name (tolerates Croatian declension: 'Ane'->
+    'ana'): one is a prefix of the other or they share the first 3 letters."""
     import os
     a, b = worker_username.lower(), name.lower()
     if a == b or a.startswith(b) or b.startswith(a):
         return True
-    # deklinacija (Ana/Ane/Ani): dijele sve osim zadnjeg slova
+    # declension (Ana/Ane/Ani): they share everything but the last letter
     cp = len(os.path.commonprefix([a, b]))
     return cp >= 2 and cp >= min(len(a), len(b)) - 1
 
 
 def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str) -> dict:
-    """Chat 'kod <ime> otvori <program>': nađi radnikovu stanicu + program iz
-    allowliste i enqueue run_program. Admin+ (dnevno pokretanje). Vrati
+    """Chat 'kod <name> otvori <program>': find the worker's station + program from
+    the allowlist and enqueue run_program. Admin+ (daily launch). Return
     {ok, message, command_id?}."""
     from atlas.business import devices as devices_mod
 
@@ -360,10 +360,10 @@ def open_on_worker(spine, worker_name: str, program_query: str, actor_role: str)
 
 
 def device_activity(spine, device_id: int, limit: int = 30) -> list[dict]:
-    """Nedavna aktivnost jednog uređaja (naredbe: akcija/status/rezultat/vrijeme).
-    Za 'uživo' prikaz vlasnik samo poll-a ovaj endpoint (ponytail: bez wss-a —
-    long-poll/poll pokriva potrebu; upgrade path = SSE/wss ako zatreba niža
-    latencija). Read-only."""
+    """Recent activity of a single device (commands: action/status/result/time).
+    For a 'live' view the owner just polls this endpoint (ponytail: no wss —
+    long-poll/poll covers the need; upgrade path = SSE/wss if lower latency is
+    needed). Read-only."""
     rows = spine.read().execute(
         "SELECT id, action, program_key, status, result, created_at, done_at "
         "FROM agent_commands WHERE device_id=? ORDER BY id DESC LIMIT ?",
@@ -372,9 +372,9 @@ def device_activity(spine, device_id: int, limit: int = 30) -> list[dict]:
 
 
 def wake_worker(spine, worker_name: str, actor_role: str, sender=None) -> dict:
-    """Probudi radnikovu stanicu (Wake-on-LAN). Admin+ (kao pokretanje programa).
-    Jednoznačno razriješi radnika s MAC-om, pošalji magic paket. `sender`
-    injektabilan za testove."""
+    """Wake the worker's station (Wake-on-LAN). Admin+ (like launching programs).
+    Unambiguously resolve the worker with a MAC, send the magic packet. `sender`
+    is injectable for tests."""
     from atlas.business import devices as devices_mod
     from atlas.core import wol
 
@@ -397,7 +397,7 @@ _FLOTA_RE = re.compile(r"kod\s+(\S+)\s+otvori\s+(.+)", re.IGNORECASE)
 
 
 def flota_handle(spine, cfg, query: str, llm=None, actor=None) -> str:
-    """Chat lane: 'kod <ime> otvori <program>'. Actor-threaded (admin-gate)."""
+    """Chat lane: 'kod <name> otvori <program>'. Actor-threaded (admin-gate)."""
     role = getattr(actor, "role", None)
     m = _FLOTA_RE.search(query)
     if not m:
@@ -406,14 +406,14 @@ def flota_handle(spine, cfg, query: str, llm=None, actor=None) -> str:
                           actor_role=role or "viewer")["message"]
 
 
-from atlas.rag import pipeline  # noqa: E402 (lazy: izbjegni import-order coupling)
+from atlas.rag import pipeline  # noqa: E402 (lazy: avoid import-order coupling)
 pipeline.LANE_HANDLERS["flota"] = flota_handle
 
 
 def complete(spine, cmd_id: int, device_id: int, result) -> bool:
-    """Zatvori naredbu SAMO ako je 'in_progress' i pripada uređaju — spriječi da
-    agent preskoči izvršenje (pending->done) ili prepiše već završen rezultat.
-    Vrati True ako je red stvarno zatvoren."""
+    """Close the command ONLY if it is 'in_progress' and belongs to the device — prevent
+    the agent from skipping execution (pending->done) or overwriting an already-finished result.
+    Return True if the row was actually closed."""
     with spine.write() as c:
         cur = c.execute(
             "UPDATE agent_commands SET status='done', result=?, done_at=datetime('now') "

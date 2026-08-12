@@ -1,6 +1,6 @@
-"""Excel izvoz na upit. Podržani izvozi su fiksni (klijenti, obveze) — kad
-zahtjev nije potpun, `clarify` vrati pitanja (AI ih postavi korisniku). Vidljivost
-klijenta se poštuje. Anti formula-injection na svakoj ćeliji.
+"""Excel export on demand. Supported exports are fixed (clients, obligations) — when
+the request is incomplete, `clarify` returns questions (the AI asks the user). Client
+visibility is respected. Anti formula-injection on every cell.
 """
 import re
 import secrets
@@ -22,7 +22,7 @@ def _cell(v):
 
 
 def clarify(sto: str | None, period: str | None) -> list[str]:
-    """Vrati pitanja koja fale da bi se izvoz mogao napraviti (prazno = spremno)."""
+    """Return the questions still missing before the export can be made (empty = ready)."""
     if not sto or sto not in EXPORTS:
         return [f"Što izvesti? Mogu: {', '.join(EXPORTS)}."]
     if sto == "obveze" and (not period or not _PERIOD_RE.match(period)):
@@ -37,8 +37,8 @@ def _exports_dir(cfg) -> Path:
 
 
 def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
-    """Napravi xlsx za traženi izvoz (vidljivost-scopeano). Vrati (token, broj_redaka).
-    `visible` = set vidljivih client_id ili None (sve)."""
+    """Build the xlsx for the requested export (visibility-scoped). Return (token, row_count).
+    `visible` = set of visible client_id, or None (all)."""
     if clarify(sto, period):
         raise ValueError("izvoz nije potpuno određen")
     openpyxl = optional.need("openpyxl", "Excel izvoz")
@@ -56,7 +56,7 @@ def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
                 continue
             ws.append([_cell(r["name"]), _cell(r["oib"]), _cell(r["pdv_status"]), _cell(r["regime"])])
             rows += 1
-    else:  # obveze za period
+    else:  # obligations for the period
         ws.title = f"Obveze {period}"
         ws.append(["Klijent", "Vrsta", "Poslano", "Tko", "Kad"])
         for k in obveze.active_kinds(spine):
@@ -73,7 +73,7 @@ def build(spine, cfg, sto: str, period: str | None, visible) -> tuple[str, int]:
 
 
 def path_for(cfg, token: str) -> str | None:
-    """Sigurna putanja do izvezene datoteke (token = safe filename, path-scoped)."""
+    """Safe path to the exported file (token = safe filename, path-scoped)."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", token or ""):
         return None
     target = (_exports_dir(cfg) / f"{token}.xlsx").resolve()

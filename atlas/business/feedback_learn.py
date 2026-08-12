@@ -1,5 +1,5 @@
-# Učenje iz ispravki knjigovođe: bilježi original -> ispravljeni konto i
-# predlaže konto iz prošlih ispravki za slične buduće opise.
+# Learning from the bookkeeper's corrections: records original -> corrected konto and
+# suggests a konto from past corrections for similar future descriptions.
 import re
 
 _DIACRITICS = str.maketrans("čćžšđČĆŽŠĐ", "cczsdCCZSD")

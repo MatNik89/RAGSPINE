@@ -1,9 +1,9 @@
-"""Bootstrap instalacija atlas-agenta na radnikovom stroju: zapiši lokalni
-config (token + server_url + prazna program_map) i registriraj autostart U
-SESIJI (Windows Task Scheduler pri prijavi / systemd --user). Idempotentno; NE
-dira sustavske servise.
+"""Bootstrap installation of atlas-agent on the worker's machine: write the
+local config (token + server_url + empty program_map) and register autostart IN
+the SESSION (Windows Task Scheduler at login / systemd --user). Idempotent; does
+NOT touch system services.
 
-Pokretanje na radnom stroju:
+Running on the work machine:
     python -m atlas.agent.install --server https://SERVER:8443 --token <TOKEN>
 """
 import argparse
@@ -14,8 +14,8 @@ import subprocess
 import sys
 
 _UNIT_NAME = "atlas-agent.service"
-# Token uređaja = "<device_id>.<secret>" (secrets.token_urlsafe). Strogi format
-# blokira argument-injection (npr. token koji sadrži razmak/navodnike/--config).
+# Device token = "<device_id>.<secret>" (secrets.token_urlsafe). The strict
+# format blocks argument injection (e.g. a token containing a space/quotes/--config).
 _TOKEN_RE = re.compile(r"^\d+\.[A-Za-z0-9_-]{20,}$")
 
 
@@ -26,8 +26,9 @@ def write_config(path: str, server_url: str, token: str, program_map: dict | Non
     cfg = {"server_url": server_url, "token": token, "program_map": program_map or {},
            "sign_key": sign_key}
     data = json.dumps(cfg, ensure_ascii=False, indent=2).encode()
-    # Atomarno stvori s 0600 PRIJE pisanja tokena i ne slijedi symlink — inače
-    # postoji prozor u kojem je token svima čitljiv (Codex T5 nalaz).
+    # Atomically create with 0600 BEFORE writing the token and do not follow a
+    # symlink -- otherwise there is a window in which the token is world-readable
+    # (Codex T5 finding).
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, 0o600)
     try:
@@ -35,7 +36,7 @@ def write_config(path: str, server_url: str, token: str, program_map: dict | Non
     finally:
         os.close(fd)
     try:
-        os.chmod(path, 0o600)  # ako je datoteka već postojala s drugim modeom
+        os.chmod(path, 0o600)  # in case the file already existed with a different mode
     except OSError:
         pass
     return cfg
@@ -61,7 +62,7 @@ def write_systemd_unit(python_exe: str, config_path: str, unit_dir: str | None =
 
 
 def autostart_argv(python_exe: str, config_path: str, platform: str | None = None) -> list[str]:
-    """Argv za registraciju autostarta (nikad shell string)."""
+    """Argv for registering autostart (never a shell string)."""
     platform = platform or ("win" if sys.platform.startswith("win") else "linux")
     if platform == "win":
         run = f'"{python_exe}" -m atlas.agent "{config_path}"'
@@ -74,8 +75,8 @@ def register_autostart(python_exe: str, config_path: str, runner=None,
                        platform: str | None = None, unit_dir: str | None = None) -> None:
     platform = platform or ("win" if sys.platform.startswith("win") else "linux")
     if platform != "win":
-        # Linux: unit MORA postojati prije enable (inače systemctl padne) i mora
-        # referencirati OVAJ python + config (Codex T5 nalaz).
+        # Linux: the unit MUST exist before enable (otherwise systemctl fails)
+        # and must reference THIS python + config (Codex T5 finding).
         write_systemd_unit(python_exe, config_path, unit_dir=unit_dir)
     runner = runner or (lambda argv: subprocess.run(argv, check=True))
     runner(autostart_argv(python_exe, config_path, platform=platform))
@@ -102,9 +103,9 @@ def main(argv=None) -> None:
     ap.add_argument("--config", default=None, help="put do configa (default ~/.atlas-agent.json)")
     ap.add_argument("--no-autostart", action="store_true", help="samo zapiši config")
     args = ap.parse_args(argv)
-    if not _TOKEN_RE.match(args.token):  # blokira injektiran/pokvaren token (defense-in-depth)
+    if not _TOKEN_RE.match(args.token):  # blocks an injected/malformed token (defense-in-depth)
         ap.error("neispravan format tokena")
-    if not args.sign_key.strip():  # potpis obavezan za nove instalacije (ne fail-open)
+    if not args.sign_key.strip():  # signature mandatory for new installs (no fail-open)
         ap.error("sign-key je obavezan (agent bez njega ne provjerava potpise)")
     path = os.path.expanduser(args.config) if args.config else os.path.expanduser("~/.atlas-agent.json")
     write_config(path, args.server, args.token, sign_key=args.sign_key)
@@ -113,5 +114,5 @@ def main(argv=None) -> None:
     print(f"Config zapisan: {path}")
 
 
-if __name__ == "__main__":  # pragma: no cover — ulazna točka na radnikovom stroju
+if __name__ == "__main__":  # pragma: no cover -- entry point on the worker's machine
     main()

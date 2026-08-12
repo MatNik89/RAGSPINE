@@ -1,14 +1,15 @@
-# Pretraga audit traga.
+# Audit trail search.
 
 
 def search(spine, client: str | None = None, user: str | None = None,
            action: str | None = None, limit: int = 100,
            org_id: int | None = None) -> list:
-    """org_id = tvrdi org-filtar (audit_log nema org stupac, ali svaki redak
-    nosi username aktera): admin vidi SAMO akcije članova svoje organizacije,
-    preko subquery joina memberships→users (bez placeholder-po-članu — IN lista
-    puca na SQLite limitu varijabli kod velikih orgova). Redci sistemskih
-    aktera ('system', '?') time ispadaju — leak-safe smjer."""
+    """org_id = a hard org filter (audit_log has no org column, but every row
+    carries the actor's username): an admin sees ONLY the actions of members of
+    their own organization, via a subquery join memberships->users (no
+    placeholder-per-member -- an IN list breaks on SQLite's variable limit for
+    large orgs). Rows of system actors ('system', '?') fall out this way -- a
+    leak-safe direction."""
     sql = "SELECT * FROM audit_log WHERE 1=1"
     args: list = []
     if org_id is not None:

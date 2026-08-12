@@ -1,9 +1,9 @@
-"""Registracija konektor-tipova (mail + kanali) sa shemama polja i test funkcijom.
-Stvarna logika slanja/primanja dolazi po adapteru; ovdje su definicije + test
-koji provjerava dostupnost biblioteke i (gdje jeftino) osnovnu ispravnost.
+"""Registration of connector types (mail + channels) with field schemas and a test function.
+The actual send/receive logic comes per adapter; here are the definitions + a test
+that checks library availability and (where cheap) basic correctness.
 
-Samo e-pošta: M365 Graph + on-prem Exchange (exchangelib). Kanali poruka
-(Telegram/WhatsApp/Viber) su izbačeni — korisnik odustao."""
+Email only: M365 Graph + on-prem Exchange (exchangelib). Message channels
+(Telegram/WhatsApp/Viber) have been dropped — the user gave up on them."""
 import importlib
 
 
@@ -19,7 +19,7 @@ def _lib(mod: str) -> bool:
 
 
 def _safe_err(e: Exception) -> str:
-    """Kratka, sigurna poruka greške (bez echanja configa/lozinke — Codex)."""
+    """Short, safe error message (without echoing config/password — Codex)."""
     return f"{type(e).__name__}: {str(e)[:180]}"
 
 
@@ -40,7 +40,7 @@ def _test_exchange(cfg):
         else:
             acct = Account(primary_smtp_address=email, credentials=creds,
                            autodiscover=True, access_type=DELEGATE)
-        n = acct.inbox.total_count  # jeftin poziv koji tjera spajanje
+        n = acct.inbox.total_count  # a cheap call that forces the connection
         return "connected", f"spojeno (inbox: {n})"
     except Exception as e:
         return "error", _safe_err(e)
@@ -72,7 +72,7 @@ def _test_graph(cfg):
         return "error", _safe_err(e)
 
 
-# --- Telegram gateway (službeni Bot API — pristup ATLAS-u preko bota) ---
+# --- Telegram gateway (official Bot API — access to ATLAS via a bot) ---
 def _test_telegram_gateway(cfg):
     from atlas.business.telegram_gateway import TelegramClient
     token = (cfg.get("bot_token") or "").strip()

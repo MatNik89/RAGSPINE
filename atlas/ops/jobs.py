@@ -41,9 +41,9 @@ def watchlist_job(spine, cfg) -> None:
 
 
 def imap_job(spine, cfg) -> None:
-    if cfg.imap_host:  # naslijeđeni env-konfiguriran IMAP
+    if cfg.imap_host:  # legacy env-configured IMAP
         logger.info("imap_job(env): %s", imap_fetch.fetch_new(spine, cfg))
-    # konektor-bazirani IMAP (UI, per-org, tajne šifrirane) — svaki izoliran
+    # connector-based IMAP (UI, per-org, encrypted secrets) — each isolated
     from atlas.business import mail_ingest
     rows = spine.read().execute(
         "SELECT id, org_id FROM connectors WHERE kind='mail_imap' AND status='connected'").fetchall()
@@ -109,8 +109,8 @@ def memory_decay_job(spine, cfg) -> None:
 
 
 def memory_distill_job(spine, cfg) -> None:
-    """L0 → L1 atomi → L3 persona za svakog korisnika s nedestiliranim
-    replikama. Bez dostupnog LLM-a distill sam tiho preskače."""
+    """L0 -> L1 atoms -> L3 persona for each user with undistilled
+    replicas. Without an available LLM, distill silently skips itself."""
     from atlas.business import model_settings
     from atlas.core.llm import LLMClient
     from atlas.knowledge import memory_layers
@@ -130,7 +130,7 @@ def memory_distill_job(spine, cfg) -> None:
 
 
 def power_job(spine, cfg) -> None:
-    """UPS poller: jedan tik stroja stanja kad je nadzor uključen."""
+    """UPS poller: one tick of the state machine when monitoring is enabled."""
     if not power.get_config(spine)["enabled"]:
         return
     out = power.evaluate(spine, cfg, now=time.time())
@@ -139,7 +139,7 @@ def power_job(spine, cfg) -> None:
 
 
 def scheduled_tasks_job(spine, cfg) -> None:
-    """Fira dospjele owner-zakazane zadatke (allowlist akcija, dedupe po danu)."""
+    """Fires due owner-scheduled tasks (action allowlist, dedupe per day)."""
     from atlas.business import scheduler_tasks
     fired = scheduler_tasks.run_due(spine, cfg)
     if fired:

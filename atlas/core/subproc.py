@@ -11,17 +11,17 @@ def _preexec(mem_mb: int):
     try:
         resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
     except (ValueError, OSError):
-        pass  # macOS zna odbiti RLIMIT_AS — bolje bez mem-limita nego pad svakog spawna
+        pass  # macOS can reject RLIMIT_AS — better without a mem-limit than every spawn failing
 
 
 def _kill_tree(proc) -> None:
-    """Ubij proces i CIJELO stablo (Windows: taskkill /T /F; POSIX: killpg)."""
+    """Kill the process and the WHOLE tree (Windows: taskkill /T /F; POSIX: killpg)."""
     try:
         if os.name == "posix" and hasattr(os, "killpg"):
             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
         elif os.name == "nt":
-            # ubij CIJELO stablo — samo proc.kill() ostavlja unuke koji drže
-            # stdout pipe pa communicate() visi do njihova kraja
+            # kill the WHOLE tree — proc.kill() alone leaves grandchildren holding
+            # the stdout pipe, so communicate() hangs until they exit
             tk = subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
                                 capture_output=True)
             if tk.returncode != 0:
@@ -36,7 +36,7 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
     posix = os.name == "posix"
     kwargs = {}
     if posix:
-        # start_new_session/preexec_fn su POSIX-only (Windows Popen ih odbija)
+        # start_new_session/preexec_fn are POSIX-only (Windows Popen rejects them)
         kwargs["start_new_session"] = True
         if resource is not None:
             kwargs["preexec_fn"] = lambda: _preexec(mem_mb)
@@ -44,7 +44,7 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
     proc = subprocess.Popen(
         cmd, cwd=cwd,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",  # tesseract stdout je UTF-8, ne locale cp1252
+        text=True, encoding="utf-8", errors="replace",  # tesseract stdout is UTF-8, not locale cp1252
         **kwargs,
     )
     try:
@@ -53,8 +53,8 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
     except subprocess.TimeoutExpired:
         _kill_tree(proc)
         try:
-            # bounded drain: preživjeli unuk s naslijeđenim pipeom ne smije
-            # držati poziv zauvijek
+            # bounded drain: a surviving grandchild with an inherited pipe must not
+            # hold the call forever
             out, err = proc.communicate(timeout=15)
         except subprocess.TimeoutExpired:
             out, err = "", ""
@@ -64,10 +64,10 @@ def run_isolated(cmd: list[str], timeout: int = 60, cwd=None, mem_mb: int = 512)
 
 def run_streaming(cmd, *, timeout: int = 600, out=print,
                   popen=subprocess.Popen) -> int:
-    """Pokreni proces i prosljeđuj izlaz UŽIVO (winget/instalacije — kraj
-    mrtvog ekrana, E2E nalaz). Poštuje \r: na pravom TTY-ju redak se
-    osvježava u mjestu; injektirani out dobiva segmente kao retke.
-    stdout+stderr spojeni; utf-8 errors=replace. -9 na timeout."""
+    """Run a process and forward output LIVE (winget/installs — no more
+    dead screen, an E2E finding). Honors \r: on a real TTY the line is
+    refreshed in place; an injected out receives segments as lines.
+    stdout+stderr merged; utf-8 errors=replace. -9 on timeout."""
     proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 **({"start_new_session": True} if os.name == "posix" else {}))
     timed_out = threading.Event()

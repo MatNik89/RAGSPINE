@@ -1,10 +1,11 @@
-"""Telegram gateway: osoblje ureda piše Telegram BOTU → ATLAS vrti upit kroz
-RAG pipeline → bot vraća odgovor. Službeni Bot API (getUpdates long-poll +
-sendMessage), čisti HTTP (urllib) — bez teške async ovisnosti. NIJE linked-device.
+"""Telegram gateway: office staff write to the Telegram BOT -> ATLAS runs the
+query through the RAG pipeline -> the bot returns an answer. Official Bot API
+(getUpdates long-poll + sendMessage), plain HTTP (urllib) — no heavy async
+dependency. NOT a linked device.
 
-Auth: /start <token> upari chat_id na ATLAS korisnika (token generira admin);
-neuparen chat_id ne dobiva pristup uredskim podacima. Poll-petlja radi u
-background threadu (ATLAS rute su sync)."""
+Auth: /start <token> pairs chat_id to an ATLAS user (the admin generates the
+token); an unpaired chat_id gets no access to office data. The poll loop runs
+in a background thread (ATLAS routes are sync)."""
 import json
 import secrets
 import time
@@ -12,11 +13,11 @@ import urllib.parse
 import urllib.request
 
 _API = "https://api.telegram.org/bot"
-_MAX = 4000  # Telegram limit 4096; ostavi zraka
+_MAX = 4000  # Telegram limit 4096; leave some room
 
 
 class TelegramClient:
-    """Minimalan Bot API klijent (getMe/getUpdates/sendMessage) preko urllib."""
+    """Minimal Bot API client (getMe/getUpdates/sendMessage) over urllib."""
 
     def __init__(self, token: str, timeout: int = 35):
         self._base = _API + token
@@ -40,7 +41,7 @@ class TelegramClient:
         parts = split_message(text)
         for i, part in enumerate(parts):
             payload = {"chat_id": chat_id, "text": part}
-            if reply_markup and i == len(parts) - 1:  # tipke samo uz zadnji dio
+            if reply_markup and i == len(parts) - 1:  # buttons only on the last part
                 payload["reply_markup"] = json.dumps(reply_markup)
             self._call("sendMessage", payload, timeout=15)
 
@@ -50,13 +51,13 @@ class TelegramClient:
 
 
 def split_message(text: str, limit: int = _MAX) -> list[str]:
-    """Razbij dugi odgovor na dijelove ≤ limit, po granicama redaka gdje ide."""
+    """Split a long reply into parts <= limit, on line boundaries where possible."""
     text = text or ""
     if len(text) <= limit:
         return [text] if text else [""]
     out, buf = [], ""
     for line in text.split("\n"):
-        while len(line) > limit:  # jedan predugačak redak
+        while len(line) > limit:  # a single overly long line
             if buf:
                 out.append(buf)
                 buf = ""
@@ -78,12 +79,13 @@ def split_message(text: str, limit: int = _MAX) -> list[str]:
 
 # --- pairing / auth ---
 
-_TOKEN_TTL_S = 600  # token vrijedi 10 min (Codex: bez roka je rizik)
+_TOKEN_TTL_S = 600  # token valid for 10 min (Codex: no expiry is a risk)
 
 
 def create_pairing_token(spine, user_id: int, org_id: int) -> str:
-    """Token veže Telegram na OVOG korisnika (self-service — ne admin za drugoga,
-    inače radnik postane admin). Jednokratan, s rokom."""
+    """The token binds Telegram to THIS user (self-service — not an admin acting
+    for someone else, otherwise a worker would become an admin). One-time, with
+    an expiry."""
     token = secrets.token_urlsafe(16)
     with spine.write() as c:
         c.execute("INSERT INTO telegram_pairing(token, user_id, org_id) VALUES(?,?,?)",
@@ -119,8 +121,9 @@ def _consume_pairing(spine, token: str, chat_id: int, username: str) -> bool:
 
 
 def format_agent_reply(res: dict) -> str:
-    """Tekst za Telegram iz rezultata agenta. WRITE prijedlog (pending) se NE
-    izvršava tiho — traži izričitu potvrdu (inline tipke, vidi _confirm_keyboard)."""
+    """Text for Telegram from the agent's result. A WRITE proposal (pending) is
+    NOT executed silently — it requires an explicit confirmation (inline buttons,
+    see _confirm_keyboard)."""
     text = res.get("text") or res.get("answer") or ""
     pending = res.get("pending")
     if pending:
@@ -131,8 +134,9 @@ def format_agent_reply(res: dict) -> str:
 
 
 def _confirm_keyboard(token: str) -> dict:
-    """Inline tipke Potvrdi/Odustani. callback_data nosi token (≤64 B); vlasništvo
-    tokena se PONOVO provjeri pri potvrdi (confirm_pending scope-a po korisniku)."""
+    """Inline Confirm/Cancel buttons. callback_data carries the token (<=64 B);
+    token ownership is re-checked on confirmation (confirm_pending scopes by
+    user)."""
     return {"inline_keyboard": [[
         {"text": "✓ Potvrdi", "callback_data": f"ok:{token}"},
         {"text": "✕ Odustani", "callback_data": f"no:{token}"},
@@ -140,9 +144,9 @@ def _confirm_keyboard(token: str) -> dict:
 
 
 def _handle_callback(spine, cfg, cbq: dict, tg: "TelegramClient") -> None:
-    """Obradi klik na inline tipku (potvrda/odustajanje agentskog write-a). Radi
-    SAMO iz uparenog privatnog chata; izvršenje ide kroz confirm_pending koji
-    ponovo provjeri ovlasti + vlasništvo tokena."""
+    """Handle a click on an inline button (confirm/cancel of an agent write).
+    Works ONLY from a paired private chat; execution goes through confirm_pending
+    which re-checks permissions + token ownership."""
     from atlas.rag import agent
 
     cb_id = cbq.get("id")
@@ -153,7 +157,7 @@ def _handle_callback(spine, cfg, cbq: dict, tg: "TelegramClient") -> None:
     chat_id = chat.get("id")
     if not isinstance(cb_id, str) or not isinstance(data, str) or not isinstance(chat_id, int):
         return
-    # samo privatni chat i klik od vlasnika chata (kao kod poruka)
+    # only a private chat and a click from the chat owner (as with messages)
     if chat.get("type") != "private" or frm.get("id") != chat_id:
         return
     link = _link_for(spine, chat_id)
@@ -193,20 +197,21 @@ def _resolve_actor(spine, link):
 
 def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
                   limiter=None) -> None:
-    """Obradi jedan update: /start uparivanje ili upit kroz answer_fn. answer_fn
-    je (query, actor) -> dict s 'answer'. Sve greške izolirane (bot ne pada)."""
+    """Handle a single update: /start pairing or a query through answer_fn.
+    answer_fn is (query, actor) -> dict with 'answer'. All errors are isolated
+    (the bot does not crash)."""
     if not isinstance(update, dict):
         return
     cbq = update.get("callback_query")
-    if isinstance(cbq, dict):  # klik na inline tipku (potvrdi/odustani)
+    if isinstance(cbq, dict):  # click on an inline button (confirm/cancel)
         try:
             _handle_callback(spine, cfg, cbq, tg)
         except Exception:
-            pass  # bot ne pada na jednom updateu
+            pass  # the bot does not crash on a single update
         return
     msg = update.get("message")
     if not isinstance(msg, dict):
-        return  # ignoriraj edited/channel_post itd.
+        return  # ignore edited/channel_post etc.
     chat = msg.get("chat") if isinstance(msg.get("chat"), dict) else {}
     frm = msg.get("from") if isinstance(msg.get("from"), dict) else {}
     chat_id = chat.get("id")
@@ -216,8 +221,8 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
     text = text.strip()
     if not text:
         return
-    # SAMO privatni chat, i pošiljatelj == chat (Codex: /start u grupi bi dao
-    # pristup svim članovima pod tuđim računom)
+    # ONLY a private chat, and sender == chat (Codex: /start in a group would give
+    # all members access under someone else's account)
     if chat.get("type") != "private" or frm.get("id") != chat_id:
         return
     username = chat.get("username") or chat.get("first_name") or ""
@@ -236,8 +241,8 @@ def handle_update(spine, cfg, update: dict, answer_fn, tg: "TelegramClient",
     if link is None:
         tg.send_message(chat_id, "Nisi uparen. Zatraži token u uredu pa: /start <token>")
         return
-    # limit po ATLAS korisniku (ne chat_id — isti korisnik može vezati više
-    # chatova); LLM je skup. Dnevni token-budžet je ponytail upgrade.
+    # rate limit per ATLAS user (not chat_id — the same user can bind multiple
+    # chats); the LLM is expensive. A daily token budget is a ponytail upgrade.
     if limiter is not None and not limiter.allow(f"tg:u{link['user_id']}", limit=10, window_s=60.0):
         tg.send_message(chat_id, "Previše upita — pričekaj minutu.")
         return
@@ -267,8 +272,9 @@ def _set_offset(spine, key: str, offset: int) -> None:
 
 
 def poll_loop(spine, cfg, token: str, answer_fn, stop_event, limiter=None, key: str = "default") -> None:
-    """Long-poll getUpdates dok stop_event nije postavljen. Offset se pamti da se
-    poruke ne obrađuju dvaput. Greška u ciklusu se proguta (bot ostaje živ)."""
+    """Long-poll getUpdates until stop_event is set. The offset is persisted so
+    messages are not processed twice. An error in a cycle is swallowed (the bot
+    stays alive)."""
     tg = TelegramClient(token)
     offset = _get_offset(spine, key)
     while not stop_event.is_set():
@@ -283,8 +289,9 @@ def poll_loop(spine, cfg, token: str, answer_fn, stop_event, limiter=None, key: 
                 handle_update(spine, cfg, u, answer_fn, tg, limiter=limiter)
             except Exception:
                 pass
-            # commit offset PO SVAKOM updateu (Codex: offset nakon batcha → duplikati
-            # pri crashu). Offset naprijed i ako handle baci — poruka se ne ponavlja.
+            # commit the offset AFTER EACH update (Codex: an offset after the batch ->
+            # duplicates on a crash). Advance the offset even if handle raises — the
+            # message is not repeated.
             if isinstance(uid, int):
                 offset = max(offset, uid + 1)
                 _set_offset(spine, key, offset)

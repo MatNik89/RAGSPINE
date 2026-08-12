@@ -1,5 +1,5 @@
-"""Trajno stanje setup wizarda u config_overrides(module='setup').
-Omogućuje resume: pad usred wizarda -> nastavak od zadnjeg dovršenog koraka."""
+"""Persistent state of the setup wizard in config_overrides(module='setup').
+Enables resume: a crash mid-wizard -> continue from the last completed step."""
 
 _MOD = "setup"
 

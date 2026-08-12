@@ -1,6 +1,6 @@
-"""Hibridna ekstrakcija polja iz teksta dokumenta (C3): regex prvo, LLM samo za
-polja koja regex nije našao. Polja definira doc_types registar (C2); expiry
-polje s valjanim datumom ide u expiry_items (rok-alert na dashboardu)."""
+"""Hybrid field extraction from document text (C3): regex first, LLM only for
+fields regex did not find. Fields are defined by the doc_types registry (C2); an
+expiry field with a valid date goes into expiry_items (deadline alert on the dashboard)."""
 
 import datetime
 import json
@@ -17,11 +17,11 @@ _DATE = re.compile(r"\b(\d{1,2})\.\s?(\d{1,2})\.\s?(\d{4})\b|\b(\d{4})-(\d{2})-(
 
 def _iso_date(m: re.Match) -> str | None:
     try:
-        if m.group(4):  # ISO grana
+        if m.group(4):  # ISO branch
             d, mo, y = int(m.group(6)), int(m.group(5)), int(m.group(4))
         else:
             d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        return datetime.date(y, mo, d).isoformat()  # odbija 31.02., 29.02. ne-prijestupne...
+        return datetime.date(y, mo, d).isoformat()  # rejects 31.02., non-leap 29.02....
     except (ValueError, TypeError):
         return None
 
@@ -36,14 +36,14 @@ def _label_variants(field: dict) -> list[str]:
 
 
 def extract_regex(text: str, fields: list[dict]) -> dict:
-    """{key: vrijednost} za polja nađena labelom u istom retku; date
-    normaliziran u ISO. Nenađeno polje se ne pojavljuje u rezultatu."""
+    """{key: value} for fields found by their label on the same line; date
+    normalized to ISO. A field that is not found does not appear in the result."""
     out = {}
     for f in fields:
         for label in _label_variants(f):
-            # labela mora biti POČETAK retka + eksplicitni delimiter — inače
-            # "Kontrolni broj: 1" pogodi polje "broj", a "Broj računa: 42"
-            # vrati "računa: 42" (Codex nalaz, kolizije labela)
+            # the label must be the START of the line + an explicit delimiter — otherwise
+            # "Kontrolni broj: 1" would match the "broj" field, and "Broj racuna: 42"
+            # would return "racuna: 42" (Codex finding, label collisions)
             pat = re.compile(rf"(?im)^\s*{re.escape(label)}\s*[:.]\s*(.+)$")
             m = pat.search(text or "")
             if not m:
@@ -55,7 +55,7 @@ def extract_regex(text: str, fields: list[dict]) -> dict:
                     out[f["key"]] = iso
                     break
             else:
-                # vrijednost = ostatak retka do prvog dvostrukog razmaka/tab
+                # value = the rest of the line up to the first double space/tab
                 val = re.split(r"\s{2,}|\t", rest)[0].strip().rstrip(",;")
                 if val:
                     out[f["key"]] = val
@@ -64,8 +64,8 @@ def extract_regex(text: str, fields: list[dict]) -> dict:
 
 
 def extract_llm(llm, text: str, fields: list[dict]) -> dict:
-    """Jedan LLM poziv za zadana polja; JSON objekt {key: value|null}, datumi
-    YYYY-MM-DD. Greška/nedostupan LLM ili neispravan JSON -> {} (degradacija)."""
+    """One LLM call for the given fields; JSON object {key: value|null}, dates
+    YYYY-MM-DD. Error/unavailable LLM or invalid JSON -> {} (graceful degradation)."""
     if llm is None or not fields:
         return {}
     spec = "\n".join(
@@ -80,17 +80,17 @@ def extract_llm(llm, text: str, fields: list[dict]) -> dict:
                            system=system).text.strip()
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
         data = json.loads(raw)
-    except Exception as e:  # LLMUnavailable/LLMError/JSON — nikad ne ruši ekstrakciju
+    except Exception as e:  # LLMUnavailable/LLMError/JSON — never break extraction
         _log.warning("LLM ekstrakcija preskočena: %s", e)
         return {}
     if not isinstance(data, dict):
         return {}
-    # grounding: LLM vrijednost se prihvaća SAMO ako postoji u tekstu dokumenta
-    # (datum: ISO mora biti među datumima iz teksta; tekst: substring, case-fold)
-    # — dokument ne može prompt-injectati izmišljene vrijednosti u registar.
-    # ponytail: substring grounding pada na hrvatskoj fleksiji ("Rijeka" vs
-    # "u Rijeci") — polja osobnih dokumenata su doslovne vrijednosti pa je OK;
-    # upgrade path: fuzzy/lemma usporedba.
+    # grounding: an LLM value is accepted ONLY if it exists in the document text
+    # (date: the ISO must be among the dates from the text; text: substring, case-fold)
+    # — a document cannot prompt-inject fabricated values into the registry.
+    # ponytail: substring grounding fails on Croatian inflection ("Rijeka" vs
+    # "u Rijeci") — personal-document fields are literal values so it's OK;
+    # upgrade path: fuzzy/lemma comparison.
     dates_in_text = _text_dates(text)
     out = {}
     for f in fields:
@@ -115,8 +115,8 @@ def _doc_text(spine, doc_id: int) -> str:
 
 
 def _upsert_expiry(spine, client_id: int, kind: str, label: str, expires: str) -> bool:
-    """Upsert po (client_id, kind, label) — re-ekstrakcija ažurira, ne duplicira.
-    Vraća True ako je red kreiran/ažuriran na novi datum."""
+    """Upsert by (client_id, kind, label) — re-extraction updates, does not duplicate.
+    Returns True if the row was created/updated to a new date."""
     with spine.write() as c:
         row = c.execute(
             "SELECT id, expires FROM expiry_items WHERE client_id=? AND kind=? AND label=?",

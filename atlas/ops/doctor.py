@@ -115,8 +115,8 @@ def _check_db_writable(cfg) -> dict:
 
 
 def _check_admin_exists(cfg) -> dict:
-    """Za produkciju mora postojati barem jedan korisnik — inače se nitko ne može
-    prijaviti (svjež install)."""
+    """Production must have at least one user — otherwise nobody can log in
+    (a fresh install)."""
     try:
         conn = sqlite3.connect(cfg.db_path, timeout=5)
         try:
@@ -130,7 +130,7 @@ def _check_admin_exists(cfg) -> dict:
 
 
 def _check_llm_configured(cfg) -> dict:
-    """RAG bez LLM-a radi degradirano (samo regex/FTS) — javi ako provider fali."""
+    """RAG without an LLM runs degraded (regex/FTS only) — report if the provider is missing."""
     try:
         from atlas.core.llm import load_oauth_token
         has = bool(cfg.llm_provider or cfg.llm_api_key or load_oauth_token())
@@ -141,8 +141,8 @@ def _check_llm_configured(cfg) -> dict:
 
 
 def _check_nas_configured(cfg) -> dict:
-    """Uredske funkcije (skeni, arhitektura, e-račun autosort) trebaju registriranu
-    KLIJENTI mapu unutar dozvoljenih mount_roots."""
+    """Office functions (scans, architecture, e-invoice autosort) need a registered
+    KLIJENTI folder within the allowed mount_roots."""
     if not cfg.mount_roots:
         return {"check": "nas", "ok": True, "detail": "mount_roots prazan (NAS funkcije isključene)"}
     try:
@@ -158,8 +158,8 @@ def _check_nas_configured(cfg) -> dict:
 
 
 def _check_secret_perms(cfg) -> dict:
-    """DB + secret smiju biti čitljivi samo vlasniku (0600) — inače drugi lokalni
-    korisnici hosta vide PII/hasheve/JWT tajnu."""
+    """DB + secret must be readable only by the owner (0600) — otherwise other local
+    host users can see PII/hashes/the JWT secret."""
     if os.name == "nt":
         return {"check": "perms", "ok": True, "detail": "n/a (Windows ACL)"}
     import stat
@@ -172,7 +172,7 @@ def _check_secret_perms(cfg) -> dict:
         except OSError:
             pass
     from atlas.business import secretbox
-    fp = secretbox.key_fingerprint(cfg)  # dijagnostika krivog ključa pri restoreu (Paperclip)
+    fp = secretbox.key_fingerprint(cfg)  # diagnostics for a wrong key on restore (Paperclip)
     base = "0600" if not bad else "preširoke dozvole: " + ", ".join(bad)
     return {"check": "perms", "ok": not bad,
             "detail": base + (f"; ključ={fp}" if fp else "")}

@@ -1,5 +1,5 @@
-"""Read-only popis stabla spojene mape: broji podmape/dokumente/PDF-ove i PDF-ove
-bez pretraživog teksta. Ništa se ne mijenja na disku. Puni OCR je komad C."""
+"""Read-only listing of a mounted folder's tree: counts subfolders/documents/PDFs and PDFs
+without searchable text. Nothing is changed on disk. Full OCR is part C."""
 import json
 import os
 
@@ -11,9 +11,9 @@ _DOC_EXT = {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".txt", ".md", ".odt", ".r
 
 
 def pdf_has_text(path: str):
-    """True/False ima li PDF tekstualni sloj; None ako fitz nedostupan.
-    Isti prag (100 znakova) kao ocr.has_text_layer — dashboard brojka i bulk OCR
-    moraju gledati isti kriterij, inače dugme laže."""
+    """True/False whether the PDF has a text layer; None if fitz is unavailable.
+    Same threshold (100 characters) as ocr.has_text_layer — the dashboard count and bulk OCR
+    must look at the same criterion, otherwise the button lies."""
     fitz = optional.need("fitz", "PDF tekst-detekcija")
     if fitz is None:
         return None
@@ -31,7 +31,7 @@ def scan(spine, cfg, folder_id: int) -> dict:
     row = spine.read().execute("SELECT path FROM folders WHERE id=?", (folder_id,)).fetchone()
     if row is None:
         raise ValueError("nepoznata mapa")
-    base = folders._scoped(cfg, row["path"])  # scoped realpath, simlink-escape blokiran
+    base = folders._scoped(cfg, row["path"])  # scoped realpath, symlink-escape blocked
     n_subdirs = sum(1 for e in os.scandir(base) if e.is_dir())
     n_docs = n_pdf = n_pdf_no_text = 0
     for dirpath, _dirs, files in os.walk(base):

@@ -11,7 +11,7 @@ from atlas.core.security import oib_valid
 from atlas.rag import budget, composer
 from atlas.rag.retrieval import Hit
 
-_MAX_ENTS = 200  # gornja granica entiteta po dokumentu (klika = _MAX_ENTS^2/2 bridova)
+_MAX_ENTS = 200  # upper bound of entities per document (clique = _MAX_ENTS^2/2 edges)
 
 
 def _q_tokens(s: str) -> set:
@@ -63,8 +63,8 @@ def index_doc(spine, doc_id, text: str) -> None:
     INSERT OR IGNORE keyed on the (src,dst,rel,doc_id) primary key, so re-indexing
     the same doc never duplicates rows.
     """
-    # cap entiteta po dokumentu: klika je O(n^2) bridova — jedan golem mail/dokument
-    # s tisućama entiteta bi ubacio milijune redova u jednu transakciju (Codex HIGH)
+    # cap entities per document: a clique is O(n^2) edges — one huge mail/document
+    # with thousands of entities would insert millions of rows in one transaction (Codex HIGH)
     ents = extract_entities(text)[:_MAX_ENTS]
     if len(ents) < 2:
         if ents:
@@ -107,9 +107,9 @@ def traverse(spine, seeds: list[int], hops: int = 2) -> set[int]:
 
 def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
     """Graph lane: entities in query -> traverse -> connected docs -> compose+LLM.
-    `visible` (skup vidljivih client_id ili None) skriva dokumente klijenata koje
-    restringirani radnik ne smije vidjeti. `org_id` scopea na org — kg_edges su
-    globalni pa bi traversal inače dosegao dokumente DRUGE organizacije (Codex HIGH)."""
+    `visible` (set of visible client_ids or None) hides documents of clients that
+    a restricted worker must not see. `org_id` scopes to the org — kg_edges are
+    global, so otherwise the traversal would reach documents of ANOTHER organization (Codex HIGH)."""
     conn = spine.read()
     ents = extract_entities(query)
     seeds = []
@@ -135,8 +135,8 @@ def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
     if not doc_ids:
         return "Nema povezanih dokumenata."
 
-    # org-scope: kg_edges su globalni preko orgova -> zadrži samo dokumente ove
-    # organizacije (ili dijeljene org_id IS NULL) prije bilo čega (Codex HIGH)
+    # org-scope: kg_edges are global across orgs -> keep only documents of this
+    # organization (or shared org_id IS NULL) before anything else (Codex HIGH)
     if org_id is not None:
         dph = ",".join("?" * len(doc_ids))
         doc_ids = {
@@ -146,7 +146,7 @@ def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
         if not doc_ids:
             return "Nema povezanih dokumenata."
 
-    # restringiran radnik: zadrži samo uredske (client_id IS NULL) i vidljive dok.
+    # restricted worker: keep only office (client_id IS NULL) and visible docs.
     if visible is not None:
         dph = ",".join("?" * len(doc_ids))
         vph = ",".join("?" * len(visible)) if visible else "NULL"
@@ -175,11 +175,11 @@ def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
         Hit(r["chunk_id"], r["doc_id"], r["title"], r["text"], 1.0, r["doc_type"])
         for r in rows
     ]
-    # graf zna vratiti SVE chunkove povezanih dokumenata — bez kompakcije
-    # prompt eksplodira (144k znakova u probi). Ali kompakcija čuva PREFIKS, a
-    # graf-hitovi su poredani po (doc_id, seq) s uniformnim scoreom — Codex r3:
-    # stari/veliki dokumenti pojedu budžet i izbace baš relevantni. Zato prvo
-    # leksičko rangiranje prema upitu (stabilno: overlap desc, pa izvorni red).
+    # the graph can return ALL chunks of connected documents — without compaction
+    # the prompt explodes (144k characters in a test). But compaction keeps the PREFIX,
+    # and graph hits are ordered by (doc_id, seq) with a uniform score — Codex r3:
+    # old/large documents eat the budget and push out the truly relevant ones. So first
+    # lexical ranking against the query (stable: overlap desc, then original order).
     qt = _q_tokens(query)
     hits.sort(key=lambda h: -len(qt & _q_tokens(h.text)))
     hits = budget.compact(hits)
@@ -192,4 +192,4 @@ def handle(spine, cfg, query: str, llm, visible=None, org_id=None) -> str:
 
 
 from atlas.rag import pipeline  # noqa: E402  (lazy: avoid any import-order coupling)
-pipeline.LANE_HANDLERS["graph"] = handle  # dispatch prosljeđuje visible (vidi pipeline)
+pipeline.LANE_HANDLERS["graph"] = handle  # dispatch forwards visible (see pipeline)

@@ -1,9 +1,9 @@
-"""Vidljivost klijenata po radniku (unutar jednog ureda). Zadano radnik vidi
-SVE klijente; admin/vlasnik uvijek sve. Opcijom se radniku ograniči vidljivost
-na izabrane klijente. Reuse ACL rang-a: manager (admin/owner) je iznad pravila.
+"""Client visibility per worker (within a single office). By default a worker sees
+ALL clients; admin/owner always all. An option restricts a worker's visibility
+to selected clients. Reuse of the ACL rank: a manager (admin/owner) is above the rule.
 
-Napomena o modelu: svaka firma ima VLASTITI ATLAS install (vlastita baza),
-pa cross-org izolacija ovdje nije tema — ovo je čisto intra-uredska vidljivost.
+Note on the model: each firm has its OWN ATLAS install (its own database),
+so cross-org isolation is not a concern here — this is purely intra-office visibility.
 """
 from atlas.business.acl import ROLE_RANK
 
@@ -13,7 +13,7 @@ def _is_manager(role: str) -> bool:
 
 
 def visible_ids(spine, user_id: int, role: str = "member") -> set | None:
-    """None = bez ograničenja (svi klijenti). Inače skup dozvoljenih client_id."""
+    """None = no restriction (all clients). Otherwise the set of allowed client_id."""
     if _is_manager(role):
         return None
     r = spine.read().execute(
@@ -53,8 +53,8 @@ def set_policy(spine, user_id: int, sees_all: bool,
 
 
 def grant(spine, user_id: int, client_id: int, actor_name: str = "?") -> None:
-    """Dodaj jednog klijenta radnikovoj vidljivosti (npr. onome tko ga je kreirao,
-    da restringirani radnik vidi vlastito djelo)."""
+    """Add a single client to a worker's visibility (e.g. to whoever created it,
+    so that a restricted worker sees their own work)."""
     with spine.write() as c:
         c.execute("INSERT OR IGNORE INTO client_visibility(user_id, client_id) VALUES(?,?)",
                   (user_id, client_id))

@@ -1,9 +1,9 @@
-# Faza 2: sinkronizacija registriranih mrežnih mapa u bazu.
+# Phase 2: synchronization of registered network folders into the database.
 #
-# Za mapu uloge 'propisi': datoteka u podmapi (Zakoni/Pravilnici/Uredbe/...) dobije
-# doc_type = tier iz naziva podmape pa retrieval autoritet bude točan. Promijenjena
-# datoteka (novi sadržaj) → nova aktivna verzija, stara → superseded (retrieval već
-# filtrira status='active', pa stari propis ispadne iz odgovora).
+# For a folder with role 'propisi': a file in a subfolder (Zakoni/Pravilnici/Uredbe/...) gets
+# doc_type = tier from the subfolder name so the retrieval authority is correct. A changed
+# file (new content) -> new active version, the old one -> superseded (retrieval already
+# filters status='active', so the old regulation drops out of the answers).
 
 import os
 
@@ -12,7 +12,7 @@ from atlas.docs import ingest as ingest_mod
 from atlas.docs.ingest import UnsupportedFormat
 from atlas.rag.authority import _fold
 
-# naziv podmape (folded) → authority tier (ključ iz authority.AUTHORITY)
+# subfolder name (folded) -> authority tier (key from authority.AUTHORITY)
 _TIER_BY_DIR = {
     "zakoni": "zakon", "zakon": "zakon",
     "pravilnici": "pravilnik", "pravilnik": "pravilnik",
@@ -25,8 +25,8 @@ _TIER_BY_DIR = {
 
 
 def _subfolder_tier(folder_path: str, file_path: str) -> str | None:
-    """Tier iz prve podmape ispod registrirane mape (npr. .../Propisi/Pravilnici/x.pdf
-    → 'pravilnik'). Datoteka direktno u korijenu (bez podmape) → None (auto-detekcija)."""
+    """Tier from the first subfolder under the registered folder (e.g. .../Propisi/Pravilnici/x.pdf
+    -> 'pravilnik'). A file directly in the root (no subfolder) -> None (auto-detection)."""
     rel = os.path.relpath(file_path, folder_path)
     parts = rel.split(os.sep)
     if len(parts) < 2:
@@ -35,10 +35,10 @@ def _subfolder_tier(folder_path: str, file_path: str) -> str | None:
 
 
 def _reconcile_path(spine, path: str) -> int:
-    """Idempotentno: za jednu putanju ostavi SAMO najnoviji aktivni dokument
-    (najveći id), starije aktivne → superseded, novom postavi verziju/pred, uz
-    predecessor = najviši od starijih. Radi i kad je prethodni sync pao između
-    inserta i supersede-a (crash-safe) — sljedeći poziv počisti."""
+    """Idempotent: for a single path keep ONLY the newest active document
+    (highest id), older active ones -> superseded, set version/pred on the new one, with
+    predecessor = the highest of the older ones. Works even when a previous sync crashed between
+    the insert and the supersede (crash-safe) - the next call cleans up."""
     with spine.write() as c:
         rows = c.execute(
             "SELECT id, version FROM documents WHERE path=? AND status='active' ORDER BY id",
@@ -46,7 +46,7 @@ def _reconcile_path(spine, path: str) -> int:
         ).fetchall()
         if len(rows) <= 1:
             return 0
-        keep, older = rows[-1], rows[:-1]  # najveći id = najnoviji
+        keep, older = rows[-1], rows[:-1]  # highest id = newest
         maxv = max((r["version"] or 1) for r in rows)
         for r in older:
             c.execute("UPDATE documents SET status='superseded' WHERE id=?", (r["id"],))
@@ -66,8 +66,8 @@ def _active_file_sha(spine, path: str) -> str | None:
 def sync_folder(spine, cfg, folder: dict) -> dict:
     counts = {"ingested": 0, "skipped": 0, "superseded": 0, "errors": []}
     role = folder.get("role") or "ostalo"
-    # Revalidiraj korijen SVAKI put (mount mogao pasti, root maknut iz mount_roots,
-    # ili mapa zamijenjena simlinkom nakon registracije).
+    # Revalidate the root EVERY time (the mount may have dropped, the root removed from mount_roots,
+    # or the folder replaced with a symlink after registration).
     try:
         path = folders_mod._scoped(cfg, folder["path"])
     except ValueError as e:
@@ -77,14 +77,14 @@ def sync_folder(spine, cfg, folder: dict) -> dict:
         counts["errors"].append(f"nedostupna mapa: {folder['path']}")
         return counts
     if role == "klijenti":
-        return counts  # klijentske mape drži onboarding
+        return counts  # client folders are handled by onboarding
     roots = cfg.mount_roots or []
     for root, dirs, files in os.walk(path, followlinks=False):
-        # ne silazi u simlinkane podmape (mogu voditi van korijena)
+        # do not descend into symlinked subfolders (they can lead outside the root)
         dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
         for fname in files:
             fp = os.path.join(root, fname)
-            # preskoči simlink-datoteke i sve što realpath odvodi van korijena (TOCTOU/escape)
+            # skip symlink files and anything whose realpath leads outside the root (TOCTOU/escape)
             if os.path.islink(fp) or not folders_mod._under_a_root(os.path.realpath(fp), roots):
                 counts["skipped"] += 1
                 continue
@@ -92,17 +92,17 @@ def sync_folder(spine, cfg, folder: dict) -> dict:
             try:
                 fsha = ingest_mod._file_sha(fp)
                 if _active_file_sha(spine, fp) == fsha:
-                    counts["skipped"] += 1  # nepromijenjeno (po SADRŽAJU DATOTEKE)
+                    counts["skipped"] += 1  # unchanged (by FILE CONTENT)
                 else:
                     doc_id = ingest_mod.ingest_file(spine, fp, doc_type=dtype)
                     counts["skipped" if doc_id is None else "ingested"] += 1
             except UnsupportedFormat:
                 counts["skipped"] += 1
                 continue
-            except Exception as e:  # jedna loša datoteka ne ruši sinkronizaciju
+            except Exception as e:  # one bad file does not break the synchronization
                 counts["errors"].append(f"{fp}: {e}")
                 continue
-            counts["superseded"] += _reconcile_path(spine, fp)  # uvijek, idempotentno
+            counts["superseded"] += _reconcile_path(spine, fp)  # always, idempotent
     return counts
 
 

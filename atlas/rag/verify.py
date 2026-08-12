@@ -1,7 +1,8 @@
-"""Faza 3: iterativni provjereni odgovor. Prije odgovora ATLAS napravi više
-prolaza — retrieve → nacrt → provjeri citate → proširi pretragu ako je slabo →
-ponovno — pa tek onda odluči. Ispod praga (80%) ne odgovara nego objasni zašto.
-Ograničeno na MAX_PASSES; bez LLM-a se ne poziva (pipeline degradira zasebno)."""
+"""Phase 3: iterative verified answer. Before answering, ATLAS makes several
+passes — retrieve -> draft -> verify citations -> broaden the search if weak ->
+again — and only then decides. Below the threshold (80%) it does not answer but
+explains why. Capped at MAX_PASSES; without an LLM it is not called (the pipeline
+degrades separately)."""
 import re
 
 from atlas.rag import budget, citations, composer, conversation, retrieval
@@ -12,8 +13,9 @@ MAX_PASSES = 3
 
 
 def _reformulate(query: str, hits) -> str:
-    """Proširi upit razlikovnim riječima iz naslova najboljih izvora (jeftino,
-    bez dodatnog LLM poziva) da idući prolaz dohvati širi/precizniji skup."""
+    """Broaden the query with distinguishing words from the titles of the best
+    sources (cheap, without an extra LLM call) so the next pass retrieves a
+    broader/more precise set."""
     have = set(re.findall(r"\w+", query.lower()))
     extra: list[str] = []
     for h in hits[:3]:
@@ -31,14 +33,14 @@ def _merge(a, b):
 def run(spine, query: str, hits, llm, prior_turns=None,
         threshold: float = THRESHOLD, max_passes: int = MAX_PASSES, extra: str = "",
         org_id=None, visible_client_ids=None) -> dict:
-    """Vrati najbolji kandidat: {text, report, confidence, cited_hits, hits, passes, threshold}.
-    llm.complete može podići LLMError/LLMUnavailable — pušta se pozivatelju."""
+    """Return the best candidate: {text, report, confidence, cited_hits, hits, passes, threshold}.
+    llm.complete may raise LLMError/LLMUnavailable — it is propagated to the caller."""
     best = None
     prev_conf = -1.0
     for p in range(1, max_passes + 1):
-        # Kompaktiraj PRIJE composea i verificiraj nad istim (kompaktiranim)
-        # skupom — model ne smije dobiti bod za citat izvora kojeg nije vidio,
-        # ni za činjenicu odrezanu truncationom.
+        # Compact BEFORE compose and verify against the same (compacted) set —
+        # the model must not earn a point for citing a source it did not see,
+        # nor for a fact cut off by truncation.
         hits = budget.compact(hits)
         system, messages = composer.compose(query, hits, extra=extra)
         if prior_turns:
@@ -46,9 +48,9 @@ def run(spine, query: str, hits, llm, prior_turns=None,
         result = llm.complete(messages, system=system)
         report = citations.verify(result.text, hits)
         cited_hits = [hits[n - 1] for n in report.cited if 1 <= n <= len(hits)]
-        # Grounded = stvarno je citiran barem jedan izvor. Prazan retrieval daje
-        # citations.verify ok=1.0 (nema što provjeriti) — za pravni asistent to je
-        # yes-man rupa, pa bez citiranog izvora povjerenje = 0.
+        # Grounded = at least one source was actually cited. An empty retrieval
+        # makes citations.verify return ok=1.0 (nothing to check) — for a legal
+        # assistant that is a yes-man hole, so without a cited source confidence = 0.
         grounded = report.ok and bool(cited_hits)
         conf = citations.blend_authority(report.confidence, cited_hits) if grounded else 0.0
         cand = {"text": result.text, "report": report, "confidence": conf,
@@ -57,17 +59,17 @@ def run(spine, query: str, hits, llm, prior_turns=None,
             best = cand
         if conf >= threshold:
             break
-        if conf <= prev_conf:  # nema napretka — ne troši daljnje prolaze
+        if conf <= prev_conf:  # no progress — do not spend further passes
             break
-        if p >= max_passes or not hits:  # zadnji prolaz / prazan retrieval — bez širenja
+        if p >= max_passes or not hits:  # last pass / empty retrieval — no broadening
             break
         prev_conf = conf
-        # org_id MORA pratiti i ekspanziju — bez njega bi 2.+ prolaz pobjegao
-        # iz tenant filtra i umiješao tuđe dokumente u kontekst
+        # org_id MUST follow the expansion too — without it the 2nd+ pass would
+        # escape the tenant filter and mix other tenants' documents into the context
         more = retrieval.search(spine, _reformulate(query, hits), k=len(hits) + 4, org_id=org_id,
                                 visible_client_ids=visible_client_ids)
         merged = _merge(hits, more)
-        if len(merged) == len(hits):  # ništa novo — nema smisla ponavljati isti nacrt
+        if len(merged) == len(hits):  # nothing new — no point repeating the same draft
             break
         hits = merged
     best["threshold"] = threshold

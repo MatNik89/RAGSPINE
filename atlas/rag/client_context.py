@@ -1,7 +1,7 @@
 # W3: client-scoped answer enrichment. When a worker's query names a
 # specific client (declension-robust detection reused from clarify.W2),
 # surface that client's own approved SOPs + recent notes as a short
-# "Napomena za klijenta X" block appended to the normal answer.
+# "Napomena za klijenta X" (Note for client X) block appended to the normal answer.
 from atlas.rag import clarify
 
 
@@ -12,8 +12,8 @@ def resolve_client(spine, query: str, actor=None) -> dict | None:
     row = spine.read().execute("SELECT * FROM clients WHERE name=?", (name,)).fetchone()
     if row is None:
         return None
-    # radnik s ograničenom vidljivošću ne smije dobiti bilješke/SOP klijenta
-    # kojeg ne smije vidjeti (inače bi curili kroz chat napomenu)
+    # a worker with restricted visibility must not receive notes/SOPs for a client
+    # they are not allowed to see (otherwise they would leak through the chat note)
     if actor is not None:
         from atlas.business import client_visibility
         if not client_visibility.can_see(spine, actor.user_id, row["id"], actor.role):

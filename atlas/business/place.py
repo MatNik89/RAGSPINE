@@ -1,12 +1,12 @@
-# Bruto -> neto kalkulator plaće (HR 2026).
+# Gross -> net salary calculator (HR 2026).
 #
-# ponytail: nema umanjenja MIO doprinosa za niske plaće (mjesečni prag) i nema
-# neoporezivih primitaka (bonusi, prehrana, prijevoz...). Upgrade path: dodati
-# nove override ključeve (npr. "mio_reduction", "neoporezivo.{vrsta}") kad
-# zatreba puna preciznost.
+# ponytail: no reduction of MIO contributions for low salaries (monthly
+# threshold) and no non-taxable receipts (bonuses, meals, transport...).
+# Upgrade path: add new override keys (e.g. "mio_reduction",
+# "neoporezivo.{vrsta}") when full precision is needed.
 
 OSNOVNI_ODBITAK = 600.0
-DIJETE_FAKTORI = [0.5, 0.7, 1.0]  # 1., 2., 3. dijete; 4.+ nije modeliran
+DIJETE_FAKTORI = [0.5, 0.7, 1.0]  # 1st, 2nd, 3rd child; 4th+ not modeled
 INVALIDNOST_FAKTOR = 0.3
 PRAG_OSNOVICE = 5000.0
 STOPA_NIZA_DEFAULT = 20.0
@@ -56,7 +56,7 @@ def bruto_to_neto(bruto: float, city: str = "", children: int = 0,
     porez = niza_osnovica * stopa_niza / 100 + visa_osnovica * stopa_visa / 100
     detalji.append(f"porez: {niza_osnovica}@{stopa_niza}% + {visa_osnovica}@{stopa_visa}%")
 
-    # legacy prirez (ukinut u HR 2024., ali override se poštuje radi kompatibilnosti)
+    # legacy surtax (abolished in HR 2024, but the override is honored for compatibility)
     if spine is not None:
         prirez = _rate(spine, f"prirez.{city}", None)
         if prirez is not None:

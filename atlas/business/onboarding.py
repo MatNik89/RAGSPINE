@@ -22,21 +22,21 @@ def _slug(name: str) -> str:
     return s or "klijent"
 
 
-# fallback ime mape klijenata kad NIJE registrirana stvarna (npr. KLIJENTI na
-# NAS-u) kroz Mrežne mape s role='klijenti'. Registrirana mapa uvijek pobjeđuje
-# — korisnikova postojeća struktura je izvor istine, ne naša konstanta.
+# fallback client folder name when the real one is NOT registered (e.g. KLIJENTI
+# on the NAS) via Network folders with role='klijenti'. A registered folder always
+# wins — the user's existing structure is the source of truth, not our constant.
 KLIJENTI_DIR = "klijenti"
 
 
 def klijenti_root(spine, cfg) -> str | None:
-    """Stvarna mapa klijenata: registrirana mapa role='klijenti'; fallback
-    {root}/klijenti ako postoji na disku; inače None.
+    """The real client folder: the registered folder with role='klijenti';
+    fallback {root}/klijenti if it exists on disk; otherwise None.
 
-    Registrirani path se RE-VALIDIRA na svaku upotrebu (ne vjeruje se bazi):
-    mora postojati kao direktorij, ne smije biti simlink i mora ležati unutar
-    trenutačnih mount_roots ∪ nas_root — inače ValueError (fail-closed).
-    Odmountan SMB bi inače tiho stvorio lokalno sjenčano stablo, a naknadno
-    preusmjeren path pobjegao iz odobrenog mounta."""
+    The registered path is RE-VALIDATED on every use (the database is not
+    trusted): it must exist as a directory, must not be a symlink, and must lie
+    within the current mount_roots union nas_root — otherwise ValueError
+    (fail-closed). Otherwise an unmounted SMB share would silently create a
+    local shadow tree, and a later-redirected path would escape the approved mount."""
     r = spine.read().execute(
         "SELECT path FROM folders WHERE role='klijenti' AND enabled=1 "
         "ORDER BY id LIMIT 1").fetchone()
@@ -78,8 +78,8 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
     # concurrent add_document for this client_id would resolve to nas_root
     # itself (defeats per-client folder isolation). Disk folder is created
     # only after that transaction commits.
-    # validacija PRIJE transakcije: doc_registry.list_types seeda kroz vlastiti
-    # spine.write() — poziv unutar našeg write-locka bio bi deadlock
+    # validation BEFORE the transaction: doc_registry.list_types seeds through its
+    # own spine.write() — calling it inside our write-lock would be a deadlock
     wanted_doc_types = [k.strip() for k in dict.fromkeys(data.get("doc_types") or [])
                         if isinstance(k, str) and k.strip()]
     if wanted_doc_types:
@@ -112,17 +112,17 @@ def create_client(spine, cfg, data: dict, owner: str) -> dict:
                  data.get("pausal_eur") or 0, 1 if data.get("has_employees") else 0,
                  pdv_freq, regime, legal_form),
             ).lastrowid
-            # praćene vrste dokumenata (C2 registar) — validirane gore
+            # tracked document types (C2 registry) — validated above
             for key in wanted_doc_types:
                 c.execute("INSERT OR IGNORE INTO client_doc_types(client_id, doc_type_key) "
                           "VALUES(?,?)", (client_id, key))
             folder_path = _client_root(spine, cfg, client_id, name)
             if security.path_under(folder_path, root):
-                # uvijek "/" u bazi — portabilan identifikator (Windows relpath daje "\\")
+                # always "/" in the database — a portable identifier (Windows relpath gives "\\")
                 nas_folder = os.path.relpath(folder_path, root).replace(os.sep, "/")
             else:
-                # registrirana KLIJENTI mapa izvan nas_roota (mount) — apsolutni
-                # realpath, isti oblik kao client_discovery.commit
+                # registered KLIJENTI folder outside nas_root (mount) — absolute
+                # realpath, same form as client_discovery.commit
                 nas_folder = folder_path
             c.execute("UPDATE clients SET nas_folder=? WHERE id=?", (nas_folder, client_id))
     except sqlite3.IntegrityError as e:
@@ -142,8 +142,8 @@ def _client_dir(spine, cfg, client_id) -> str:
     root = os.path.realpath(cfg.nas_root or cfg.data_dir)
     client_dir = os.path.realpath(os.path.join(root, row["nas_folder"] or ""))
     kroot = klijenti_root(spine, cfg)
-    # STROGO ispod korijena (klijentova mapa nikad nije korijen sam — nas_folder
-    # '.' bi inače pisao dokumente ravno u KLIJENTI/nas_root)
+    # STRICTLY below the root (a client folder is never the root itself — nas_folder
+    # '.' would otherwise write documents straight into KLIJENTI/nas_root)
     ok_root = security.path_under(client_dir, root) and client_dir != root
     ok_kroot = bool(kroot) and security.path_under(client_dir, kroot) and client_dir != kroot
     if not (ok_root or ok_kroot):

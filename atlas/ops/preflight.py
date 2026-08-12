@@ -1,10 +1,10 @@
-"""Preflight: stanje računala + preduvjeti za pokretanje ATLAS.
+"""Preflight: machine state + prerequisites for running ATLAS.
 
-Javne funkcije:
-- system_state(): RAM/disk/CPU/GPU/OS/Python (cross-OS, čisti stdlib).
-- requirements(): lista "što treba na računalu" sa statusom ok/warn/fail + fix.
-- llmfit_models(): chat modeli iz llmfit (hardver-osjetljiv izbor kvantizacije).
-- fit_pill(): udio RAM-a za embedding model; embedding sam je ručno kurirano.
+Public functions:
+- system_state(): RAM/disk/CPU/GPU/OS/Python (cross-OS, pure stdlib).
+- requirements(): list of "what the machine needs" with status ok/warn/fail + fix.
+- llmfit_models(): chat models from llmfit (hardware-sensitive quantization choice).
+- fit_pill(): RAM fraction for the embedding model; embedding itself is hand-curated.
 """
 import os
 import platform
@@ -19,16 +19,16 @@ from atlas import config
 from atlas.core.subproc import run_isolated, run_streaming
 from atlas.ops import winpath
 
-# --- stanje računala (cross-OS, bez nove ovisnosti) ---
+# --- machine state (cross-OS, no new dependency) ---
 
 
 _GIB = 1024 ** 3
 
 
 def _mem_gb() -> tuple[float, float]:
-    """(ukupno_GiB, slobodno_GiB) best-effort, ujednačene jedinice (GiB svugdje).
-    psutil ako postoji, inače OS-specifično; macOS bez psutila = ukupno preko
-    sysconfa (slobodno nepoznato → vraća ukupno, jer fit ionako računa po ukupnom)."""
+    """(total_GiB, free_GiB) best-effort, consistent units (GiB everywhere).
+    psutil if present, otherwise OS-specific; macOS without psutil = total via
+    sysconf (free unknown -> returns total, since fit computes by total anyway)."""
     try:
         import psutil  # optional
         vm = psutil.virtual_memory()
@@ -48,7 +48,7 @@ def _mem_gb() -> tuple[float, float]:
             m = _MS()
             m.dwLength = ctypes.sizeof(_MS)
             ok = ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))  # type: ignore[attr-defined]
-            if ok:  # BOOL: 0 = neuspjeh
+            if ok:  # BOOL: 0 = failure
                 return m.ullTotalPhys / _GIB, m.ullAvailPhys / _GIB
         except Exception:
             pass
@@ -60,12 +60,12 @@ def _mem_gb() -> tuple[float, float]:
                 k, _, v = line.partition(":")
                 if v:
                     info[k.strip()] = int(v.split()[0])  # kB
-        total = info["MemTotal"] / 1024 / 1024  # kB → GiB
+        total = info["MemTotal"] / 1024 / 1024  # kB -> GiB
         avail = info.get("MemAvailable", info.get("MemFree", 0)) / 1024 / 1024
         return total, avail
     except Exception:
         pass
-    try:  # macOS / generički POSIX — ukupno preko sysconfa
+    try:  # macOS / generic POSIX -- total via sysconf
         total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / _GIB
         return total, total
     except Exception:
@@ -73,13 +73,13 @@ def _mem_gb() -> tuple[float, float]:
 
 
 def _vram_gb() -> float:
-    """VRAM iz nvidia-smi memory.total (parsanje naziva GPU-a je nepouzdano —
-    Codex nalaz). 0 ako nema NVIDIA GPU-a."""
+    """VRAM from nvidia-smi memory.total (parsing the GPU name is unreliable --
+    Codex finding). 0 if there is no NVIDIA GPU."""
     try:
         rc, out, _err = run_isolated(
             ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"], timeout=5)
         if rc == 0 and out.strip():
-            return float(out.strip().splitlines()[0]) / 1024  # MiB → GiB
+            return float(out.strip().splitlines()[0]) / 1024  # MiB -> GiB
     except Exception:
         pass
     return 0.0
@@ -108,9 +108,9 @@ def system_state(cfg=None) -> dict:
     }
 
 
-# --- preduvjeti: "što treba na računalu da ATLAS radi" ---
+# --- prerequisites: "what the machine needs for ATLAS to work" ---
 
-# (modul za import, ljudski naziv, pip/winget uputa ako fali)
+# (module to import, human-readable name, pip/winget instruction if missing)
 _OPTIONAL_MODULES = [
     ("fitz", "Čitanje PDF-ova (PyMuPDF)", "pip install pymupdf"),
     ("fastembed", "Semantička pretraga (embeddings)", "pip install fastembed"),
@@ -129,7 +129,7 @@ def _status(ok: bool, warn: bool = False) -> str:
 
 
 def ollama_version(url: str = "http://127.0.0.1:11434") -> str | None:
-    """GET /api/version -> "0.5.4" ili None. Ne baca."""
+    """GET /api/version -> "0.5.4" or None. Does not raise."""
     import json
     try:
         with urllib.request.urlopen(f"{url}/api/version", timeout=3) as r:
@@ -142,7 +142,7 @@ _OLLAMA_FLOOR = "0.5.0"
 
 
 def ollama_floor_ok(version: str | None, floor: str = _OLLAMA_FLOOR) -> bool:
-    """Tuple-usporedba "0.5.4" >= "0.5.0". Neparsabilno/None -> False."""
+    """Tuple comparison "0.5.4" >= "0.5.0". Unparseable/None -> False."""
     if not version:
         return False
     try:
@@ -154,15 +154,16 @@ def ollama_floor_ok(version: str | None, floor: str = _OLLAMA_FLOOR) -> bool:
 
 
 def start_ollama(wait_s: float = 8.0, url: str = "http://127.0.0.1:11434") -> bool:
-    """Pokušaj pokrenuti `ollama serve` detached pa čekaj da /api/tags prodiše.
-    False kad binary ne postoji ili servis ne prodiše u wait_s."""
+    """Try to start `ollama serve` detached, then wait until /api/tags responds.
+    False when the binary does not exist or the service does not respond within wait_s."""
     kwargs: dict = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
                     "stdin": subprocess.DEVNULL}
     if platform.system() == "Windows":
-        # POSIX start_new_session je no-op na Windowsu — treba DETACHED_PROCESS
-        # da daemon preživi zatvaranje wizard konzole. getattr fallback da test
-        # na Linuxu s mockanim platform.system()=="Windows" ne padne na
-        # AttributeError (atributi postoje samo na Windows buildu Pythona).
+        # POSIX start_new_session is a no-op on Windows -- DETACHED_PROCESS is
+        # needed so the daemon survives closing the wizard console. getattr
+        # fallback so a test on Linux with mocked platform.system()=="Windows"
+        # does not fail with AttributeError (the attributes exist only on the
+        # Windows build of Python).
         kwargs["creationflags"] = (getattr(subprocess, "DETACHED_PROCESS", 0x8)
                                    | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200))
     else:
@@ -182,8 +183,8 @@ def start_ollama(wait_s: float = 8.0, url: str = "http://127.0.0.1:11434") -> bo
 
 
 def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
-    """200 na /api/tags = servis radi. Ne oslanja se na `ollama --version`
-    (hermes: instalirana ali ne startana je čest slučaj)."""
+    """200 on /api/tags = the service is running. Does not rely on `ollama --version`
+    (hermes: installed but not started is a common case)."""
     try:
         with urllib.request.urlopen(f"{url}/api/tags", timeout=3) as r:
             return (r.status == 200, "servis radi")
@@ -192,9 +193,9 @@ def ollama_ready(url: str = "http://localhost:11434") -> tuple[bool, str]:
 
 
 def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) -> bool:
-    """Skini model preko Ollama daemona (POST /api/pull, NDJSON stream).
-    Daemon sam nastavlja djelomični download (resume) — dovoljno je ponovno pozvati.
-    True na završni status "success"."""
+    """Download a model via the Ollama daemon (POST /api/pull, NDJSON stream).
+    The daemon resumes a partial download on its own -- calling again is enough.
+    True on the final "success" status."""
     import json
     req = urllib.request.Request(f"{url}/api/pull",
                                  data=json.dumps({"model": name}).encode(),
@@ -241,19 +242,19 @@ def ollama_pull(name: str, url: str = "http://127.0.0.1:11434", *, out=print) ->
 
 
 def quant_tags(ollama_name: str, quant: str) -> list[str]:
-    """Kandidat-tagovi s TOČNOM kvantizacijom (E2E BUG: goli tag vuče
-    registry default — tipično veći od llmfit procjene). Konvencije
-    variraju pa lista: '<ime>-instruct-<q>' pa '<ime>-<q>'; pozivatelj
-    doda goli tag kao zadnji fallback."""
+    """Candidate tags with the EXACT quantization (E2E BUG: a bare tag pulls
+    the registry default -- typically larger than the llmfit estimate).
+    Conventions vary, hence the list: '<name>-instruct-<q>' then '<name>-<q>';
+    the caller adds the bare tag as the last fallback."""
     if not quant or ":" not in ollama_name:
         return []
-    q = quant[0].lower() + quant[1:]   # Q4_K_M → q4_K_M (ollama stil)
+    q = quant[0].lower() + quant[1:]   # Q4_K_M -> q4_K_M (ollama style)
     return [f"{ollama_name}-instruct-{q}", f"{ollama_name}-{q}"]
 
 
 def ollama_model_size(tag: str, url: str = "http://127.0.0.1:11434") -> float:
-    """Stvarna veličina skinutog modela u GB (GET /api/tags); 0.0 =
-    nepoznato/greška — pozivatelj tada preskače usporedbu."""
+    """Actual size of the downloaded model in GB (GET /api/tags); 0.0 =
+    unknown/error -- the caller then skips the comparison."""
     import json
     try:
         with urllib.request.urlopen(f"{url}/api/tags", timeout=10) as r:
@@ -269,38 +270,39 @@ def ollama_model_size(tag: str, url: str = "http://127.0.0.1:11434") -> float:
 _LLMFIT_CHAT_CATS = {"Chat", "Coding", "Reasoning", "General"}
 _LLMFIT_MAX_ROWS = 12
 
-# llmfit subprocess je spor (~sekunde); wizard i web preflight ga zovu više
-# puta u procesu. Keš po procesu; None (neuspjeh) se NE kešira da
-# retry-nakon-installa proradi. Testovi resetiraju kroz conftest.
-# Napomena: uspješan-ali-prazan rezultat (llmfit radi, 0 modela prođe filter)
-# kešira se zauvijek — bezopasno, jer retry grana u wizardu gleda PATH
-# (dostupnost llmfita), ne sadržaj liste.
+# The llmfit subprocess is slow (~seconds); the wizard and web preflight call
+# it multiple times in a process. Cached per process; None (failure) is NOT
+# cached so a retry-after-install works. Tests reset it via conftest.
+# Note: a successful-but-empty result (llmfit works, 0 models pass the filter)
+# is cached forever -- harmless, because the retry branch in the wizard looks at
+# PATH (llmfit availability), not the list contents.
 _llmfit_cache: list[dict] | None = None
 
 
 def llmfit_models(cfg=None) -> list[dict] | None:
-    """Modeli po llmfitu: on detektira hardver i izračuna najbolju kvantizaciju.
-    Vraćamo samo Ollama-pokretljive chat modele koji stanu (Good/Marginal),
-    sortirane po score-u. None kad llmfit nije dostupan ili izlaz ne valja."""
+    """Models per llmfit: it detects the hardware and computes the best quantization.
+    We return only Ollama-runnable chat models that fit (Good/Marginal),
+    sorted by score. None when llmfit is unavailable or its output is invalid."""
     global _llmfit_cache
     if _llmfit_cache is not None:
         return _llmfit_cache
     import json
     try:
-        # PATH binary prvo; `python -m llmfit` wrapper traži binary u sysconfig scripts putanji pa puca za pip --user instalacije.
+        # PATH binary first; the `python -m llmfit` wrapper looks for the binary in the sysconfig scripts path and breaks for pip --user installs.
         exe = shutil.which("llmfit")
         cmd = [exe, "--json"] if exe else [sys.executable, "-m", "llmfit", "--json"]
-        # Ukupni RAM (sposobnost namjenskog servera), NE trenutno slobodni —
-        # llmfit inače sizinga po slobodnoj memoriji, pa na opterećenom stroju
-        # (keš, drugi procesi) sve modele vidi kao "Too Tight" i lista je prazna
-        # (Nalaz #1, P2b review). --ram override tjera llmfit da računa po ukupnom.
+        # Total RAM (dedicated-server capability), NOT currently free --
+        # otherwise llmfit sizes by free memory, so on a loaded machine
+        # (cache, other processes) it sees every model as "Too Tight" and the
+        # list is empty (Finding #1, P2b review). --ram override forces llmfit
+        # to compute by total.
         total = system_state(cfg).get("ram_total_gb") or 0
         if total > 0:
             cmd = cmd + ["--ram", f"{round(total)}G"]
-        # llmfit-ov Rust alokator povremeno puca (SIGABRT) na zadanom
-        # run_isolated limitu od 512 MB adresnog prostora — mjereno ~50% padova
-        # (nedeterministično, ovisi o rasporedu heapa); 1024 MB je pouzdano u
-        # ponovljenim probama i i dalje daleko ispod stvarnog RAM-a stroja.
+        # llmfit's Rust allocator occasionally crashes (SIGABRT) at the default
+        # run_isolated limit of 512 MB address space -- measured ~50% failures
+        # (non-deterministic, depends on heap layout); 1024 MB is reliable across
+        # repeated trials and still far below the machine's actual RAM.
         rc, out, _err = run_isolated(cmd, timeout=60, mem_mb=1024)
         if rc != 0:
             return None
@@ -326,9 +328,9 @@ def llmfit_models(cfg=None) -> list[dict] | None:
             "params": m.get("parameter_count") or "",
         })
     rows.sort(key=lambda r: r["score"], reverse=True)
-    # Dedup po ollama_name: više HF varijanti zna mapirati na isti Ollama tag
-    # (npr. qwen2.5:0.5b, smollm2:135m dvaput u top-12 — Nalaz #2). Lista je već
-    # sortirana po score-u opadajuće, pa prvo pojavljivanje = najbolji score.
+    # Dedup by ollama_name: several HF variants can map to the same Ollama tag
+    # (e.g. qwen2.5:0.5b, smollm2:135m twice in the top-12 -- Finding #2). The
+    # list is already sorted by score descending, so the first occurrence = best score.
     seen: set[str] = set()
     deduped: list[dict] = []
     for r in rows:
@@ -341,7 +343,7 @@ def llmfit_models(cfg=None) -> list[dict] | None:
 
 
 def local_ip() -> str:
-    """Primarni LAN IP — UDP connect trik (ne šalje pakete). 127.0.0.1 na grešku."""
+    """Primary LAN IP -- UDP connect trick (sends no packets). 127.0.0.1 on error."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.connect(("8.8.8.8", 53))
@@ -351,10 +353,10 @@ def local_ip() -> str:
 
 
 def port_free(host: str, port: int) -> bool:
-    """True kad se port može bindati (slobodan).
-    SO_REUSEADDR na Windowsu ima drugu semantiku nego na POSIX-u — dopušta
-    bind na već zauzet port, pa bi provjera uvijek prošla (Codex nalaz).
-    Windows: SO_EXCLUSIVEADDRUSE ako postoji, inače bez opcije reuse-a."""
+    """True when the port can be bound (free).
+    SO_REUSEADDR has different semantics on Windows than on POSIX -- it allows
+    binding to an already-used port, so the check would always pass (Codex finding).
+    Windows: SO_EXCLUSIVEADDRUSE if present, otherwise no reuse option."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if os.name != "nt":
@@ -370,7 +372,7 @@ def port_free(host: str, port: int) -> bool:
 
 
 def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> bool:
-    """Socket connect na DNS server (Google) — brza provjera dostupnosti neta."""
+    """Socket connect to a DNS server (Google) -- a quick internet availability check."""
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -379,8 +381,8 @@ def internet_ok(host: str = "8.8.8.8", port: int = 53, timeout: float = 2.0) -> 
 
 
 def _ip_mode() -> str:
-    """Statička adresa ili DHCP — detektuj OS-specifično.
-    Windows: netsh; drugdje: unknown (detekcija je LAN-specifična)."""
+    """Static address or DHCP -- detect OS-specifically.
+    Windows: netsh; elsewhere: unknown (detection is LAN-specific)."""
     if platform.system() != "Windows":
         return "unknown"
     try:
@@ -397,8 +399,8 @@ def _ip_mode() -> str:
 
 
 def requirements(cfg=None) -> list[dict]:
-    """Lista preduvjeta sa statusom. 'fail' = ATLAS neće ispravno raditi;
-    'warn' = radi degradirano; 'ok' = spremno."""
+    """List of prerequisites with status. 'fail' = ATLAS will not work correctly;
+    'warn' = works degraded; 'ok' = ready."""
     import importlib
 
     st = system_state(cfg)
@@ -417,7 +419,7 @@ def requirements(cfg=None) -> list[dict]:
                 "detalj": f"{st['disk_free_gb']} GB", "fix": "oslobodi prostor (modeli+indeks trebaju mjesta)"})
 
     data_dir = getattr(cfg, "data_dir", None) or config.default_data_dir()
-    # stvarni upis+brisanje (os.access W_OK je nepouzdan na Windows ACL — Codex)
+    # actual write+delete (os.access W_OK is unreliable on Windows ACL -- Codex)
     writable = False
     if os.path.isdir(data_dir):
         probe = os.path.join(data_dir, ".rs_write_probe")
@@ -460,7 +462,7 @@ def requirements(cfg=None) -> list[dict]:
     for mod, naziv, fix in _OPTIONAL_MODULES:
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter("ignore")   # fitz deprecation i sl. ne u izlaz
+                warnings.simplefilter("ignore")   # fitz deprecation etc. not into output
                 importlib.import_module(mod)
             present = True
         except Exception:
@@ -471,11 +473,11 @@ def requirements(cfg=None) -> list[dict]:
     return out
 
 
-# --- kompresija-svjestan izbor modela (embedding) ---
+# --- compression-aware model choice (embedding) ---
 
-# Jedna jasna margina (Codex): udio UKUPNOG RAM-a koji model smije zauzeti.
-# <50% = komotno stane · 50–70% = tijesno (radi, ali malo zraka za KV cache/OS)
-# ≥70% = ne. Ukupni (ne trenutno slobodni) RAM = sposobnost namjenskog servera.
+# One clear margin (Codex): fraction of TOTAL RAM the model is allowed to take.
+# <50% = fits comfortably . 50-70% = tight (works, but little room for KV cache/OS)
+# >=70% = no. Total (not currently free) RAM = dedicated-server capability.
 _FITS_FRAC = 0.5
 _TIGHT_FRAC = 0.7
 
@@ -492,8 +494,8 @@ def fit_pill(size_gb: float, total_gb: float) -> str:
 
 
 def _redact(st: dict, reqs: list) -> tuple[dict, list]:
-    """Za anonimni onboarding: makni točne putanje / OS string / naziv GPU-a koje
-    bi LAN promatrač mogao skupljati (Codex). Brojevi (RAM/disk/fit) ostaju."""
+    """For anonymous onboarding: remove exact paths / OS string / GPU name that
+    a LAN observer could collect (Codex). Numbers (RAM/disk/fit) stay."""
     st = {**st, "os": None, "gpu": None}
     out = []
     for r in reqs:
@@ -505,15 +507,15 @@ def _redact(st: dict, reqs: list) -> tuple[dict, list]:
 
 
 def summary(cfg=None, reduced: bool = False) -> dict:
-    """Sve na jednom mjestu za Postavke ekran / wizard. reduced=True za anonimni
-    onboarding (redigirane putanje/inventar). Modeli dolaze iz llmfit_models()."""
+    """Everything in one place for the Settings screen / wizard. reduced=True for
+    anonymous onboarding (redacted paths/inventory). Models come from llmfit_models()."""
     st = system_state(cfg)
     reqs = requirements(cfg)
     if reduced:
         st, reqs = _redact(st, reqs)
     from atlas.ops import model_recommender
     try:
-        # proslijedi NAŠ RAM (Codex: stari detect_hw vidi RAM=0 na Windowsu → tier tiny)
+        # pass OUR RAM (Codex: old detect_hw sees RAM=0 on Windows -> tier tiny)
         hw = {"ram_gb": st["ram_total_gb"], "gpu": st.get("gpu")}
         rec = model_recommender.recommend(hw, ollama_url=getattr(cfg, "ollama_url",
                                                                  "http://127.0.0.1:11434"))
@@ -526,7 +528,7 @@ def summary(cfg=None, reduced: bool = False) -> dict:
         "recommended_tier": (rec or {}).get("tier"),
         "ollama_installed": (rec or {}).get("ollama_installed", False),
         "already_pulled": (rec or {}).get("already_pulled", []),
-        "models": llmfit_models(cfg) or [],  # llmfit kao izvor modela (ako nedostaje → [])
+        "models": llmfit_models(cfg) or [],  # llmfit as the model source (if missing -> [])
     }
 
 
@@ -540,7 +542,7 @@ _TESSDATA_URL = "https://raw.githubusercontent.com/tesseract-ocr/tessdata/main/{
 
 
 def _dir_writable(d) -> bool:
-    """Stvarna proba upisa (os.access je nepouzdan na Windows ACL)."""
+    """Actual write probe (os.access is unreliable on Windows ACL)."""
     import pathlib
     d = pathlib.Path(d)
     try:
@@ -555,11 +557,11 @@ def _dir_writable(d) -> bool:
 
 def ensure_traineddata(langs=("hrv", "eng"), *, out=print,
                        urlopen=urllib.request.urlopen) -> bool:
-    """Osiguraj Tesseract jezike (E2E: UB-Mannheim paket nema hrv).
-    Cilj: tessdata uz exe; bez dozvole (Program Files bez elevacije) →
-    <data_dir>/tessdata + TESSDATA_PREFIX (proces + trajno). TESSDATA_PREFIX
-    je ISKLJUČIV — u fallback mapu se kopiraju i jezici koje primarna već
-    ima, inače bi eng nestao."""
+    """Ensure Tesseract languages (E2E: the UB-Mannheim package lacks hrv).
+    Target: tessdata next to the exe; without permission (Program Files without
+    elevation) -> <data_dir>/tessdata + TESSDATA_PREFIX (process + persistent).
+    TESSDATA_PREFIX is EXCLUSIVE -- languages the primary already has are also
+    copied into the fallback dir, otherwise eng would disappear."""
     from pathlib import Path
     exe = winpath.find_binary("tesseract")
     if not exe:
@@ -595,10 +597,10 @@ def ensure_traineddata(langs=("hrv", "eng"), *, out=print,
 
 
 def install_via_winget(key: str, *, out=print) -> bool:
-    """Windows auto-install preko winget allowliste. 'Već instalirano' se
-    prepozna i preskoči (E2E nalaz); izlaz ide UŽIVO (run_streaming);
-    nakon installa PATH refresh iz registryja + poznate lokacije umjesto
-    'restartaj terminal'; tesseract dobiva i hrv/eng jezike."""
+    """Windows auto-install via the winget allowlist. 'Already installed' is
+    detected and skipped (E2E finding); output goes LIVE (run_streaming);
+    after install, PATH refresh from the registry + known locations instead of
+    'restart the terminal'; tesseract also gets the hrv/eng languages."""
     if key not in WINGET_IDS:
         raise ValueError(f"nepoznat paket: {key!r}")
     wid = WINGET_IDS[key]
@@ -636,7 +638,7 @@ def install_via_winget(key: str, *, out=print) -> bool:
 
 
 def install_llmfit(*, out=print) -> bool:
-    """pip install llmfit (fallback kad atlas nije instaliran s depsima)."""
+    """pip install llmfit (fallback when atlas is not installed with its deps)."""
     out("Instaliram llmfit (pip)...")
     rc, _o, err = run_isolated([sys.executable, "-m", "pip", "install", "--user", "llmfit"],
                                timeout=600)

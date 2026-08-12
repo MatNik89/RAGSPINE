@@ -1,6 +1,6 @@
-# Multi-tenant model dozvola (TIER 0). Čista funkcija check() + DB-backed can()
-# s "empty-first fast path" (ACL tablica se čita tek kad zatreba). Tenant-izolacija
-# je prvo i tvrdo pravilo — cross-org nikad nije dozvoljen.
+# Multi-tenant permission model (TIER 0). Pure check() function + DB-backed can()
+# with an "empty-first fast path" (the ACL table is read only when needed). Tenant
+# isolation is the first and hard rule -- cross-org is never allowed.
 
 from dataclasses import dataclass, field
 
@@ -17,7 +17,7 @@ class Actor:
     org_id: int
     role: str = "member"
     team_ids: set = field(default_factory=set)
-    username: str = ""  # za audit zapise; ne sudjeluje u odlukama
+    username: str = ""  # for audit records; does not take part in decisions
 
 
 @dataclass
@@ -42,11 +42,11 @@ def _acl_matches(row: dict, actor: Actor) -> bool:
 
 
 def check(actor: Actor, asset: Asset, action: str, acl_rows: list[dict] | None = None) -> bool:
-    """Čista odluka. acl_rows=None znači 'ACL još nije učitan' (fast path)."""
+    """Pure decision. acl_rows=None means 'ACL not loaded yet' (fast path)."""
     if actor.org_id != asset.org_id:
-        return False  # tvrda tenant-izolacija — nikad cross-org
+        return False  # hard tenant isolation -- never cross-org
     if actor.user_id == asset.owner_user_id:
-        return True  # vlasnik uvijek sve
+        return True  # the owner always has everything
     if ROLE_RANK.get(actor.role, 0) >= _ADMIN:
         return True  # admin/owner org-scope
     if action == "read":
@@ -67,7 +67,7 @@ def load_acl(spine, asset_type: str, asset_id: int) -> list[dict]:
 
 
 def can(spine, actor: Actor, asset: Asset, action: str) -> bool:
-    """Fast path bez ACL-a; tek na promašaj (i to samo kad ACL može pomoći) čita bazu."""
+    """Fast path without the ACL; only on a miss (and only when the ACL can help) reads the DB."""
     if check(actor, asset, action, acl_rows=None):
         return True
     if asset.visibility == "restricted" or action in ("write", "delete", "manage"):
@@ -80,7 +80,7 @@ def grant(spine, asset_type: str, asset_id: int, subject_type: str, subject_id,
     if subject_type not in SUBJECT_TYPES:
         raise ValueError(f"nepoznat subject_type: {subject_type!r}")
     if permission not in ACTIONS:
-        raise ValueError(f"nepoznata dozvola: {permission!r}")
+        raise ValueError(f"nepoznata dozvola: {permission!r}")  # unknown permission
     with spine.write() as c:
         c.execute("""INSERT OR IGNORE INTO asset_acl(asset_type, asset_id, subject_type, subject_id, permission)
                      VALUES(?,?,?,?,?)""", (asset_type, asset_id, subject_type, str(subject_id), permission))

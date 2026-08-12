@@ -34,18 +34,18 @@ def _record(spine, user: str, query: str, lane: str, answer_text: str, confidenc
             (user, query, lane, answer_text, confidence),
         )
     if actor is not None:
-        # L0 sirovi zapis za noćnu destilaciju (L1 atomi → L3 persona)
+        # L0 raw record for nightly distillation (L1 atoms -> L3 persona)
         try:
             memory_layers.record_turn(spine, actor.org_id, actor.user_id, user, "user", query)
             memory_layers.record_turn(spine, actor.org_id, actor.user_id, user, "assistant", answer_text)
         except Exception:
-            pass  # ponytail: memorija je best-effort — nikad ne ruši odgovor
+            pass  # ponytail: memory is best-effort — never break the answer
 
 
 def _org_context(spine, actor, query: str) -> str:
-    """Interni org-kontekst (memorija/skill/wiki) kao dodatni blok u promptu.
-    Ulazi kao referentni PODATAK (anti-injection okvir u composer.SYSTEM),
-    NE kao citabilan izvor. Best-effort — nikad ne ruši odgovor."""
+    """Internal org context (memory/skill/wiki) as an extra block in the prompt.
+    Enters as reference DATA (anti-injection frame in composer.SYSTEM),
+    NOT as a citable source. Best-effort — never breaks the answer."""
     parts = []
     try:
         mem = memory_layers.recall(spine, actor.org_id, actor.user_id, query)
@@ -76,9 +76,9 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
            actor=None) -> dict:
     org_id = actor.org_id if actor is not None else None
     lane = router.route(query)
-    # None = bez ograničenja (manager/nescopeano); inače skup vidljivih client_id.
-    # Računa se RANO jer monthly/clarify/sql agregati moraju poštovati vidljivost
-    # restringiranog radnika (inače cure obveze/imena/agregati skrivenih klijenata).
+    # None = no restriction (manager/unscoped); otherwise the set of visible client_ids.
+    # Computed EARLY because monthly/clarify/sql aggregates must respect the visibility
+    # of a restricted worker (otherwise obligations/names/aggregates of hidden clients leak).
     visible = (client_visibility.visible_ids(spine, actor.user_id, actor.role)
                if actor is not None else None)
 
@@ -133,11 +133,11 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         except Exception:
             prior_turns = []  # ponytail: memory is best-effort — never break the answer
     has_history = bool(prior_turns)
-    # arhitektura lane radi side-effect (sprema dogovor) — keširani "Zapamtio"
-    # bez izvršenja bi lagao, pa ni read ni write keša za tu lane.
-    # visible is not None (restringiran radnik): njegov je odgovor SCOPEAN — ne
-    # smije se ni čitati ni PISATI u keš (inače bi posluženo drugome — cache je
-    # keyed po tekstu+org, ne po vidljivosti).
+    # the arhitektura lane has a side effect (saves an agreement) — a cached "Remembered"
+    # without execution would lie, so no cache read or write for that lane.
+    # visible is not None (restricted worker): their answer is SCOPED — it must
+    # neither be read nor WRITTEN to the cache (otherwise it would be served to
+    # someone else — the cache is keyed by text+org, not by visibility).
     skip_cache = (has_history or resolved_client is not None
                   or lane in ("arhitektura", "flota") or visible is not None)
 
@@ -150,8 +150,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     # reason as the cache skip above — a kb hit keyed on plain query text may
     # have been saved for a different (or no) client and would silently drop
     # the napomena/"client" key on repeat.
-    # kb unos je mogao biti spremljen iz dokumenta skrivenog klijenta — ne
-    # serviraj ga restringiranom radniku (isto kao keš iznad).
+    # the kb entry may have been saved from a hidden client's document — don't
+    # serve it to a restricted worker (same as the cache above).
     kb_answer = (kb.lookup(spine, query, org_id=org_id)
                  if resolved_client is None and visible is None else None)
     if kb_answer is not None:
@@ -160,14 +160,14 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     handler = LANE_HANDLERS.get(lane)
     if handler is not None:
         if lane in ("arhitektura", "learn", "flota"):
-            # side-effect lane mora znati TKO pita (role-gate u handleru:
+            # a side-effect lane must know WHO is asking (role-gate in the handler:
             # arhitektura=admin, learn=member+)
             res = handler(spine, cfg, query, llm, actor=actor)
         elif lane == "graph":
-            # graf traversal scopean na vidljive klijente I na org (kg_edges globalni)
+            # graph traversal scoped to visible clients AND to the org (kg_edges are global)
             res = handler(spine, cfg, query, llm, visible=visible, org_id=org_id)
         elif lane == "sql":
-            # SQL agregati scopeani na vidljive klijente restringiranog radnika
+            # SQL aggregates scoped to the visible clients of a restricted worker
             res = handler(spine, cfg, query, llm, visible=visible)
         else:
             res = handler(spine, cfg, query, llm)
@@ -177,8 +177,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
             return _package(res, lane, 1.0, [], False)
 
     # chat lane (or unhandled lane falling through)
-    # restringirani radnik ne smije kroz RAG izvući dokumente skrivenog klijenta
-    # (uredski client_id IS NULL dokumenti ostaju svima) — Codex nalaz HIGH.
+    # a restricted worker must not pull a hidden client's documents through RAG
+    # (office client_id IS NULL documents remain visible to all) — Codex finding HIGH.
     hits = retrieval.search(spine, query, k=selfrag.k_for(query), org_id=org_id,
                             visible_client_ids=visible)
 
@@ -194,7 +194,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
     if llm is None:
         return _package(_LLM_DOWN, "chat", 0, [], False)
     extra_context = _org_context(spine, actor, query) if actor is not None else ""
-    # Faza 3: višeprolazna provjera prije odgovora (retrieve→nacrt→citati→proširi).
+    # Phase 3: multi-pass verification before answering (retrieve->draft->citations->expand).
     try:
         best = verify.run(spine, query, hits, llm, prior_turns, extra=extra_context,
                           org_id=org_id, visible_client_ids=visible)
@@ -202,7 +202,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         return _package(_LLM_DOWN, "chat", 0, [], False)
 
     report = best["report"]
-    bhits = best["hits"]  # skup izvora iz prolaza koji je dao najbolji rezultat
+    bhits = best["hits"]  # set of sources from the pass that gave the best result
 
     # W3: the client-specific napomena is independent of citation verification
     # (it comes from clients/sop_pages/notes, not from `hits`) — compute it
@@ -219,12 +219,12 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
 
     pct = round(best["confidence"] * 100)
     if not verify.accepted(best):
-        # ispod praga (80%) — ne nagađa; objasni zašto (anti-yes-man)
+        # below threshold (80%) — don't guess; explain why (anti-yes-man)
         if resolved_client is not None and napomena_block:
             final_text = (f"Nisam dovoljno siguran općenito (točnost {pct}%), ali imam "
                           f"napomenu za ovog klijenta:\n\n{napomena_block}")
         elif not verify.grounded(best):
-            final_text = citations.IDK  # nema citiranog izvora → ne znam
+            final_text = citations.IDK  # no cited source -> I don't know
         else:
             final_text = (f"Nisam dovoljno siguran (točnost {pct}%) — {verify.reason(best)}. "
                           f"Ne želim nagađati; provjerite izvor ili preformulirajte pitanje.")
@@ -235,8 +235,8 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         confidence = best["confidence"]
         sources = [{"n": n, "title": bhits[n - 1].title, "doc_id": bhits[n - 1].doc_id}
                    for n in report.cited if 1 <= n <= len(bhits)]
-        # citation-graph ekspanzija može dosegnuti dokumente skrivenog klijenta i
-        # procuriti im naslov — preskoči za restringiranog radnika.
+        # citation-graph expansion can reach a hidden client's documents and
+        # leak their title — skip it for a restricted worker.
         if visible is None:
             try:
                 related = authority.related_documents(spine, bhits)
@@ -255,7 +255,7 @@ def answer(spine, cfg, query: str, user: str, llm=None, fresh: bool = False,
         features.maybe_file_gap(spine, user, query, final_text, confidence)
     except Exception:
         pass  # ponytail: capability-gap filing is best-effort, must never break the chat lane
-    # ne spremaj u KB odgovor restringiranog radnika (scopean je — Codex #5)
+    # don't save a restricted worker's answer to the KB (it's scoped — Codex #5)
     if verify.accepted(best) and resolved_client is None and visible is None:
         kb.save(spine, query, final_text, org_id=org_id)
     result = _package(final_text, "chat", confidence, sources, False)

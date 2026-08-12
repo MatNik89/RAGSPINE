@@ -1,7 +1,7 @@
-# Jutarnji pregled (morning digest) — office-wide hrvatski tekst koji spaja
-# rokove, neposlane obveze, isteke dokumenata i zakonske promjene za CIJELI ured.
-# Svi radnici vide isto (jedan zajednički pregled). Dostavljeno apprise-om ako je
-# konfiguriran, inače spremljeno u notifications.
+# Morning digest — office-wide Croatian text that combines deadlines, unsent
+# obligations, document expiries and legal changes for the WHOLE office.
+# Everyone sees the same thing (one shared digest). Delivered via apprise if it is
+# configured, otherwise stored in notifications.
 import logging
 from datetime import date
 

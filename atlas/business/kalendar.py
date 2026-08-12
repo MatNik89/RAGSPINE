@@ -1,7 +1,7 @@
-# Porezni kalendar — 12 tipova rokova + mini-RRULE ekspanzija u datume.
+# Tax calendar - 12 deadline types + mini-RRULE expansion into dates.
 #
-# ponytail: rule DSL pokriva samo monthly/yearly/quarterly (dovoljno za sve
-# HR obveze niže). Upgrade path: dodati "weekly"/"biweekly" ako zatreba.
+# ponytail: the rule DSL covers only monthly/yearly/quarterly (enough for all
+# HR obligations below). Upgrade path: add "weekly"/"biweekly" if needed.
 
 from datetime import date, timedelta
 

@@ -1,8 +1,9 @@
-"""Windows PATH/env pomagala: refresh iz registryja bez restarta terminala
-(E2E nalaz: winget instalira, a tekući proces drži stari PATH), poznate
-instalacijske lokacije (UB-Mannheim Tesseract NE dodaje PATH) i trajni
-upis u user Environment (winreg, NE setx — setx truncira na 1024 znaka).
-Registry funkcije su no-op izvan Windowsa."""
+"""Windows PATH/env helpers: refresh from the registry without restarting the
+terminal (E2E finding: winget installs, but the current process holds the old
+PATH), known install locations (UB-Mannheim Tesseract does NOT add to PATH),
+and a persistent write to the user Environment (winreg, NOT setx — setx
+truncates at 1024 characters). Registry functions are a no-op outside
+Windows."""
 import os
 import shutil
 
@@ -15,8 +16,8 @@ KNOWN_LOCATIONS = {
 
 
 def _merge_path(current: str, machine: str, user: str) -> str:
-    """Spoji PATH-ove bez duplikata (case-insensitive po segmentu);
-    redoslijed: machine, user, pa postojeći current."""
+    """Merge PATHs without duplicates (case-insensitive per segment); order:
+    machine, user, then the existing current."""
     seen: set[str] = set()
     merged: list[str] = []
     for chunk in (machine, user, current):
@@ -29,8 +30,9 @@ def _merge_path(current: str, machine: str, user: str) -> str:
 
 
 def refresh_path_from_registry() -> bool:
-    """Pročitaj HKLM/HKCU Environment PATH i osvježi os.environ — 'Provjeri
-    ponovno' u wizardu radi bez restarta terminala. Ne-Windows: False."""
+    """Read the HKLM/HKCU Environment PATH and refresh os.environ — 'Check
+    again' in the wizard works without restarting the terminal. Non-Windows:
+    False."""
     if os.name != "nt":
         return False
     import winreg
@@ -51,7 +53,7 @@ def refresh_path_from_registry() -> bool:
 
 
 def find_binary(key: str) -> str | None:
-    """shutil.which pa poznate instalacijske lokacije."""
+    """shutil.which, then known install locations."""
     hit = shutil.which(key)
     if hit:
         return hit
@@ -63,10 +65,10 @@ def find_binary(key: str) -> str | None:
 
 
 def get_user_env(name: str) -> str | None:
-    """Pročitaj HKCU\\Environment vrijednost (npr. TESSDATA_PREFIX postavljen
-    trajno u prošloj sesiji preko persist_user_env) — servis pod LocalService
-    ima drugu logon sesiju i ne vidi tekući os.environ pa se mora eksplicitno
-    pročitati iz registryja. Ne-Windows / ne postoji: None."""
+    """Read an HKCU\\Environment value (e.g. TESSDATA_PREFIX set persistently
+    in a previous session via persist_user_env) — a service under LocalService
+    has a different logon session and does not see the current os.environ, so it
+    must be read explicitly from the registry. Non-Windows / missing: None."""
     if os.name != "nt":
         return None
     import winreg
@@ -79,8 +81,9 @@ def get_user_env(name: str) -> str | None:
 
 
 def persist_user_env(name: str, value: str) -> bool:
-    """Trajni upis u HKCU\\Environment + WM_SETTINGCHANGE broadcast (novi
-    procesi vide odmah). Čuva postojeći registry tip vrijednosti."""
+    """Persistent write to HKCU\\Environment + WM_SETTINGCHANGE broadcast (new
+    processes see it immediately). Preserves the existing registry value
+    type."""
     if os.name != "nt":
         return False
     import ctypes
@@ -98,8 +101,8 @@ def persist_user_env(name: str, value: str) -> bool:
 
 
 def append_user_path(directory: str) -> bool:
-    """Dodaj mapu u user PATH (registry, bez brisanja postojećeg) i u
-    os.environ tekućeg procesa. Idempotentno."""
+    """Add a directory to the user PATH (registry, without deleting the
+    existing one) and to os.environ of the current process. Idempotent."""
     if os.name != "nt":
         return False
     import winreg

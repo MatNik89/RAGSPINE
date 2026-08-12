@@ -1,6 +1,6 @@
-# "Mozak vs gorivo": odabir LLM providera živi u bazi (config_overrides, modul
-# 'model'), ne u kodu ni u okolišu. ATLAS ostaje isti; model je zamjenjiv.
-# api_key se sprema, ali se nikad ne vraća u čistom obliku (samo has_api_key).
+# "Brain vs fuel": the LLM provider choice lives in the database (config_overrides,
+# module 'model'), not in code nor in the environment. ATLAS stays the same; the
+# model is replaceable. api_key is stored but never returned in cleartext (only has_api_key).
 
 import dataclasses
 import socket
@@ -8,11 +8,11 @@ import urllib.parse
 
 from atlas.core.net import _is_blocked_addr
 
-# B11: statični katalog providera (ARHITEKTURA.md §5.1) — namjerno nema ekran za
-# uređivanje (audit "Što NE dirati" #3) niti popis modela po provideru (#4); tipični
-# modeli idu kao <datalist> prijedlog u UI, ne ovdje. "custom" = ručni unos base_url-a.
-# path = put iza base_url za OpenAI-kompat pozive (core/llm.py); "" znači zadano
-# "/v1/chat/completions" (core/llm.py). Gemini ima nestandardni put (B10).
+# B11: static provider catalog (ARHITEKTURA.md §5.1) — deliberately has no editing
+# screen (audit "What NOT to touch" #3) nor a per-provider model list (#4); typical
+# models go as a <datalist> suggestion in the UI, not here. "custom" = manual base_url entry.
+# path = the path after base_url for OpenAI-compat calls (core/llm.py); "" means the
+# default "/v1/chat/completions" (core/llm.py). Gemini has a non-standard path (B10).
 PROVIDER_CATALOG = [
     {"key": "anthropic", "naziv": "Anthropic (Claude)", "base_url": "https://api.anthropic.com",
      "path": "/v1/messages", "needs_key": True, "hint": "Zahtijeva API ključ s console.anthropic.com."},
@@ -55,9 +55,9 @@ _KEYS = ("provider", "model", "base_url", "api_key", "embed_model", "ollama_url"
 
 
 def _validate_remote_url(url: str) -> None:
-    """Za anthropic/openai base_url: https + javni host (ne interni/loopback).
-    Sprječava da autenticirani korisnik preusmjeri spremljeni API ključ na
-    napadačev/interni host preko /model/test (SSRF + eksfiltracija ključa)."""
+    """For anthropic/openai base_url: https + public host (not internal/loopback).
+    Prevents an authenticated user from redirecting the stored API key to an
+    attacker/internal host via /model/test (SSRF + key exfiltration)."""
     p = urllib.parse.urlparse(url)
     if p.scheme != "https":
         raise ValueError("base_url mora biti https za Claude/OpenAI")
@@ -77,7 +77,7 @@ def _raw(spine) -> dict:
 
 
 def get(spine) -> dict:
-    """Za UI — bez sirovog ključa."""
+    """For the UI — without the raw key."""
     r = _raw(spine)
     return {
         "provider": r["provider"], "model": r["model"], "base_url": r["base_url"],
@@ -91,15 +91,15 @@ def save(spine, provider: str, model: str = "", base_url: str = "", api_key: str
     if provider not in PROVIDERS:
         raise ValueError(f"nepoznat provider: {provider!r}")
     base_url = (base_url or "").strip()
-    # remote provideri (svi osim Ollame): base_url mora biti javni https (ako je zadan).
-    # B11 proširio popis providera preko anthropic/openai — isti SSRF/eksfiltracijski
-    # rizik vrijedi za svakog od njih (i za "custom"), pa se uvjet drži na "nije ollama".
+    # remote providers (all except Ollama): base_url must be public https (if given).
+    # B11 expanded the provider list beyond anthropic/openai — the same SSRF/exfiltration
+    # risk applies to each of them (and to "custom"), so the condition stays as "not ollama".
     if provider != "ollama" and base_url:
         _validate_remote_url(base_url)
 
     prev = _raw(spine)
-    # Ako se ENDPOINT (provider ili base_url) promijeni, a novi ključ nije upisan,
-    # obriši stari ključ — inače bi se stari ključ poslao na novi host.
+    # If the ENDPOINT (provider or base_url) changes and a new key was not entered,
+    # delete the old key — otherwise the old key would be sent to the new host.
     endpoint_changed = (prev["provider"] != provider) or (prev["base_url"] != base_url)
     if endpoint_changed and not api_key:
         spine.set_override("model", "api_key", "")
@@ -109,9 +109,9 @@ def save(spine, provider: str, model: str = "", base_url: str = "", api_key: str
     spine.set_override("model", "base_url", base_url)
     spine.set_override("model", "embed_model", embed_model or "")
     spine.set_override("model", "ollama_url", ollama_url or "")
-    # prazan api_key = zadrži postojeći (osim gornjeg endpoint-changed slučaja).
-    # Šifriraj at-rest kad je cfg dostupan (ukradeni backup ne otkriva ključ; Codex);
-    # bez cfg (npr. wizard/testovi) ostaje plaintext, apply() svejedno dešifrira.
+    # empty api_key = keep the existing one (except the endpoint-changed case above).
+    # Encrypt at-rest when cfg is available (a stolen backup does not reveal the key; Codex);
+    # without cfg (e.g. wizard/tests) it stays plaintext, apply() decrypts anyway.
     if api_key:
         if cfg is not None:
             from atlas.business import secretbox
@@ -122,18 +122,18 @@ def save(spine, provider: str, model: str = "", base_url: str = "", api_key: str
 
 
 def apply(spine, cfg):
-    """Vrati cfg s DB-odabirom modela (primarni provider). Bez odabira → cfg."""
+    """Return cfg with the DB model choice (primary provider). No choice → cfg."""
     s = _raw(spine)
-    if s.get("api_key"):  # dešifriraj at-rest ključ (secretbox fallback = stari plaintext)
+    if s.get("api_key"):  # decrypt the at-rest key (secretbox fallback = old plaintext)
         from atlas.business import secretbox
         s = {**s, "api_key": secretbox.decrypt(s["api_key"], cfg)}
     return _apply_profile(cfg, s)
 
 
 def _apply_profile(cfg, s: dict):
-    """Nadjačaj cfg jednim provider-profilom (dict: provider/model/base_url/
+    """Override cfg with a single provider profile (dict: provider/model/base_url/
     api_key/embed_model/ollama_url). Immutable copy (dataclasses.replace).
-    Dijele apply() i chain() — jedan izvor logike po provideru."""
+    Shared by apply() and chain() — one source of per-provider logic."""
     prov = s.get("provider")
     if not prov:
         return cfg
@@ -141,8 +141,8 @@ def _apply_profile(cfg, s: dict):
     base = s.get("base_url") or ""
     embed = s.get("embed_model") or cfg.embed_model
     if prov == "ollama":
-        # llm_path="" — reset od eventualnog prijašnjeg openai-kompat odabira (npr.
-        # Gemini); inače cfg nosi tuđi put dok se aplikacija ne restarta (review nalaz).
+        # llm_path="" — reset from a possible previous openai-compat choice (e.g.
+        # Gemini); otherwise cfg carries someone else's path until the app restarts (review finding).
         return dataclasses.replace(cfg, llm_provider="ollama", llm_base_url="", llm_api_key="",
                                    llm_model=model, llm_path="",
                                    ollama_url=(s.get("ollama_url") or base or cfg.ollama_url),
@@ -152,8 +152,8 @@ def _apply_profile(cfg, s: dict):
         return dataclasses.replace(cfg, llm_provider="anthropic", llm_base_url=b,
                                    llm_api_key=s.get("api_key"), llm_model=model, llm_path="",
                                    anthropic_base_url=b, embed_model=embed)
-    # openai-compat (svi ostali katalog ključevi, uklj. "custom"): put iza base_url
-    # dolazi iz kataloga (B10) — zadano "/v1/chat/completions" ako ključ nije poznat.
+    # openai-compat (all other catalog keys, incl. "custom"): the path after base_url
+    # comes from the catalog (B10) — default "/v1/chat/completions" if the key is unknown.
     entry = _CATALOG_BY_KEY.get(prov, {})
     return dataclasses.replace(cfg, llm_provider="openai",
                                llm_base_url=(base or entry.get("base_url") or "https://api.openai.com"),
@@ -165,7 +165,7 @@ _FB_KEYS = ("provider", "model", "base_url", "api_key", "ollama_url")
 
 
 def get_fallbacks(spine) -> list[dict]:
-    """Za UI — bez sirovog ključa (has_api_key umjesto vrijednosti)."""
+    """For the UI — without the raw key (has_api_key instead of the value)."""
     out = []
     for p in _fallbacks_raw(spine):
         out.append({"provider": p.get("provider", ""), "model": p.get("model", ""),
@@ -185,7 +185,7 @@ def _fallbacks_raw(spine) -> list[dict]:
 
 
 def fallbacks(spine, cfg) -> list[dict]:
-    """Profili s DEŠIFRIRANIM ključem (za gradnju lanca). Nikad se ne izlaže rutom."""
+    """Profiles with the DECRYPTED key (for building the chain). Never exposed via a route."""
     from atlas.business import secretbox
     out = []
     for p in _fallbacks_raw(spine):
@@ -196,15 +196,15 @@ def fallbacks(spine, cfg) -> list[dict]:
 
 
 def set_fallbacks(spine, profiles: list[dict], cfg, user: str = "?") -> None:
-    """Spremi uređeni popis fallback-providera (šifriraj ključeve). Prazna lista =
-    isključi fallback. base_url ide kroz istu SSRF-provjeru kao primarni."""
+    """Save the edited list of fallback providers (encrypt the keys). Empty list =
+    disable fallback. base_url goes through the same SSRF check as the primary."""
     import json
 
     from atlas.business import secretbox
     if len(profiles or []) > 5:
-        raise ValueError("najviše 5 zamjenskih providera")  # anti-amplifikacija (Codex)
-    # prijašnji (šifrirani) ključevi po (provider, base_url) — prazan novi ključ
-    # znači ZADRŽI stari (GET maskira ključ pa read-edit-write ne smije obrisati; Codex)
+        raise ValueError("najviše 5 zamjenskih providera")  # anti-amplification (Codex)
+    # previous (encrypted) keys by (provider, base_url) — an empty new key
+    # means KEEP the old one (GET masks the key so read-edit-write must not delete it; Codex)
     prev = {(x.get("provider"), x.get("base_url")): x.get("api_key", "")
             for x in _fallbacks_raw(spine)}
     clean = []
@@ -227,27 +227,27 @@ def set_fallbacks(spine, profiles: list[dict], cfg, user: str = "?") -> None:
 
 
 def chain(spine, cfg) -> list:
-    """Uređeni lanac primijenjenih cfg-ova: [primarni] + fallbacks. Prazan primarni
-    provider -> samo cfg (kao dosad). FallbackLLM ih redom pokušava."""
+    """Ordered chain of applied cfgs: [primary] + fallbacks. Empty primary
+    provider -> just cfg (as before). FallbackLLM tries them in order."""
     primary = apply(spine, cfg)
     return [primary] + [_apply_profile(cfg, fb) for fb in fallbacks(spine, cfg)]
 
 
 def build_llm(spine, cfg, transport=None):
-    """Jedinstveni ulaz za gradnju LLM-a: lanac providera s fallbackom. Ako nema
-    fallbacka, ponaša se kao jedan LLMClient (lanac duljine 1).
+    """Single entry point for building the LLM: a provider chain with fallback. If there
+    is no fallback, it behaves like a single LLMClient (chain of length 1).
 
-    Rezidualno (prihvaćeno, Codex): (a) ollama_url je lokalni-po-dizajnu pa se ne
-    SSRF-provjerava (kao primarni); (b) llm.py transport re-resolva DNS (rebind) —
-    provider-URL je admin-konfiguriran na poznat endpoint, ne user-content; (c) ako
-    primarni podržava alate a zamjenski ne, zamjenski samo tekstualno odgovori
-    (agent ne dobije tool_call = ne predloži write; degradacija, ne rupa)."""
+    Residual (accepted, Codex): (a) ollama_url is local-by-design so it is not
+    SSRF-checked (like the primary); (b) llm.py transport re-resolves DNS (rebind) —
+    the provider URL is admin-configured to a known endpoint, not user-content; (c) if
+    the primary supports tools but the fallback does not, the fallback only replies with
+    text (the agent gets no tool_call = proposes no write; degradation, not a hole)."""
     from atlas.core.llm import FallbackLLM
     return FallbackLLM(chain(spine, cfg), transport=transport)
 
 
 def test_connection(spine, cfg) -> dict:
-    """Pokušaj kratki upit s trenutnim odabirom; vrati {ok, error?}."""
+    """Try a short request with the current choice; return {ok, error?}."""
     from atlas.core.llm import LLMClient, LLMError, LLMUnavailable
     try:
         res = LLMClient(apply(spine, cfg)).complete(
@@ -255,5 +255,5 @@ def test_connection(spine, cfg) -> dict:
         return {"ok": True, "model": res.model}
     except (LLMError, LLMUnavailable) as e:
         return {"ok": False, "error": str(e)[:300]}
-    except Exception as e:  # mreža/timeout/itd. — ne ruši UI
+    except Exception as e:  # network/timeout/etc. — do not crash the UI
         return {"ok": False, "error": str(e)[:300]}

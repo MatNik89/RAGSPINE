@@ -1,5 +1,5 @@
-"""Wake-on-LAN: magic paket (6×0xFF + 16×MAC) preko UDP broadcasta. Server pri
-dizanju budi radna računala redom (obrnuto od gašenja). Bez ovisnosti."""
+"""Wake-on-LAN: magic packet (6x0xFF + 16xMAC) over UDP broadcast. On startup the
+server wakes the workstations in order (reverse of shutdown). No dependencies."""
 import re
 import socket
 
@@ -25,8 +25,8 @@ def send(mac: str, broadcast: str = "255.255.255.255", port: int = 9) -> None:
 
 
 def wake_fleet(devices_list: list[dict], sender=None) -> list[str]:
-    """Pošalji magic paket svakom uređaju s MAC-om. Vrati imena probuđenih.
-    `sender` injektabilan za testove (default: pravi UDP broadcast)."""
+    """Send a magic packet to every device with a MAC. Return the names of the woken.
+    `sender` is injectable for tests (default: real UDP broadcast)."""
     sender = sender or (lambda pkt: _broadcast(pkt))
     woken = []
     for d in devices_list:
@@ -37,7 +37,7 @@ def wake_fleet(devices_list: list[dict], sender=None) -> list[str]:
             sender(magic_packet(mac))
             woken.append(d["name"])
         except (ValueError, OSError):
-            continue  # neispravan MAC / mreža — preskoči, ne ruši buđenje ostalih
+            continue  # invalid MAC / network — skip, do not break waking the rest
     return woken
 
 
