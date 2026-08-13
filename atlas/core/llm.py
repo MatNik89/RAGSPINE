@@ -86,6 +86,11 @@ class ProviderHealthTracker:
 
 _health = ProviderHealthTracker()  # shared singleton (park survives turns)
 
+# Default models for zero-config OAuth (token auto-detected, operator picked no model).
+# Anthropic default is verified working via the Claude subscription OAuth token; the
+# operator can always override in Settings -> Model.
+_DEFAULT_OAUTH_MODEL = {"anthropic": "claude-haiku-4-5-20251001", "openai": "gpt-5"}
+
 
 @dataclass
 class LLMResult:
@@ -275,6 +280,11 @@ class LLMClient:
         cfg = self.cfg
         provider, base, key, is_oauth = self._resolve()
         model = model or cfg.llm_model
+        # Zero-config OAuth (auto-detected Claude/OpenAI token, no model chosen): default a
+        # sensible model instead of failing with a cryptic "model too short" provider error.
+        # Only for OAuth — an explicitly-configured provider with no model is an operator error.
+        if not model and is_oauth:
+            model = _DEFAULT_OAUTH_MODEL.get(provider, "")
 
         if provider == "anthropic":
             url = f"{base}/v1/messages"
