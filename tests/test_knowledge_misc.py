@@ -120,9 +120,11 @@ def test_api_translate_bad_lang_400(spine, cfg, monkeypatch):
 
 def test_api_translate_llm_error_503_scrubbed(spine, cfg, monkeypatch):
     # LLMError body must not leak provider internals ("boom") to the client.
+    # /translate builds its LLM via model_settings.build_llm -> mock THAT layer
+    # (mocking api.LLMClient is ineffective and lets a real OAuth LLM answer).
     c = _client(spine, cfg)
-    from atlas.web import api as api_mod
-    monkeypatch.setattr(api_mod, "LLMClient", lambda cfg: _FakeLLM(raise_error=True))
+    monkeypatch.setattr("atlas.business.model_settings.build_llm",
+                        lambda spine, cfg: _FakeLLM(raise_error=True))
     r = c.post("/translate", json={"text": "Bok", "target": "en"})
     assert r.status_code == 503
     assert "boom" not in r.json()["detail"]
